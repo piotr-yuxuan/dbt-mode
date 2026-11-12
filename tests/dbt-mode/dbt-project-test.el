@@ -102,6 +102,22 @@
     (should-not (dbt-project-entities root '(model) "assert_positive_amount"))
     (should (equal (plist-get (car (dbt-project-entities root '(table) "raw_orders")) :source) "raw"))))
 
+(ert-deftest dbt-project-index-files-local-packages-under-their-name ()
+  "A local package's macro belongs to it, once, at its source, not to the project."
+  (dbt-test-with-project root
+    (dolist (directory '("local_packages/vocab/macros/" "dbt_packages/vocab/macros/"))
+      (make-directory (expand-file-name directory root) t)
+      (write-region "name: 'vocab'\n" nil (expand-file-name (concat directory "../dbt_project.yml") root))
+      (write-region "{% macro normalise(x) %}lower({{ x }}){% endmacro %}" nil
+                    (expand-file-name (concat directory "normalise.sql") root)))
+    (write-region "packages:\n  - local: local_packages/vocab  # ours\n  - local: \"dbt_packages/shop_utils\"\n" nil
+                  (expand-file-name "packages.yml" root))
+    (should (equal (mapcar #'car (dbt-project-packages root)) '("shop" "vocab" "shop_utils")))
+    (should (equal (mapcar (lambda (entity) (list (plist-get entity :package)
+                                                  (file-relative-name (plist-get entity :file) root)))
+                           (dbt-project-entities root '(macro) "normalise"))
+                   '(("vocab" "local_packages/vocab/macros/normalise.sql"))))))
+
 (ert-deftest dbt-project-index-sees-saved-files-once-forgotten ()
   "A new model shows once the project is forgotten, as saving a buffer does."
   (dbt-test-with-project root

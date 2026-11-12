@@ -221,20 +221,35 @@ Otherwise call COMPUTE with ROOT, and keep and return its value."
 
 (defun dbt-project-packages (root)
   "Return the projects of ROOT, each as (NAME DIRECTORY CONFIG).
-The project itself comes first, then each package installed under
-dbt_packages.  NAME falls back to the name of the directory."
+The project itself comes first, then the local packages that its
+packages.yml or dependencies.yml declares, then each package installed
+under dbt_packages.  A package comes once, at its first place: a local
+package is edited where it lives, not in its copy under dbt_packages.
+NAME falls back to the name of the directory."
   (dbt-project-cached
    root 'packages
    (lambda (root)
-     (let ((installed (expand-file-name "dbt_packages" root)))
-       (mapcan (lambda (directory)
-                 (when (file-exists-p (expand-file-name dbt-project-file directory))
-                   (let ((config (dbt-project-config directory)))
-                     (list (list (or (plist-get config :name)
-                                     (file-name-nondirectory (directory-file-name directory)))
-                                 (file-name-as-directory directory) config)))))
-               (cons root (and (file-directory-p installed)
-                               (directory-files installed t "\\`[^.]"))))))))
+     (let ((installed (expand-file-name "dbt_packages" root))
+           (locals (mapcan (lambda (file)
+                             (with-temp-buffer
+                               (ignore-errors (insert-file-contents (expand-file-name file root)))
+                               (let (directories)
+                                 (while (re-search-forward
+                                         "^[ \t]*-?[ \t]*local:[ \t]*\\([^#\n]*?\\)[ \t]*\\(?:#.*\\)?$" nil t)
+                                   (push (expand-file-name (dbt-project-yaml-unquote (match-string 1)) root)
+                                         directories))
+                                 (nreverse directories))))
+                           '("packages.yml" "dependencies.yml"))))
+       (seq-uniq
+        (mapcan (lambda (directory)
+                  (when (file-exists-p (expand-file-name dbt-project-file directory))
+                    (let ((config (dbt-project-config directory)))
+                      (list (list (or (plist-get config :name)
+                                      (file-name-nondirectory (directory-file-name directory)))
+                                  (file-name-as-directory directory) config)))))
+                (append (list root) locals
+                        (and (file-directory-p installed) (directory-files installed t "\\`[^.]"))))
+        (lambda (package other) (equal (car package) (car other))))))))
 
 (defun dbt-project-name (root)
   "Return the name of the project at ROOT."
@@ -243,14 +258,16 @@ dbt_packages.  NAME falls back to the name of the directory."
 (defun dbt-project-source-files (directory)
   "Return the source files of the project or package at DIRECTORY.
 They are its SQL, Python, CSV, Markdown and YAML files, outside hidden
-directories and those of `dbt-project-skipped-directories'.  Hidden
-files go too, such as the lock files .#NAME of the buffers being edited."
+directories, those of `dbt-project-skipped-directories' and those of
+nested projects, such as local packages.  Hidden files go too, such as
+the lock files .#NAME of the buffers being edited."
   (directory-files-recursively
    directory "\\`[^.].*\\.\\(?:sql\\|py\\|csv\\|md\\|ya?ml\\)\\'" nil
    (lambda (subdirectory)
      (not (or (string-prefix-p "." (file-name-nondirectory subdirectory))
               (member (file-relative-name subdirectory directory)
-                      dbt-project-skipped-directories))))))
+                      dbt-project-skipped-directories)
+              (file-exists-p (expand-file-name dbt-project-file subdirectory)))))))
 
 (defun dbt-project-index (root)
   "Return the entities that the project at ROOT and its packages define."
