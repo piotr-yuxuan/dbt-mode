@@ -1,0 +1,40 @@
+# Working in this repository
+
+This repository holds the Emacs package `dbt-mode`, a major mode for the
+SQL and Jinja of dbt projects with a client of `dbt lsp` for lsp-mode.
+`README.md` describes it for users.
+
+## Workflow
+
+Every change follows the skill `workflow:plans`; load it before the first
+edit. In this repository: plans are `docs/work/plans/NNN-slug.md`, not
+tracked; the check is `make check`, run in `nix develop`, and, before a
+merge, `make test` with `DBT_MODE_TEST_DBT` naming a dbt 2 executable, so
+that the live tests run against the real server.
+
+## Layout
+
+```
+dbt-project.el             the project model: root, configuration, index, ref graph; no dbt needed
+dbt-mode.el                the major mode: Jinja syntax and font lock, xref, completion, imenu, commands
+dbt-lineage.el             the table of a model's upstream and downstream
+dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer
+dbt-lsp.el                 the lsp-mode client of dbt lsp and its custom commands
+tests/run-ert.el           strict ERT runner: a skip must have an allowed reason
+tests/helpers/             what the tests share
+tests/dbt-mode/            the tests; *-live-test.el run the real dbt lsp
+tests/fixtures/shop/       the fixture dbt project, on DuckDB
+tests/bin/dbt              a stand-in for dbt
+scripts/with-scratch-home  runs a command in a scratch home
+scripts/lint.el            byte-compile and checkdoc, one file per Emacs
+scripts/complexity.el      cyclomatic complexity of each definition, at most 10
+flake.nix                  the development shell
+```
+
+## What the server does
+
+The protocol of `dbt lsp` is not documented. What dbt-lsp.el relies on was
+observed on dbt 2.0.9, and the live tests check it: the custom commands
+`dbt.compileFile`, `dbt.show`, `dbt.listNodes` and the code lens
+`dbt.previewCte`, the notifications `dbt/*`, file renames through
+`workspace/willRenameFiles`, and formatting computed from the file on disk.

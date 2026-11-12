@@ -1,0 +1,318 @@
+;;; dbt-lsp.el --- The client of dbt lsp for lsp-mode  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 piotr-yuxuan
+;; SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+;; This file is not part of GNU Emacs.
+
+;;; Commentary:
+
+;; dbt 2.0 and later run a language server, `dbt lsp', on the standard
+;; input and output.  This client registers it with lsp-mode for
+;; `dbt-mode' buffers, which then get from it what lsp-mode offers:
+;; definitions and references of models and macros, hover with a model's
+;; parents, children and columns, completion, diagnostics, semantic
+;; tokens, and code lenses that preview a CTE.  Column-level features
+;; need a dbt account; the server says nothing about them otherwise.
+;;
+;; What lsp-mode does not do by itself, this client does with the
+;; server's own requests and commands:
+;;
+;; - `dbt-lsp-rename-model' renames the file of a model, and every `ref'
+;;   and YAML entry that names it: lsp-mode asks the server, by
+;;   workspace/willRenameFiles, whenever a file is renamed;
+;; - `dbt-lsp-compile-file' shows the compiled SQL (dbt.compileFile);
+;; - `dbt-lsp-show' shows the rows of the model, or of a query
+;;   (dbt.show); `dbt-lsp-preview-cte', which the code lenses "Preview
+;;   CTE" run, those of a CTE of the compiled SQL;
+;; - `dbt-lsp-lineage' shows the lineage that the server computes
+;;   (dbt.listNodes);
+;; - `dbt-lsp-format-buffer' formats the buffer.  The server formats the
+;;   file on disk, not the buffer, so its edits would corrupt unsaved
+;;   changes: this client hides formatting from lsp-mode, and this
+;;   command saves the buffer first.
+;;
+;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
+;; project a folder of the lsp session before lsp-mode starts, so that
+;; the server runs on the project, not on an enclosing repository; `dbt-lsp'
+;; does the same at once.
+
+;;; Code:
+
+(require 'dbt-cli)
+(require 'dbt-lineage)
+(require 'dbt-mode)
+(require 'dbt-project)
+(require 'lsp-mode)
+(require 'map)
+
+(defcustom dbt-lsp-arguments nil
+  "More arguments of `dbt lsp', such as (\"--profiles-dir\" \"/path\")."
+  :type '(repeat string)
+  :group 'dbt)
+
+(defcustom dbt-lsp-enable-linter nil
+  "Whether the server lints the SQL, with dbt's built-in linter."
+  :type 'boolean
+  :group 'dbt)
+
+(defvar dbt-lsp--servers (make-hash-table :test #'equal)
+  "From the file name of a dbt executable to whether it runs `dbt lsp'.")
+
+(defun dbt-lsp-server-p ()
+  "Return non-nil when `dbt-executable' runs a language server.
+Only dbt 2.0 or later does; dbt Core 1.x has no `dbt lsp'.  The answer
+is kept for each executable."
+  (when-let* ((executable (executable-find dbt-executable)))
+    (with-memoization (gethash executable dbt-lsp--servers)
+      (eq 0 (ignore-errors (call-process executable nil nil nil "lsp" "--help"))))))
+
+(defun dbt-lsp--command ()
+  "Return the command line of the server, for the workspace being started.
+lsp-mode calls it with `default-directory' at the root of the workspace,
+in the buffer that starts it."
+  (append (list dbt-executable "lsp" "--project-dir"
+                (directory-file-name (or (and buffer-file-name (dbt-project-root buffer-file-name))
+                                         (dbt-project-root default-directory)
+                                         default-directory)))
+          (and dbt-lsp-enable-linter (list "--lint-enabled" "true"))
+          dbt-lsp-arguments))
+
+(defun dbt-lsp-workspace ()
+  "Return the workspace of dbt lsp of the current buffer, or nil."
+  (and (bound-and-true-p lsp-mode)
+       (seq-find (lambda (workspace)
+                   (eq (lsp--client-server-id (lsp--workspace-client workspace)) 'dbt-lsp))
+                 (lsp-workspaces))))
+
+(defun dbt-lsp--hide-formatting (workspace)
+  "Hide the formatting of the server of WORKSPACE from lsp-mode.
+The server formats the file on disk rather than the buffer, so lsp-mode
+would apply its edits to unsaved text; `dbt-lsp-format-buffer' saves
+first."
+  ;; A key with a nil value would still mean support to lsp-mode: the keys
+  ;; go.  They are strings in a hash table, keywords in a plist.
+  (let ((capabilities (lsp--workspace-server-capabilities workspace)))
+    (dolist (key '(:documentFormattingProvider :documentRangeFormattingProvider))
+      (setq capabilities (map-delete capabilities (if (hash-table-p capabilities) (lsp-keyword->string key) key))))
+    (setf (lsp--workspace-server-capabilities workspace) capabilities)))
+
+(defun dbt-lsp--library-folders (_workspace)
+  "Return the folders whose files belong to the workspace of their project.
+They are the packages that dbt installs, opened read-only."
+  (when-let* ((root (dbt-project-root)))
+    (list (expand-file-name "dbt_packages" root) (expand-file-name "dbt_internal_packages" root))))
+
+;;;###autoload
+(defun dbt-lsp-add-project-folder ()
+  "Make the root of the current dbt project a folder of the lsp session.
+Unless the session has it already, or blocks it.  lsp-mode then runs
+the server on the project, not on an enclosing folder of the session or
+on the repository it guesses."
+  (when-let* ((root (and buffer-file-name (dbt-project-root)))
+              (folder (lsp-f-canonical root))
+              (session (lsp-session)))
+    (unless (or (member folder (lsp-session-folders session))
+                (seq-some (lambda (blocked) (lsp-f-ancestor-of? blocked folder))
+                          (lsp-session-folders-blocklist session)))
+      (lsp-workspace-folders-add folder))))
+
+;;;###autoload
+(defun dbt-lsp ()
+  "Start dbt lsp for the current buffer, on the root of its dbt project."
+  (interactive)
+  (dbt-lsp-add-project-folder)
+  (lsp))
+
+;;;###autoload
+(defun dbt-lsp-deferred ()
+  "Start dbt lsp for the current buffer once it is shown.
+On the root of its dbt project; for `dbt-mode-hook'."
+  (dbt-lsp-add-project-folder)
+  (lsp-deferred))
+
+;;;; Commands of the server
+
+(defun dbt-lsp--execute (command arguments callback)
+  "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
+CALLBACK receives the result once the server answers, unless the answer
+holds an error, which is then shown."
+  (let ((workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))))
+    (with-lsp-workspace workspace
+      (lsp-request-async "workspace/executeCommand"
+                         (list :command command :arguments (vconcat arguments))
+                         (lambda (result)
+                           (if-let* ((error (and result (lsp-get result :error))))
+                               (message "From dbt lsp: %s" error)
+                             (funcall callback result)))
+                         :mode 'detached
+                         :error-handler (lambda (error)
+                                          (message "From dbt lsp: %s" (lsp-get error :message)))))))
+
+(defun dbt-lsp--compiled (callback)
+  "Have the server compile the current buffer, then call CALLBACK.
+CALLBACK runs with no argument in the buffer of the compiled SQL, which
+is read-only.  The server compiles the buffer as it is, unsaved changes
+included."
+  (dbt-lsp--execute
+   "dbt.compileFile" (list (lsp--buffer-uri))
+   (lambda (result)
+     (with-current-buffer (find-file-noselect (lsp--uri-to-path (lsp-get result :file_uri)))
+       (revert-buffer t t t)
+       (read-only-mode 1)
+       (funcall callback)))))
+
+(defun dbt-lsp-compile-file ()
+  "Show the SQL that the current model compiles to, in another window."
+  (interactive)
+  (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
+
+(defvar-local dbt-lsp--rerun nil
+  "The function that runs the query of this buffer of results again.")
+
+(define-derived-mode dbt-lsp-results-mode tabulated-list-mode "dbt rows"
+  "Major mode of the rows that a dbt query returned."
+  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lsp--rerun))))
+
+(defun dbt-lsp--show-rows (title result rerun)
+  "Show the rows of RESULT, the answer of dbt.show, as TITLE.
+RERUN is a function of no argument that runs the query again."
+  (let* ((columns (append (lsp-get result :columns) nil))
+         (rows (mapcar (lambda (row)
+                         (vconcat (mapcar (lambda (column)
+                                            (pcase (lsp-get row (intern (concat ":" column)))
+                                              ('nil "NULL")
+                                              (:json-false "false")
+                                              ('t "true")
+                                              (value (format "%s" value))))
+                                          columns)))
+                       (append (lsp-get result :data) nil))))
+    (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
+      (dbt-lsp-results-mode)
+      (setq dbt-lsp--rerun rerun
+            tabulated-list-format
+            (vconcat (seq-map-indexed
+                      (lambda (column index)
+                        (list column (min 40 (apply #'max (length column)
+                                                    (mapcar (lambda (row) (length (aref row index))) rows)))
+                              t))
+                      columns))
+            tabulated-list-entries (seq-map-indexed (lambda (row index) (list index row)) rows))
+      (tabulated-list-init-header)
+      (tabulated-list-print)
+      (display-buffer (current-buffer))
+      (message "%d rows of %s" (length rows) title))))
+
+(defun dbt-lsp-show (&optional sql title)
+  "Show the rows of the current model, or of the query SQL, as TITLE.
+SQL may hold Jinja.  At most `dbt-preview-limit' rows.  TITLE defaults to
+the name of the model, or \"query\"."
+  (interactive)
+  (let ((buffer (current-buffer))
+        (title (or title (if sql "query" (file-name-base buffer-file-name)))))
+    (dbt-lsp--execute
+     "dbt.show" (list (if sql
+                          (list :inline sql :limit dbt-preview-limit)
+                        (list :uri (lsp--buffer-uri) :limit dbt-preview-limit)))
+     (lambda (result)
+       (dbt-lsp--show-rows title result
+                           (lambda () (with-current-buffer buffer (dbt-lsp-show sql title))))))))
+
+(defun dbt-lsp-preview-cte (name)
+  "Show the rows of the CTE NAME of the current model.
+The CTE comes from the compiled SQL, where the Jinja that needs a model,
+such as `is_incremental', is rendered."
+  (interactive (list (car (dbt-mode-cte-query))))
+  (let ((source (current-buffer)))
+    (dbt-lsp--compiled
+     (lambda ()
+       (let ((query (dbt-mode-cte-query name)))
+         (with-current-buffer source
+           (dbt-lsp-show (cdr query) (car query))))))))
+
+(defun dbt-lsp--preview-cte (command)
+  "Show the rows of the CTE that COMMAND, the command of a code lens, names.
+For the action handler of dbt.previewCte, which the server leaves to the
+client."
+  (let ((arguments (append (lsp-get command :arguments) nil)))
+    (with-current-buffer (find-file-noselect (car arguments))
+      (dbt-lsp-preview-cte (lsp-get (nth 1 arguments) :name)))))
+
+(defun dbt-lsp-lineage (name)
+  "Show the lineage of the model, seed or snapshot NAME, as the server sees it."
+  (interactive (list (file-name-base buffer-file-name)))
+  (let ((root (dbt-project-root))
+        (buffer (current-buffer)))
+    (dbt-lsp--execute
+     "dbt.listNodes" (list (format "+%s+" name))
+     (lambda (result)
+       (dbt-lineage-show
+        root name
+        (mapcar (lambda (node)
+                  (let ((package (assoc (lsp-get node :package_name) (dbt-project-packages root))))
+                    (list :id (lsp-get node :unique_id)
+                          :name (lsp-get node :name)
+                          :type (intern (lsp-get node :resource_type))
+                          :package (lsp-get node :package_name)
+                          :file (expand-file-name (lsp-get node :original_file_path) (or (nth 1 package) root))
+                          :parents (append (lsp-get (lsp-get node :depends_on) :nodes) nil))))
+                (append (lsp-get result :nodes) nil))
+        "dbt lsp"
+        (lambda () (with-current-buffer buffer (dbt-lsp-lineage name))))))))
+
+(defun dbt-lsp-rename-model (name)
+  "Rename the model of the current buffer to NAME, and every use of it.
+lsp-mode asks the server what renaming the file changes, and the server
+edits each `ref' and YAML entry that names the model; the edited buffers
+are left unsaved.  Renaming the file otherwise, such as in Dired, does
+the same.  The current buffer is saved first."
+  (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
+  (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
+    (user-error "Not a name for a model: %s" name))
+  (unless (dbt-lsp-workspace)
+    (user-error "No dbt lsp runs in this buffer"))
+  (let ((new (expand-file-name (concat name "." (file-name-extension buffer-file-name))
+                               (file-name-directory buffer-file-name))))
+    (when (file-exists-p new)
+      (user-error "%s exists already" new))
+    (save-buffer)
+    (rename-visited-file new)
+    (message "Renamed to %s; save the buffers it edited with C-x s" name)))
+
+(defun dbt-lsp-format-buffer ()
+  "Save the buffer, and format it with the server."
+  (interactive)
+  (save-buffer)
+  (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
+    ;; Without its requirement, lsp-mode sends the method that
+    ;; `dbt-lsp--hide-formatting' hid, here only.
+    (let ((lsp-method-requirements (assoc-delete-all "textDocument/formatting"
+                                                     (copy-alist lsp-method-requirements))))
+      (lsp--apply-text-edits
+       (lsp-request "textDocument/formatting"
+                    (list :textDocument (lsp--text-document-identifier)
+                          :options (list :tabSize tab-width :insertSpaces (if indent-tabs-mode :json-false t))))
+       'format))))
+
+;;;; The client
+
+(lsp-register-client
+ (make-lsp-client
+  :new-connection (lsp-stdio-connection #'dbt-lsp--command #'dbt-lsp-server-p)
+  :activation-fn (lambda (file-name mode)
+                   (and (provided-mode-derived-p mode 'dbt-mode) (dbt-project-root file-name)))
+  :priority 1
+  :server-id 'dbt-lsp
+  :library-folders-fn #'dbt-lsp--library-folders
+  :initialized-fn #'dbt-lsp--hide-formatting
+  ;; The server tells of its compilations with notifications of its own;
+  ;; lsp-mode already shows their progress, from $/progress.
+  :notification-handlers (lsp-ht ("dbt/lspCompileStart" #'ignore)
+                                  ("dbt/lspCompileComplete" #'ignore)
+                                  ("dbt/lspBackgroundCompileStart" #'ignore)
+                                  ("dbt/lspBackgroundCompileComplete" #'ignore)
+                                  ("dbt/renameModel" #'ignore))
+  :action-handlers (lsp-ht ("dbt.previewCte" #'dbt-lsp--preview-cte))))
+
+(provide 'dbt-lsp)
+;;; dbt-lsp.el ends here

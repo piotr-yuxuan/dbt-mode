@@ -1,0 +1,21 @@
+name: 'shop'
+config-version: 2
+version: '1.0.0'
+profile: 'shop'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths:
+  - macros
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+
+vars:
+  start_date: '2018-01-01'
+
+models:
+  shop:
+    +materialized: view
+    marts:
+      +materialized: table

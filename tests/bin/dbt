@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+#
+# A stand-in for dbt: it prints its arguments, then an error as dbt 2
+# prints one, and fails.
+echo "arguments: $*"
+echo "[error] [DependencyNotFound (dbt1048)]: Ref 'nope' not found in project."
+echo "  --> models/marts/orders.sql:12:19"
+exit 1

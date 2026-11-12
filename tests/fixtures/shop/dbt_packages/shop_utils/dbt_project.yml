@@ -1,0 +1,4 @@
+name: 'shop_utils'
+config-version: 2
+version: '0.1.0'
+macro-paths: ["macros"]
