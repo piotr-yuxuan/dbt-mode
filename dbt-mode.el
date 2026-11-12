@@ -131,6 +131,13 @@ closing delimiter, or nil when the tag is not closed yet."
                      (eq (char-before) ?})
                      (point))))))))
 
+(defun dbt-mode-cte-regexp (&optional name)
+  "Return the regexp of the start of a CTE, up to its parenthesis.
+The CTE is named NAME, or anything; group 1 matches the name.  It
+needs `case-fold-search', as SQL ignores case."
+  (format "^[ \t]*\\(?:)[ \t]*\\)?\\(?:with[ \t]+\\|,[ \t]*\\)?\\(%s\\)[ \t]+as[ \t]*("
+          (if name (regexp-quote name) "[A-Za-z_][A-Za-z0-9_]*")))
+
 (defun dbt-mode--extend-region ()
   "Extend the region of font lock to the whole Jinja tags at its ends.
 For `font-lock-extend-region-functions'."
@@ -144,10 +151,12 @@ For `font-lock-extend-region-functions'."
 
 (defun dbt-mode--match-tag (limit)
   "Find the next Jinja tag before LIMIT, outside a comment, for font lock.
-Group 1 matches its contents, and groups 2 and 3 its delimiters."
+Group 1 matches its contents, and groups 2 and 3 its delimiters.  An
+opener that meets another before any closer is still being typed: it
+makes no tag, so that it does not swallow the next tag's closer."
   (let (found)
     (while (and (not found)
-                (re-search-forward "\\({[{%]-?\\)\\(\\(?:.\\|\n\\)*?\\)\\(-?[}%]}\\)" limit t))
+                (re-search-forward "\\({[{%]-?\\)\\(\\(?:[^{]\\|{[^{%]\\)*?\\)\\(-?[}%]}\\)" limit t))
       (setq found (not (nth 4 (save-excursion (syntax-ppss (match-beginning 0))))))
       (unless found
         (goto-char (1+ (match-beginning 0)))))
@@ -173,8 +182,11 @@ Group 1 matches its contents, and groups 2 and 3 its delimiters."
        ("\\_<\\([A-Za-z_][A-Za-z0-9_]*\\)\\.[A-Za-z_][A-Za-z0-9_]*[ \t\n]*("
         ,within ,after (1 'font-lock-type-face))
        ("\\_<\\([A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*("
-        ,within ,after (1 'font-lock-function-call-face)))))
-  "Font lock of the Jinja tags, which comes before that of `sql-mode'.")
+        ,within ,after (1 'font-lock-function-call-face)))
+      ;; The name of a CTE, which `sql-mode' leaves bare, or takes for a
+      ;; keyword, such as final or source.
+      (,(dbt-mode-cte-regexp) (1 'font-lock-function-name-face))))
+  "Font lock of the Jinja tags and of the CTEs, before that of `sql-mode'.")
 
 (defconst dbt-mode--syntax-propertize
   (syntax-propertize-rules
@@ -185,13 +197,6 @@ Group 1 matches its contents, and groups 2 and 3 its delimiters."
   "Make each Jinja comment `{# #}' a comment, as generic comment fences.")
 
 ;;;; What point is on
-
-(defun dbt-mode-cte-regexp (&optional name)
-  "Return the regexp of the start of a CTE, up to its parenthesis.
-The CTE is named NAME, or anything; group 1 matches the name.  It
-needs `case-fold-search', as SQL ignores case."
-  (format "^[ \t]*\\(?:with[ \t]+\\|,[ \t]*\\)?\\(%s\\)[ \t]+as[ \t]*("
-          (if name (regexp-quote name) "[A-Za-z_][A-Za-z0-9_]*")))
 
 (defun dbt-mode-cte-query (&optional name)
   "Return the name of a CTE and a query of its rows, as a pair.

@@ -63,6 +63,28 @@
     (should (eq (dbt-test-face "It's") 'font-lock-comment-face))
     (should (eq (dbt-test-face "left join") 'font-lock-keyword-face))))
 
+(ert-deftest dbt-mode-fontifies-cte-names ()
+  "A CTE's name gets the face of a definition, keyword or not."
+  (with-temp-buffer
+    (insert "with source as (select 1),\nfinal as (select 2\n), failures as (select 3)\nselect * from final\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (should (eq (dbt-test-face "source") 'font-lock-function-name-face))
+    (should (eq (dbt-test-face "final") 'font-lock-function-name-face))
+    (should (eq (dbt-test-face "failures") 'font-lock-function-name-face))
+    (should (equal (mapcar #'car (funcall imenu-create-index-function)) '("source" "final" "failures")))))
+
+(ert-deftest dbt-mode-leaves-an-unclosed-tag-alone ()
+  "A tag being typed does not take the closer of the next tag."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (dbt-test-goto "with orders")
+    (insert "{{ ")
+    (font-lock-ensure)
+    (should-not (eq (dbt-test-face "{{ with") 'dbt-jinja-delimiter-face))
+    (should (eq (dbt-test-face "{{ ref") 'dbt-jinja-delimiter-face))
+    (should (eq (dbt-test-face "ref(") 'font-lock-builtin-face))))
+
 (ert-deftest dbt-mode-fontifies-a-tag-from-its-middle ()
   "Refontifying a line inside a multi-line tag fontifies the whole tag."
   (dbt-test-with-project root
