@@ -939,7 +939,8 @@ listed: their `model' key is not a call."
     (xref-show-xrefs (lambda () items) nil)))
 
 (defvar dbt-mode--formatting nil
-  "Non-nil while a command or a save formats the buffer.")
+  "The buffer that a command or a save formats, while it does.
+A buffer saved meanwhile, as by a timer, is formatted as usual.")
 
 (defun dbt-format-buffer ()
   "Save the buffer, then format it.
@@ -948,7 +949,7 @@ and leaves it modified.  Otherwise `dbt format' formats the saved file,
 and the buffer shows the result once dbt ends, unless it was modified
 meanwhile."
   (interactive)
-  (let ((dbt-mode--formatting t))
+  (let ((dbt-mode--formatting (current-buffer)))
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
       (save-buffer)
@@ -958,8 +959,8 @@ meanwhile."
   "Format the buffer just saved, and save it again when that changed it.
 For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
 message: the save stands."
-  (unless dbt-mode--formatting
-    (let ((dbt-mode--formatting t))
+  (unless (eq dbt-mode--formatting (current-buffer))
+    (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
           (if (not (dbt-mode-server-p))
               (dbt-cli-format (current-buffer))
@@ -967,7 +968,7 @@ message: the save stands."
             ;; formats nothing again.
             (dbt-lsp-format-buffer (lambda ()
                                      (when (buffer-modified-p)
-                                       (let ((dbt-mode--formatting t))
+                                       (let ((dbt-mode--formatting (current-buffer)))
                                          (save-buffer))))))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 

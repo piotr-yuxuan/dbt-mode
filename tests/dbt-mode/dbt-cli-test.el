@@ -477,6 +477,26 @@ saved; dbt's runs leave no buffer behind."
         (should-not (buffer-modified-p))
         (should (verify-visited-file-modtime))))))
 
+(ert-deftest dbt-cli-formats-a-buffer-saved-while-another-formats ()
+  "A buffer saved while another one formats, as by a timer, is formatted after its save."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.5") process-environment))
+            (other (dbt-test-visit root "models/marts/customers.sql")))
+        (with-current-buffer other
+          (dbt-format-on-save-mode 1)
+          (goto-char (point-min))
+          (insert "-- other\n"))
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        ;; The second C-c C-q waits for the first, while the timer saves.
+        (run-with-timer 0.1 nil (lambda () (with-current-buffer other (save-buffer))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- other\n" (dbt-test-file-text root "models/marts/customers.sql")))))))
+
+
 (ert-deftest dbt-cli-formats-each-save-after-the-one-before ()
   "A save waits for the format that runs: an older format never writes over a newer save.
 C-c C-q with the mode on formats once."
