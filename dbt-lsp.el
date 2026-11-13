@@ -133,21 +133,43 @@ On the root of its dbt project; for `dbt-mode-hook'."
 
 ;;;; Commands of the server
 
-(defun dbt-lsp--execute (command arguments callback)
+(defun dbt-lsp--conforms-p (value schema)
+  "Return non-nil when SCHEMA fits VALUE, read from an answer of dbt lsp.
+SCHEMA is a predicate, such as `stringp' or `null'; (or SCHEMA...), when
+one SCHEMA fits; (array SCHEMA), a vector of values that SCHEMA fits; or
+\(object (KEY SCHEMA)...), a JSON object whose KEY, a keyword, holds a
+value that its SCHEMA fits, a missing key holding null."
+  (pcase schema
+    (`(or . ,schemas) (seq-some (lambda (schema) (dbt-lsp--conforms-p value schema)) schemas))
+    (`(array ,item) (and (vectorp value) (seq-every-p (lambda (element) (dbt-lsp--conforms-p element item)) value)))
+    (`(object . ,fields)
+     (and (or (hash-table-p value) (and lsp-use-plists (consp value)))
+          (seq-every-p (pcase-lambda (`(,key ,field)) (dbt-lsp--conforms-p (lsp-get value key) field)) fields)))
+    (_ (funcall schema value))))
+
+(defun dbt-lsp--unreadable (method answer)
+  "Return the message that dbt-mode cannot read ANSWER, of dbt lsp to METHOD."
+  (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
+          method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
+
+(defun dbt-lsp--execute (command arguments schema callback)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
-CALLBACK receives the result once the server answers, unless the answer
-holds an error, which is then shown."
+CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
+as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
+or holds an error, a message says so."
   (let ((workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))))
     (with-lsp-workspace workspace
       (lsp-request-async "workspace/executeCommand"
                          (list :command command :arguments (vconcat arguments))
-                         (lambda (result)
-                           (if-let* ((error (and result (lsp-get result :error))))
-                               (message "From dbt lsp: %s" error)
-                             (funcall callback result)))
+                         (lambda (answer)
+                           (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
+                                 ((dbt-lsp--conforms-p answer '(object (:error stringp)))
+                                  (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
+                                 ((dbt-lsp--conforms-p answer schema) (funcall callback answer))
+                                 (t (message "%s" (dbt-lsp--unreadable command answer)))))
                          :mode 'detached
                          :error-handler (lambda (error)
-                                          (message "From dbt lsp: %s" (lsp-get error :message)))))))
+                                          (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
 
 (defun dbt-lsp--compiled (callback)
   "Have the server compile the current buffer, then call CALLBACK.
@@ -155,7 +177,7 @@ CALLBACK runs with no argument in the buffer of the compiled SQL, which
 is read-only.  The server compiles the buffer as it is, unsaved changes
 included."
   (dbt-lsp--execute
-   "dbt.compileFile" (list (lsp--buffer-uri))
+   "dbt.compileFile" (list (lsp--buffer-uri)) '(object (:file_uri stringp))
    (lambda (result)
      (with-current-buffer (find-file-noselect (lsp--uri-to-path (lsp-get result :file_uri)))
        (revert-buffer t t t)
@@ -214,6 +236,7 @@ the name of the model, or \"query\"."
      "dbt.show" (list (if sql
                           (list :inline sql :limit dbt-preview-limit)
                         (list :uri (lsp--buffer-uri) :limit dbt-preview-limit)))
+     '(object (:columns (or null (array stringp))) (:data (or null (array (object)))))
      (lambda (result)
        (dbt-lsp--show-rows title result
                            (lambda () (with-current-buffer buffer (dbt-lsp-show sql title))))))))
@@ -233,10 +256,12 @@ such as `is_incremental', is rendered."
 (defun dbt-lsp--preview-cte (command)
   "Show the rows of the CTE that COMMAND, the command of a code lens, names.
 For the action handler of dbt.previewCte, which the server leaves to the
-client."
-  (let ((arguments (append (lsp-get command :arguments) nil)))
-    (with-current-buffer (find-file-noselect (car arguments))
-      (dbt-lsp-preview-cte (lsp-get (nth 1 arguments) :name)))))
+client.  Its arguments are the file and the CTE."
+  (pcase (lsp-get command :arguments)
+    ((and `[,(and (pred stringp) file) ,cte] (guard (dbt-lsp--conforms-p cte '(object (:name stringp)))))
+     (with-current-buffer (find-file-noselect file)
+       (dbt-lsp-preview-cte (lsp-get cte :name))))
+    (arguments (error "%s" (dbt-lsp--unreadable "dbt.previewCte" arguments)))))
 
 (defun dbt-lsp-lineage (name)
   "Show the lineage of the model, seed or snapshot NAME, as the server sees it."
@@ -245,6 +270,9 @@ client."
         (buffer (current-buffer)))
     (dbt-lsp--execute
      "dbt.listNodes" (list (format "+%s+" name))
+     '(object (:nodes (array (object (:unique_id stringp) (:name stringp) (:resource_type stringp)
+                                     (:package_name stringp) (:original_file_path stringp)
+                                     (:depends_on (or null (object (:nodes (or null (array stringp))))))))))
      (lambda (result)
        (dbt-lineage-show
         root name
@@ -286,13 +314,21 @@ the same.  The current buffer is saved first."
   (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
     ;; Without its requirement, lsp-mode sends the method that
     ;; `dbt-lsp--hide-formatting' hid, here only.
-    (let ((lsp-method-requirements (assoc-delete-all "textDocument/formatting"
-                                                     (copy-alist lsp-method-requirements))))
-      (lsp--apply-text-edits
-       (lsp-request "textDocument/formatting"
-                    (list :textDocument (lsp--text-document-identifier)
-                          :options (list :tabSize tab-width :insertSpaces (if indent-tabs-mode :json-false t))))
-       'format))))
+    (let* ((lsp-method-requirements (assoc-delete-all "textDocument/formatting"
+                                                      (copy-alist lsp-method-requirements)))
+           (edits (lsp-request "textDocument/formatting"
+                               (list :textDocument (lsp--text-document-identifier)
+                                     :options (list :tabSize tab-width
+                                                    :insertSpaces (if indent-tabs-mode :json-false t))))))
+      ;; lsp-mode gives the array of edits as a list.
+      (unless (and (listp edits)
+                   (dbt-lsp--conforms-p
+                    (vconcat edits)
+                    '(array (object (:range (object (:start (object (:line natnump) (:character natnump)))
+                                                    (:end (object (:line natnump) (:character natnump)))))
+                                    (:newText stringp)))))
+        (error "%s" (dbt-lsp--unreadable "textDocument/formatting" edits)))
+      (lsp--apply-text-edits edits 'format))))
 
 ;;;; The client
 

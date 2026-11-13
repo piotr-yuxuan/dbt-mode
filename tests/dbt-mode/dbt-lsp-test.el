@@ -248,5 +248,59 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
     (should (member "textDocument/formatting"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))
 
+;; What the server answers is checked before it is read.
+
+(ert-deftest dbt-lsp-names-the-command-of-an-answer-it-cannot-read ()
+  "An answer of an unexpected shape is reported with its command, and changes nothing."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show" :columns 3 :data [])
+        ("workspace/executeCommand dbt.compileFile" :file_uri 7)
+        ("workspace/executeCommand dbt.listNodes" . ["model.shop.orders"])
+        ("textDocument/formatting" . [(:range 3 :newText "x")]))
+    (dbt-lsp-show)
+    (dbt-lsp-test-message "dbt lsp: dbt\\.show answered what dbt-mode cannot read: {\"columns\":3")
+    (dbt-lsp-compile-file)
+    (dbt-lsp-test-message "dbt lsp: dbt\\.compileFile answered what dbt-mode cannot read")
+    (dbt-lsp-lineage "orders")
+    (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
+    (let ((text (buffer-string)))
+      (should (string-match-p "\\`dbt lsp: textDocument/formatting answered what dbt-mode cannot read"
+                              (error-message-string (should-error (dbt-lsp-format-buffer)))))
+      (should (equal (buffer-string) text)))
+    (should-not (get-buffer "*dbt rows: orders*"))
+    (should-not (get-buffer "*dbt lineage: orders*"))))
+
+(ert-deftest dbt-lsp-names-the-node-it-cannot-read ()
+  "A node of an unexpected shape among those of the lineage is reported."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.listNodes"
+         :nodes [(:unique_id "model.shop.orders" :name "orders" :resource_type "model"
+                             :package_name "shop" :original_file_path "models/marts/orders.sql"
+                             :depends_on (:nodes [3]))]))
+    (dbt-lsp-lineage "orders")
+    (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
+    (should-not (get-buffer "*dbt lineage: orders*"))))
+
+(ert-deftest dbt-lsp-says-when-the-server-answers-nothing-or-fails ()
+  "A command that the server answers with null, or with an error, says so."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.listNodes" :error "No nodes found" :nodes []))
+    (dbt-lsp-show)
+    (dbt-lsp-test-message "dbt lsp: dbt\\.show answered nothing")
+    (dbt-lsp-lineage "orders")
+    (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes failed: No nodes found")
+    (should-not (get-buffer "*dbt rows: orders*"))))
+
+(ert-deftest dbt-lsp-names-the-lens-it-cannot-read ()
+  "A code lens of a CTE whose arguments are not a file and a CTE is reported."
+  (dbt-lsp-test-with-server root nil
+    (should (string-match-p "\\`dbt lsp: dbt\\.previewCte answered what dbt-mode cannot read"
+                            (error-message-string
+                             (should-error
+                              (lsp--execute-command
+                               (json-parse-string (json-encode (list :command "dbt.previewCte"
+                                                                     :arguments (vector buffer-file-name)))
+                                                  :null-object nil :false-object :json-false))))))))
+
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
