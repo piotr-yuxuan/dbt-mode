@@ -363,7 +363,10 @@ above."
   (dbt-test-with-window "select *\nfrom t\nwhere a = 1\n{% if target.name == 'prod'\nand var('full_refresh', false) %}\n"
     (dbt-test-goto "and var")
     (dbt-test-keys "TAB")
-    (should (= (current-indentation) 4))))
+    (should (= (current-indentation) 4)))
+  ;; Of several lines, a tag sits by what it leads to, as on one line.
+  (should (equal (dbt-test-indented "select *\nfrom events\n{% if is_incremental()\nand not var('full') %}\nwhere updated_at > 1\n{% endif %}\n")
+                 "select *\nfrom events\n{% if is_incremental()\n    and not var('full') %}\n    where updated_at > 1\n{% endif %}\n")))
 
 (ert-deftest dbt-edit-indents-a-comment-as-the-code-after-it ()
   "A line that starts a comment indents as the code after it: before a clause, between CTEs, before the final select.
