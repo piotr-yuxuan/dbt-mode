@@ -140,6 +140,76 @@ in a `{# #}' comment or not closed yet counts for nothing."
           (goto-char (or end (match-end 0)))))
       (cons closed open))))
 
+(defcustom dbt-indent-offset 4
+  "The columns by which a parenthesis or a Jinja block indents what it holds."
+  :type 'natnum
+  :group 'dbt)
+
+(defconst dbt-edit-clause-regexp
+  (regexp-opt '("select" "from" "where" "group" "having" "qualify" "order" "limit" "offset" "union"
+                "intersect" "except" "minus" "with" "window" "join" "left" "right" "full" "inner" "cross"
+                "natural" "lateral")
+              'symbols)
+  "The keywords that start a clause of SQL, on a line of their own level.")
+
+(defun dbt-edit--opener (position blocks)
+  "Return the start of the parenthesis or Jinja block open at POSITION, or 0.
+It is the one that opened last.  BLOCKS are what `dbt-edit-blocks'
+returns for a position after POSITION."
+  (let ((opener (or (nth 1 (save-excursion (syntax-ppss position))) 0)))
+    (dolist (block (append (car blocks) (cdr blocks)) opener)
+      (when (and (<= (nth 2 block) position (or (nth 3 block) position)) (> (nth 1 block) opener))
+        (setq opener (nth 1 block))))))
+
+(defun dbt-edit-indentation (blocks)
+  "Return the column that the current line indents to, given BLOCKS.
+BLOCKS are what `dbt-edit-blocks' returns for a position after the
+line's start.
+The nearest construct open at the line's start, a parenthesis or a Jinja
+block, indents it by `dbt-indent-offset' from the line that opened it.
+A line that starts by closing it, with `)', `]', `}' or a tag such as
+`{% endif %}' or `{% else %}', is at that line's column.  At that base,
+a line that starts with a clause keyword, such as select or from, with
+a Jinja statement tag, or with a CTE, NAME as (, stays at the base; any
+other is one step in
+from the nearest line above at its level that starts a clause: the
+columns of a select, the conditions of a where."
+  (save-excursion
+    (back-to-indentation)
+    (let* ((opener (dbt-edit--opener (line-beginning-position) blocks))
+           ;; At the top level, as if a line one step out had opened it.
+           (column (if (= opener 0)
+                       (- dbt-indent-offset)
+                     (save-excursion (goto-char opener) (current-indentation))))
+           found)
+      (cond ((looking-at-p "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)") (max 0 column))
+            ((looking-at-p (concat "{%\\|,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp))
+             (+ column dbt-indent-offset))
+            (t
+             ;; Up the lines of its level, past what a construct closed
+             ;; since then holds, to the one that starts a clause.
+             (while (and (not found) (= 0 (forward-line -1)) (> (line-end-position) opener))
+               (back-to-indentation)
+               (let ((other (dbt-edit--opener (line-beginning-position) blocks)))
+                 (cond ((> other opener) (goto-char other) (forward-line 1))
+                       ((looking-at-p dbt-edit-clause-regexp) (setq found (current-indentation))))))
+             (+ (or found column) dbt-indent-offset))))))
+
+(defun dbt-edit--indent (blocks)
+  "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
+A line that starts in a string or a comment keeps its indentation."
+  (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
+    (indent-line-to (dbt-edit-indentation blocks))))
+
+(defun dbt-edit-indent-line ()
+  "Indent the current line as `dbt-edit-indentation' says.
+A line that starts in a string or a comment keeps its indentation.
+Point keeps its place in the text, or goes to the indentation from
+within it.  For `indent-line-function'."
+  (if (<= (current-column) (current-indentation))
+      (dbt-edit--indent (dbt-edit-blocks (line-beginning-position)))
+    (save-excursion (dbt-edit--indent (dbt-edit-blocks (line-beginning-position))))))
+
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.
 On a blank line, the tag is indented as its opening tag."

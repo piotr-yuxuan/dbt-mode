@@ -241,5 +241,61 @@ Each region is (NAME . (BEG . END)), as expreg reads them."
     (fundamental-mode)
     (should-not (dbt-edit-expreg-regions))))
 
+(defun dbt-test-indented (text)
+  "Return TEXT as C-x h C-M-\\ indents it in dbt-mode."
+  (dbt-test-with-window text
+    (dbt-test-keys "C-x h C-M-\\")
+    (buffer-string)))
+
+(ert-deftest dbt-edit-indents-ctes-clauses-and-what-they-hold ()
+  "A CTE's body is one step in from its line, its ) back there; a clause's lines one step in from it.
+A line that a closed parenthesis follows is one step in from the clause
+above it, and dbt-mode indents with spaces."
+  (should (equal (dbt-test-indented
+                  (concat "with orders as (\nselect * from x\n),\nfinal as (\nselect\nid,\ncoalesce(\na,\nb\n) as c,\n"
+                          "name\nfrom orders\nwhere a = 1\nand b = 2\n)\nselect * from final\n"))
+                 (concat "with orders as (\n    select * from x\n),\nfinal as (\n    select\n        id,\n"
+                         "        coalesce(\n            a,\n            b\n        ) as c,\n        name\n"
+                         "    from orders\n    where a = 1\n        and b = 2\n)\nselect * from final\n"))))
+
+(ert-deftest dbt-edit-indents-the-jinja-blocks-of-a-model ()
+  "A Jinja tag is at the level of the clauses, its block one step in, its end and else at its column."
+  (should (equal (dbt-test-indented
+                  (concat "select\nid,\n{% if x %}\nname,\n{% else %}\nother,\n{% endif %}\nlast\nfrom t\n"
+                          "{% if is_incremental() %}\nwhere a > 1\n{% endif %}\n"))
+                 (concat "select\n    id,\n{% if x %}\n    name,\n{% else %}\n    other,\n{% endif %}\n    last\n"
+                         "from t\n{% if is_incremental() %}\n    where a > 1\n{% endif %}\n")))
+  (should (equal (dbt-test-indented "{% macro cents_to_dollars(col) %}\n({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n")
+                 "{% macro cents_to_dollars(col) %}\n    ({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n"))
+  (should (equal (dbt-test-indented "{{\nconfig(\nmaterialized='table'\n)\n}}\n")
+                 "{{\n    config(\n        materialized='table'\n    )\n}}\n")))
+
+(ert-deftest dbt-edit-indents-a-line-with-tab ()
+  "TAB indents the line it is on; point keeps its place in the text, or goes to the indentation."
+  (dbt-test-with-window "select\n    id,\n{% if x %}\n    name,\n        {% endif %}"
+    (back-to-indentation)
+    (dbt-test-keys "TAB")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{% if x %}\n    name,\n-!-{% endif %}"))
+    (forward-line -1)
+    (end-of-line)
+    (insert "  ")
+    (dbt-test-keys "TAB")
+    (should (string-suffix-p "    name,  -!-\n{% endif %}" (dbt-test-around-point)))))
+
+(ert-deftest dbt-edit-leaves-strings-and-comments-as-they-are ()
+  "A line that starts within a string or a comment keeps its indentation."
+  (let ((text "select\n    'a\n  long text' as t,\n    /* a\n      comment */\n    id\nfrom x\n"))
+    (should (equal (dbt-test-indented text) text))))
+
+(ert-deftest dbt-edit-indents-the-fixture-as-it-is-written ()
+  "The models of the fixture that follow dbt Labs' style keep their indentation.
+orders.sql does not indent the body of its block; dbt-mode does."
+  (dolist (file '("models/staging/stg_orders.sql" "models/staging/stg_customers.sql" "models/marts/customers.sql"))
+    (let ((text (dbt-test-file-text dbt-test-fixture file)))
+      (should (equal (dbt-test-indented text) text))))
+  (let ((text (dbt-test-file-text dbt-test-fixture "models/marts/orders.sql")))
+    (should (equal (dbt-test-indented text)
+                   (string-replace "\n    where orders" "\n        where orders" text)))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here

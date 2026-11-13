@@ -80,6 +80,7 @@
 (autoload 'dbt-edit-beginning-of-cte "dbt-edit")
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
 (autoload 'dbt-edit-blocks "dbt-edit")
+(autoload 'dbt-edit-indent-line "dbt-edit")
 (autoload 'dbt-compiled-show "dbt-compiled")
 (autoload 'dbt-compiled-diff "dbt-compiled" nil t)
 (autoload 'dbt-cli-show "dbt-cli")
@@ -1098,7 +1099,10 @@ commentary of dbt-mode.el for the rest.
   (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))
     (add-hook 'post-self-insert-hook function nil 'local))
   (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte
-              end-of-defun-function #'dbt-edit-end-of-cte))
+              end-of-defun-function #'dbt-edit-end-of-cte
+              indent-line-function #'dbt-edit-indent-line
+              ;; dbt's files indent with spaces.
+              indent-tabs-mode nil))
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 
