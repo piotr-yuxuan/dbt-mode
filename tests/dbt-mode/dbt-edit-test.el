@@ -283,8 +283,10 @@ above it, and dbt-mode indents with spaces."
     (should (string-suffix-p "    name,  -!-\n{% endif %}" (dbt-test-around-point)))))
 
 (ert-deftest dbt-edit-leaves-strings-and-comments-as-they-are ()
-  "A line that starts within a string or a comment keeps its indentation."
+  "A line that starts within a string or a comment keeps its indentation, and starts no clause."
   (let ((text "select\n    'a\n  long text' as t,\n    /* a\n      comment */\n    id\nfrom x\n"))
+    (should (equal (dbt-test-indented text) text)))
+  (let ((text "with x as (\n    select\n        /* note\nfrom the old table\n*/\n        a,\n        b\n    from t\n)\n"))
     (should (equal (dbt-test-indented text) text))))
 
 (ert-deftest dbt-edit-indents-the-fixture-as-it-is-written ()
@@ -314,6 +316,23 @@ orders.sql does not indent the body of its block; dbt-mode does."
         (should (< (- (float-time) start) 2.0)))
       (goto-char (point-min))
       (should (search-forward "\n        col_39,\n    {% if is_incremental() %}\n        updated_at,\n" nil t)))))
+
+(ert-deftest dbt-edit-indents-a-wide-select-at-once ()
+  "C-x h C-M-\\ indents a select of 1,000 columns, all in one clause, in under 2 s.
+Each column's line is placed by the select it belongs to, however far
+above."
+  (let ((text (with-temp-buffer
+                (insert "with renamed as (\nselect\n")
+                (dotimes (column 1000)
+                  (insert (format "col_%d as column_%d,\n" column column)))
+                (insert "id\nfrom source\n)\nselect * from renamed\n")
+                (buffer-string))))
+    (dbt-test-with-window text
+      (let ((start (float-time)))
+        (dbt-test-keys "C-x h C-M-\\")
+        (should (< (- (float-time) start) 2.0)))
+      (goto-char (point-min))
+      (should (search-forward "\n        col_999 as column_999,\n        id\n    from source\n)\n" nil t)))))
 
 (ert-deftest dbt-edit-indents-within-a-tag-of-several-lines ()
   "TAB, RET and C-M-\\ indent the lines of a `{% %}' tag of several lines as those of its parenthesis or clause."

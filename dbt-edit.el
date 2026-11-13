@@ -213,13 +213,16 @@ columns of a select, the conditions of a where."
             ((looking-at-p (concat "{%\\|,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp))
              (+ column dbt-indent-offset))
             (t
-             ;; Up the lines of its level, past what a construct closed
-             ;; since then holds, to the one that starts a clause.
-             (while (and (not found) (= 0 (forward-line -1)) (> (line-end-position) opener))
-               (back-to-indentation)
-               (let ((other (dbt-edit--opener (line-beginning-position) blocks)))
-                 (cond ((> other opener) (goto-char other) (forward-line 1))
-                       ((looking-at-p dbt-edit-clause-regexp) (setq found (current-indentation))))))
+             ;; Up the clause lines of its level, past what a construct
+             ;; closed since then holds, and past lines in a string or a
+             ;; comment.
+             (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
+               (beginning-of-line)
+               (while (and (not found) (re-search-backward (concat "^[ \t]*" dbt-edit-clause-regexp) bound t))
+                 (let ((other (dbt-edit--opener (point) blocks)))
+                   (cond ((> other opener) (goto-char other))
+                         ((not (nth 8 (syntax-ppss (point))))
+                          (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
 (defun dbt-edit--indent (blocks)
