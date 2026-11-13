@@ -191,7 +191,8 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
                                        :inline)))))
 
 (ert-deftest dbt-lsp-lineage-shows-the-nodes-of-the-server ()
-  "C-c C-g shows the nodes that the server lists, files in their packages."
+  "C-c C-g shows the nodes that the server lists, files in their packages.
+A node of a package that dbt-mode does not know has no file."
   (dbt-lsp-test-with-server root
       '(("workspace/executeCommand dbt.listNodes"
          :nodes [(:unique_id "seed.shop.raw_orders" :name "raw_orders" :resource_type "seed"
@@ -202,13 +203,19 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
                              :depends_on (:nodes ["seed.shop.raw_orders"]))
                  (:unique_id "model.shop_utils.util" :name "util" :resource_type "model"
                              :package_name "shop_utils" :original_file_path "models/util.sql"
-                             :depends_on (:nodes ["model.shop.stg_orders"]))]
+                             :depends_on (:nodes ["model.shop.stg_orders"]))
+                 ;; As those of dbt_internal_packages: dbt-mode does not
+                 ;; know where its package is.
+                 (:unique_id "model.dbt_adapters.internal" :name "internal" :resource_type "model"
+                             :package_name "dbt_adapters" :original_file_path "models/internal.sql"
+                             :depends_on (:nodes ["model.shop_utils.util"]))]
          :error nil))
     (dbt-lsp-lineage "stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
       (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
-                       ("downstream" "1" "model" "util" "dbt_packages/shop_utils/models/util.sql")))))
+                       ("downstream" "1" "model" "util" "dbt_packages/shop_utils/models/util.sql")
+                       ("downstream" "2" "model" "internal" "")))))
     (should (equal (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params) :arguments) 0)
                    "+stg_orders+"))))
 

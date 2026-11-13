@@ -277,12 +277,12 @@ client.  Its arguments are the file and the CTE."
        (dbt-lineage-show
         root name
         (mapcar (lambda (node)
-                  (let ((package (assoc (lsp-get node :package_name) (dbt-project-packages root))))
+                  (let ((directory (nth 1 (assoc (lsp-get node :package_name) (dbt-project-packages root)))))
                     (list :id (lsp-get node :unique_id)
                           :name (lsp-get node :name)
                           :type (intern (lsp-get node :resource_type))
                           :package (lsp-get node :package_name)
-                          :file (expand-file-name (lsp-get node :original_file_path) (or (nth 1 package) root))
+                          :file (and directory (expand-file-name (lsp-get node :original_file_path) directory))
                           :parents (append (lsp-get (lsp-get node :depends_on) :nodes) nil))))
                 (append (lsp-get result :nodes) nil))
         "dbt lsp"
