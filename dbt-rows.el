@@ -1,0 +1,192 @@
+;;; dbt-rows.el --- The rows of a query, in a grid  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 piotr-yuxuan
+;; SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+;; This file is not part of GNU Emacs.
+
+;;; Commentary:
+
+;; The grid where the rows of a dbt query show, whoever ran it: each row
+;; on one line, NULL in its own face, a column of numbers sorted as
+;; numbers.  `/' filters the rows, `w' copies them as CSV, Markdown or
+;; Org, `+' asks for more of them and `RET' shows a cell's whole value.
+
+;;; Code:
+
+(require 'seq)
+(require 'tabulated-list)
+
+(defface dbt-rows-null '((t :inherit shadow))
+  "Face of NULL in the rows of a query."
+  :group 'dbt)
+
+(defvar-local dbt-rows--columns nil
+  "The names of the columns of this buffer's rows.")
+
+(defvar-local dbt-rows--rows nil
+  "The rows of this buffer, a vector of vectors of cells.
+A cell is a string, the raw text of its value, or nil for NULL.")
+
+(defvar-local dbt-rows--entries nil
+  "The entries of every row of this buffer, as `tabulated-list-entries'.
+Each entry's id is the index of its row in `dbt-rows--rows'.")
+
+(defvar-local dbt-rows--filter nil
+  "The filter of the rows shown, (COLUMN . REGEXP), or nil.
+A row shows when the text of a cell matches REGEXP, in COLUMN only
+unless COLUMN is nil.")
+
+(defvar-local dbt-rows--limit nil
+  "The number of rows that this buffer's query asked for.")
+
+(defvar-local dbt-rows--rerun nil
+  "The function of a limit that runs this buffer's query again.")
+
+(defun dbt-rows--print ()
+  "Show the rows that the filter keeps, and say how many in the mode line."
+  (let* ((regexp (cdr dbt-rows--filter))
+         (index (and (car dbt-rows--filter) (seq-position dbt-rows--columns (car dbt-rows--filter))))
+         ;; As in `occur', an upper-case letter makes the case matter.
+         (case-fold-search (if (and regexp case-fold-search search-upper-case)
+                               (isearch-no-upper-case-p regexp t)
+                             case-fold-search)))
+    (setq tabulated-list-entries
+          (seq-filter (lambda (entry)
+                        (or (not regexp)
+                            (seq-some (lambda (text) (string-match-p regexp text))
+                                      (if index (list (aref (cadr entry) index)) (cadr entry)))))
+                      dbt-rows--entries)
+          mode-line-process (format " %d of %d rows%s" (length tabulated-list-entries) (length dbt-rows--entries)
+                                    (if (< (length dbt-rows--entries) dbt-rows--limit) "" ", limit reached")))
+    (tabulated-list-print t)))
+
+(defun dbt-rows-show (title columns rows limit rerun)
+  "Show ROWS of COLUMNS in the buffer *dbt rows: TITLE*, and return it.
+COLUMNS lists the names of the columns, and ROWS the rows, each a list
+of cells: a string, the raw text of the value, or nil for NULL.  LIMIT
+is the number of rows asked for, and RERUN a function of a limit that
+asks for the rows again.  A buffer that shows rows already keeps its
+filter and its order."
+  (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
+    (unless (derived-mode-p 'dbt-rows-mode)
+      (dbt-rows-mode))
+    (setq dbt-rows--columns columns
+          dbt-rows--rows (vconcat (mapcar #'vconcat rows))
+          dbt-rows--entries (seq-map-indexed
+                             (lambda (row index)
+                               (list index (vconcat (mapcar (lambda (cell)
+                                                              (if cell
+                                                                  (string-replace "\n" "\\n" cell)
+                                                                (propertize "NULL" 'face 'dbt-rows-null)))
+                                                            row))))
+                             rows)
+          dbt-rows--limit limit
+          dbt-rows--rerun rerun
+          tabulated-list-format
+          (vconcat (seq-map-indexed
+                    (lambda (column index)
+                      (let ((cells (delq nil (mapcar (lambda (row) (nth index row)) rows))))
+                        (list column
+                              (min 40 (apply #'max (length column)
+                                             (mapcar (lambda (entry) (length (aref (cadr entry) index)))
+                                                     dbt-rows--entries)))
+                              ;; A column of numbers sorts as numbers; NULL
+                              ;; sorts last, or first in reverse.
+                              (let ((numbers (and cells (seq-every-p
+                                                         (lambda (cell)
+                                                           (string-match-p "\\`-?[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?\\'"
+                                                                           cell))
+                                                         cells)))
+                                    (rows dbt-rows--rows))
+                                (lambda (a b)
+                                  (let ((x (aref (aref rows (car a)) index))
+                                        (y (aref (aref rows (car b)) index)))
+                                    (cond ((null y) (and x t))
+                                          ((null x) nil)
+                                          (numbers (< (string-to-number x) (string-to-number y)))
+                                          (t (string< x y)))))))))
+                    columns)))
+    (unless (member (car tabulated-list-sort-key) columns)
+      (setq tabulated-list-sort-key nil))
+    (tabulated-list-init-header)
+    (dbt-rows--print)
+    (display-buffer (current-buffer))
+    (current-buffer)))
+
+(defun dbt-rows-filter (regexp &optional column)
+  "Show only the rows with a cell whose text matches REGEXP.
+With a prefix argument, read COLUMN: the cell must be in that column.
+An empty REGEXP shows every row.  NULL matches as its text, NULL.  As
+in `occur', an upper-case letter in REGEXP makes the case matter."
+  (interactive
+   (let ((column (and current-prefix-arg (completing-read "Column: " dbt-rows--columns nil t))))
+     (list (read-regexp (if column (format "Rows whose %s matches" column) "Rows with a cell that matches"))
+           column)))
+  (setq dbt-rows--filter (and (not (string-empty-p regexp)) (cons column regexp)))
+  (dbt-rows--print))
+
+(defun dbt-rows-copy (format)
+  "Copy the rows shown, in their order, as FORMAT, with their header.
+FORMAT is \"CSV\", \"Markdown\" or \"Org\".  The CSV holds the raw value
+of each cell, NULL as an empty field, quoted as RFC 4180 says; the
+tables show each row on one line, as the grid does."
+  (interactive (list (completing-read "Copy as: " '("CSV" "Markdown" "Org") nil t)))
+  (let* ((csv (equal format "CSV"))
+         (escape (pcase format
+                   ("CSV" (lambda (cell)
+                            (cond ((null cell) "")
+                                  ((string-match-p "[\",\n\r]" cell)
+                                   (concat "\"" (string-replace "\"" "\"\"" cell) "\""))
+                                  (t cell))))
+                   ("Markdown" (lambda (text) (string-replace "|" "\\|" text)))
+                   (_ (lambda (text) (string-replace "|" "\\vert{}" text)))))
+         (line (lambda (cells)
+                 (if csv
+                     (mapconcat escape cells ",")
+                   (concat "| " (mapconcat escape cells " | ") " |")))))
+    (kill-new (substring-no-properties
+               (mapconcat (lambda (text) (concat text "\n"))
+                          `(,(funcall line dbt-rows--columns)
+                            ;; The rule under the header of a table.
+                            ,@(unless csv
+                                (list (concat "|" (mapconcat (lambda (_) "---") dbt-rows--columns
+                                                             (if (equal format "Org") "+" "|"))
+                                              "|")))
+                            ,@(mapcar (lambda (entry)
+                                        (funcall line (append (if csv (aref dbt-rows--rows (car entry)) (cadr entry))
+                                                              nil)))
+                                      tabulated-list-entries)))))
+    (message "Copied %d rows as %s" (length tabulated-list-entries) format)))
+
+(defun dbt-rows-more (&optional limit)
+  "Ask for the rows again, at most LIMIT of them: twice as many by default.
+Interactively, LIMIT is the numeric prefix argument.  dbt has no offset,
+so the query runs again with the larger limit."
+  (interactive "P")
+  (funcall dbt-rows--rerun (if limit (prefix-numeric-value limit) (* 2 dbt-rows--limit))))
+
+(defun dbt-rows-show-value ()
+  "Show the whole value of the cell at point."
+  (interactive)
+  (let ((id (or (tabulated-list-get-id) (user-error "No row here")))
+        (column (or (get-text-property (point) 'tabulated-list-column-name) (user-error "No cell here"))))
+    (message "%s: %s" column (or (aref (aref dbt-rows--rows id) (seq-position dbt-rows--columns column)) "NULL"))))
+
+(defvar-keymap dbt-rows-mode-map
+  :doc "Keymap of `dbt-rows-mode'."
+  :parent tabulated-list-mode-map
+  "/" #'dbt-rows-filter
+  "w" #'dbt-rows-copy
+  "+" #'dbt-rows-more
+  "RET" #'dbt-rows-show-value)
+
+(define-derived-mode dbt-rows-mode tabulated-list-mode "dbt rows"
+  "Major mode of the rows that a dbt query returned.
+\\<dbt-rows-mode-map>\\[revert-buffer] runs the query again, \\[dbt-rows-more] asks for more rows.
+
+\\{dbt-rows-mode-map}"
+  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-rows--rerun dbt-rows--limit))))
+
+(provide 'dbt-rows)
+;;; dbt-rows.el ends here

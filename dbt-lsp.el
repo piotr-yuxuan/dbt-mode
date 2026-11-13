@@ -44,6 +44,7 @@
 (require 'dbt-lineage)
 (require 'dbt-mode)
 (require 'dbt-project)
+(require 'dbt-rows)
 (require 'lsp-mode)
 (require 'map)
 
@@ -217,56 +218,37 @@ The buffer is saved first, as the server compiles the file on disk."
   (interactive)
   (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
 
-(defvar-local dbt-lsp--rerun nil
-  "The function that runs the query of this buffer of results again.")
-
-(define-derived-mode dbt-lsp-results-mode tabulated-list-mode "dbt rows"
-  "Major mode of the rows that a dbt query returned."
-  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lsp--rerun))))
-
-(defun dbt-lsp-show (&optional sql title)
+(defun dbt-lsp-show (&optional sql title limit)
   "Show the rows of the current model, or of the query SQL, as TITLE.
-SQL may hold Jinja.  At most `dbt-preview-limit' rows.  TITLE defaults to
-the name of the model, or \"query\".  Without SQL, the buffer is saved
-first, as the server reads the model on disk.  Each row shows on one
-line: a newline in a value as \\n, a nested value as JSON.  JSON false
-reads as null in lsp-mode, so it shows as NULL."
+SQL may hold Jinja.  At most LIMIT rows, `dbt-preview-limit' by default.
+TITLE defaults to the name of the model, or \"query\".  Without SQL, the
+buffer is saved first, as the server reads the model on disk.  A nested
+value shows as JSON.  JSON false reads as null in lsp-mode, so it shows
+as NULL."
   (interactive)
   (unless sql (save-buffer))
   (let ((buffer (current-buffer))
-        (title (or title (if sql "query" (file-name-base buffer-file-name)))))
+        (title (or title (if sql "query" (file-name-base buffer-file-name))))
+        (limit (or limit dbt-preview-limit)))
     (dbt-lsp--execute
      "dbt.show" (list (if sql
-                          (list :inline sql :limit dbt-preview-limit)
-                        (list :uri (lsp--buffer-uri) :limit dbt-preview-limit)))
+                          (list :inline sql :limit limit)
+                        (list :uri (lsp--buffer-uri) :limit limit)))
      '(object (:columns (or null (array stringp))) (:data (or null (array (object)))))
      (lambda (result)
        (if (not (lsp-get result :columns))
            (message "dbt lsp: dbt.show has no rows to show for %s" title)
-         (let* ((columns (append (lsp-get result :columns) nil))
-                (rows (mapcar (lambda (row)
-                                (vconcat (mapcar (lambda (column)
-                                                   (let ((value (lsp-get row (intern (concat ":" column)))))
-                                                     (cond ((null value) "NULL")
-                                                           ((stringp value) (string-replace "\n" "\\n" value))
-                                                           (t (json-encode value)))))
-                                                 columns)))
-                              (append (lsp-get result :data) nil))))
-           (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
-             (dbt-lsp-results-mode)
-             (setq dbt-lsp--rerun (lambda () (with-current-buffer buffer (dbt-lsp-show sql title)))
-                   tabulated-list-format
-                   (vconcat (seq-map-indexed
-                             (lambda (column index)
-                               (list column (min 40 (apply #'max (length column)
-                                                           (mapcar (lambda (row) (length (aref row index))) rows)))
-                                     t))
-                             columns))
-                   tabulated-list-entries (seq-map-indexed (lambda (row index) (list index row)) rows))
-             (tabulated-list-init-header)
-             (tabulated-list-print)
-             (display-buffer (current-buffer))
-             (message "%d rows of %s" (length rows) title))))))))
+         (let ((columns (append (lsp-get result :columns) nil)))
+           (dbt-rows-show title columns
+                          (mapcar (lambda (row)
+                                    (mapcar (lambda (column)
+                                              (let ((value (lsp-get row (intern (concat ":" column)))))
+                                                (if (or (null value) (stringp value)) value (json-encode value))))
+                                            columns))
+                                  (append (lsp-get result :data) nil))
+                          limit
+                          (lambda (limit) (with-current-buffer buffer (dbt-lsp-show sql title limit))))
+           (message "%d rows of %s" (length (lsp-get result :data)) title)))))))
 
 (defun dbt-lsp-preview-cte (name)
   "Show the rows of the CTE NAME of the current model.
