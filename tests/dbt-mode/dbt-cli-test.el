@@ -86,6 +86,19 @@ A YAML file or a macro that changed selects nothing of its own."
           (should (string-match-p "^arguments: build --select \\(orders\\+ fresh\\+\\|fresh\\+ orders\\+\\)$"
                                   (buffer-string))))))))
 
+(ert-deftest dbt-cli-runs-the-last-command-again ()
+  "Again runs the project's last dbt command, with its arguments."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+      (should-error (dbt-cli-again) :type 'user-error)
+      (with-current-buffer (dbt-cli-run "test" '("--select" "orders"))
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer))))))
+      (let ((buffer (dbt-cli-again)))
+        (with-current-buffer buffer
+          (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+          (should (string-match-p "^arguments: test --select orders$" (buffer-string))))))))
+
 (ert-deftest dbt-cli-runs-at-the-root-and-links-errors ()
   "dbt runs at the root of the project, and its errors link to their files."
   (dbt-test-with-project root

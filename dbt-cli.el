@@ -45,6 +45,9 @@ dbt 2.0.9 rejects --full-refresh and --limit on any other command, and
 lists --defer, --state and --vars for every one but docs generate.  The
 other options, --target and --fail-fast, go to every command.")
 
+(defvar dbt-cli--last (make-hash-table :test #'equal)
+  "The last dbt command run in each project: its root, to (COMMAND . ARGUMENTS).")
+
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
   ;; message", then, within a few lines that start no other, " -->
@@ -82,6 +85,7 @@ saving first, under `compilation-ask-about-save'."
          (default-directory root)
          (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
     (dbt-cli--save-project root)
+    (puthash root (cons command arguments) dbt-cli--last)
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")
@@ -199,6 +203,13 @@ as `dbt-cli-changed-selection' does, for a command that selects."
                                                    (dbt-cli-changed-selection
                                                     (or (dbt-project-root) (user-error "Not in a dbt project"))))))))
 
+(defun dbt-cli-again ()
+  "Run the last dbt command of the project again, with its arguments."
+  (interactive)
+  (let ((last (or (gethash (dbt-project-root) dbt-cli--last)
+                  (user-error "No dbt command has run in this project yet"))))
+    (dbt-cli-run (car last) (cdr last))))
+
 ;;;###autoload (autoload 'dbt-dispatch "dbt-cli" nil t)
 (transient-define-prefix dbt-dispatch ()
   "Run a dbt command on the project, by default on the current model."
@@ -235,7 +246,8 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ("d" "deps" (lambda () (interactive) (dbt-cli-dispatch "deps")))
     ("D" "debug" (lambda () (interactive) (dbt-cli-dispatch "debug")))
     ("R" "retry" (lambda () (interactive) (dbt-cli-dispatch "retry")))
-    ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))]])
+    ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))
+    ("." "Again" dbt-cli-again)]])
 
 (provide 'dbt-cli)
 ;;; dbt-cli.el ends here
