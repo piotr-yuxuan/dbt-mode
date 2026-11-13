@@ -261,8 +261,7 @@ in from its block."
   "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
 A line that starts in a string or a comment keeps its indentation.  A
 line that starts a comment, with `--', `/*' or `{#', indents as the line
-of code after it, unless that code is on its own line or closes, or
-there is none."
+of code after it, unless that code is on its own line or closes."
   (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
     (indent-line-to
      (save-excursion
@@ -271,7 +270,7 @@ there is none."
          (let ((start (point))
                (end (line-end-position)))
            (forward-comment (buffer-size))
-           (when (or (eobp) (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
+           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
              (goto-char start))))
        (dbt-edit-indentation blocks)))))
 
