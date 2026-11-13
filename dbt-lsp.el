@@ -196,35 +196,6 @@ included."
   "Major mode of the rows that a dbt query returned."
   (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lsp--rerun))))
 
-(defun dbt-lsp--show-rows (title result rerun)
-  "Show the rows of RESULT, the answer of dbt.show, as TITLE.
-RERUN is a function of no argument that runs the query again."
-  (let* ((columns (append (lsp-get result :columns) nil))
-         (rows (mapcar (lambda (row)
-                         (vconcat (mapcar (lambda (column)
-                                            (pcase (lsp-get row (intern (concat ":" column)))
-                                              ('nil "NULL")
-                                              (:json-false "false")
-                                              ('t "true")
-                                              (value (format "%s" value))))
-                                          columns)))
-                       (append (lsp-get result :data) nil))))
-    (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
-      (dbt-lsp-results-mode)
-      (setq dbt-lsp--rerun rerun
-            tabulated-list-format
-            (vconcat (seq-map-indexed
-                      (lambda (column index)
-                        (list column (min 40 (apply #'max (length column)
-                                                    (mapcar (lambda (row) (length (aref row index))) rows)))
-                              t))
-                      columns))
-            tabulated-list-entries (seq-map-indexed (lambda (row index) (list index row)) rows))
-      (tabulated-list-init-header)
-      (tabulated-list-print)
-      (display-buffer (current-buffer))
-      (message "%d rows of %s" (length rows) title))))
-
 (defun dbt-lsp-show (&optional sql title)
   "Show the rows of the current model, or of the query SQL, as TITLE.
 SQL may hold Jinja.  At most `dbt-preview-limit' rows.  TITLE defaults to
@@ -238,8 +209,31 @@ the name of the model, or \"query\"."
                         (list :uri (lsp--buffer-uri) :limit dbt-preview-limit)))
      '(object (:columns (or null (array stringp))) (:data (or null (array (object)))))
      (lambda (result)
-       (dbt-lsp--show-rows title result
-                           (lambda () (with-current-buffer buffer (dbt-lsp-show sql title))))))))
+       (let* ((columns (append (lsp-get result :columns) nil))
+              (rows (mapcar (lambda (row)
+                              (vconcat (mapcar (lambda (column)
+                                                 (pcase (lsp-get row (intern (concat ":" column)))
+                                                   ('nil "NULL")
+                                                   (:json-false "false")
+                                                   ('t "true")
+                                                   (value (format "%s" value))))
+                                               columns)))
+                            (append (lsp-get result :data) nil))))
+         (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
+           (dbt-lsp-results-mode)
+           (setq dbt-lsp--rerun (lambda () (with-current-buffer buffer (dbt-lsp-show sql title)))
+                 tabulated-list-format
+                 (vconcat (seq-map-indexed
+                           (lambda (column index)
+                             (list column (min 40 (apply #'max (length column)
+                                                         (mapcar (lambda (row) (length (aref row index))) rows)))
+                                   t))
+                           columns))
+                 tabulated-list-entries (seq-map-indexed (lambda (row index) (list index row)) rows))
+           (tabulated-list-init-header)
+           (tabulated-list-print)
+           (display-buffer (current-buffer))
+           (message "%d rows of %s" (length rows) title)))))))
 
 (defun dbt-lsp-preview-cte (name)
   "Show the rows of the CTE NAME of the current model.
