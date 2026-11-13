@@ -43,6 +43,24 @@ unless COLUMN is nil.")
 (defvar-local dbt-rows--rerun nil
   "The function of a limit that runs this buffer's query again.")
 
+(defvar-local dbt-rows--lines nil
+  "The line printed for each row, and the format they were printed for.
+A pair (FORMAT . LINES): LINES is a vector indexed by the id of a row,
+of its line as printed for FORMAT, the `tabulated-list-format' of then.")
+
+(defun dbt-rows--print-entry (id cells)
+  "Insert the line of the row ID, whose CELLS are those of its entry.
+For `tabulated-list-printer': the line is printed once for each
+`tabulated-list-format', which a new query or a change of width replaces,
+then inserted again as it was."
+  (unless (eq (car dbt-rows--lines) tabulated-list-format)
+    (setq dbt-rows--lines (cons tabulated-list-format (make-vector (length dbt-rows--rows) nil))))
+  (if-let* ((line (aref (cdr dbt-rows--lines) id)))
+      (insert line)
+    (let ((start (point)))
+      (tabulated-list-print-entry id cells)
+      (aset (cdr dbt-rows--lines) id (buffer-substring start (point))))))
+
 (defun dbt-rows--print ()
   "Show the rows that the filter keeps, and say how many in the mode line."
   (let* ((regexp (cdr dbt-rows--filter))
@@ -125,10 +143,10 @@ filter and its order."
           tabulated-list-format
           (vconcat (seq-map-indexed
                     (lambda (column index)
-                      (let ((cells (delq nil (mapcar (lambda (row) (nth index row)) rows))))
+                      (let ((cells (delq nil (mapcar (lambda (row) (aref row index)) dbt-rows--rows))))
                         (list column
-                              (min 40 (apply #'max (length column)
-                                             (mapcar (lambda (entry) (length (aref (cadr entry) index)))
+                              (min 40 (apply #'max (string-width column)
+                                             (mapcar (lambda (entry) (string-width (aref (cadr entry) index)))
                                                      dbt-rows--entries)))
                               ;; A column of numbers sorts as numbers; NULL
                               ;; sorts last, or first in reverse.
@@ -225,7 +243,8 @@ so the query runs again with the larger limit."
 \\<dbt-rows-mode-map>\\[revert-buffer] runs the query again, \\[dbt-rows-more] asks for more rows.
 
 \\{dbt-rows-mode-map}"
-  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-rows--rerun dbt-rows--limit))))
+  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-rows--rerun dbt-rows--limit))
+              tabulated-list-printer #'dbt-rows--print-entry))
 
 (provide 'dbt-rows)
 ;;; dbt-rows.el ends here

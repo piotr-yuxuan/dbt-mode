@@ -163,5 +163,14 @@ whoever read the JSON."
     (should (equal (dbt-rows-cell value nil) "{\"name\":\"Zoë\",\"n\":null}"))
     (should-not (dbt-rows-cell nil nil))))
 
+(ert-deftest dbt-rows-sizes-and-prints-columns-as-they-show ()
+  "A column is as wide as its text shows, wide characters included; widening it prints its rows again."
+  (dbt-rows-test-with-grid '(("日本語" "1" "x"))
+    (should (equal (nth 1 (aref tabulated-list-format 0)) 6))
+    (goto-char (point-min))
+    (let ((width (- (line-end-position) (line-beginning-position))))
+      (execute-kbd-macro (kbd "}"))
+      (should (= (- (line-end-position) (line-beginning-position)) (1+ width))))))
+
 (provide 'dbt-rows-test)
 ;;; dbt-rows-test.el ends here
