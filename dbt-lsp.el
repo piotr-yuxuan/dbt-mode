@@ -266,7 +266,7 @@ the model is compiled again."
      (lambda ()
        (let ((query (dbt-mode-cte-query name)))
          (with-current-buffer source
-           (dbt-lsp-show (cdr query) (car query) limit
+           (dbt-lsp-show (cdr query) (format "%s/%s" (file-name-base file) (car query)) limit
                          (lambda (limit)
                            (with-current-buffer (find-file-noselect file)
                              (dbt-lsp-preview-cte name limit))))))))))

@@ -96,7 +96,7 @@ In the grid, + runs dbt show again with twice the limit."
     (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
           (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
       (dbt-cli-preview-cte "customers")
-      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: customers*")))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
         (should (string-search "ref('stg_customers')" (aref (cadr (car tabulated-list-entries)) 0)))
         (with-current-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root))
           (dbt-test-goto "ref('stg_customers')")
@@ -124,6 +124,28 @@ another dbt holds the project."
           (revert-buffer))
         (dbt-test-wait (lambda () (null tabulated-list-entries)))
         (kill-buffer)))))
+
+(ert-deftest dbt-cli-names-the-rows-of-a-cte-after-their-model ()
+  "The rows of a CTE show in a grid of their model's: the renamed CTE of each model has its own."
+  (dbt-test-with-project root
+    (write-region "with source as (\n    select * from {{ ref('raw_orders') }}\n),\n\nrenamed as (\n    select id as payment_id from source\n)\n\nselect * from renamed\n"
+                  nil (expand-file-name "models/staging/stg_payments.sql" root))
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (pcase-dolist (`(,model ,column) '(("stg_orders" "order_id") ("stg_payments" "payment_id")))
+        (with-current-buffer (dbt-test-visit root (format "models/staging/%s.sql" model))
+          (dbt-cli-preview-cte "renamed")
+          (with-current-buffer (dbt-test-wait (lambda () (get-buffer (format "*dbt rows: %s/renamed*" model))))
+            (should (string-search column (aref (cadr (car tabulated-list-entries)) 0)))))))))
+
+(ert-deftest dbt-cli-names-the-rows-of-a-region-after-its-file ()
+  "The rows of a region show in a grid named after its file."
+  (dbt-test-with-project root
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (dbt-preview (point-min) (+ (point-min) 10)))
+      (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/query*"))))))
 
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.

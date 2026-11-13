@@ -311,7 +311,7 @@ for a CTE, the model is compiled again first."
     (dbt-lsp-show)
     (dbt-lsp-preview-cte "customers")
     (let ((orders (current-buffer)))
-      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: customers*")))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
         (let ((compiles (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
                                    (dbt-lsp-test-methods))))
           (revert-buffer)
@@ -416,7 +416,7 @@ for a CTE, the model is compiled again first."
      (json-parse-string (json-encode (list :command "dbt.previewCte"
                                            :arguments (vector buffer-file-name '(:name "customers"))))
                         :null-object nil :false-object :json-false))
-    (should (equal (dbt-lsp-test-rows "customers") '(("1"))))
+    (should (equal (dbt-lsp-test-rows "orders/customers") '(("1"))))
     (should (string-match-p "select 1 as a"
                             (plist-get (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params)
                                                         :arguments)

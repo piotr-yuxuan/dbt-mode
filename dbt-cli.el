@@ -128,7 +128,7 @@ query."
 `dbt show' runs the query of `dbt-mode-cte-query', Jinja and all.  Asked
 for again from its grid, the query is taken again from the model's file."
   (let ((file buffer-file-name))
-    (dbt-cli-show name (cdr (dbt-mode-cte-query name)) limit
+    (dbt-cli-show (format "%s/%s" (file-name-base file) name) (cdr (dbt-mode-cte-query name)) limit
                   (lambda (limit)
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))

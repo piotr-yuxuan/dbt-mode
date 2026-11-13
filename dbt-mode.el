@@ -680,7 +680,8 @@ show' runs it, on the Jinja of the CTE."
   ;; QUERY is the name of the rows, and their SQL unless they are the
   ;; model's.
   (let ((query (cond (cte (dbt-mode-cte-query))
-                     (start (cons "query" (buffer-substring-no-properties start end)))
+                     (start (cons (format "%s/query" (file-name-base (buffer-name)))
+                                  (buffer-substring-no-properties start end)))
                      (t (list (dbt-mode-resource-selector
                                (or (dbt-mode-current-resource) (user-error "No model here"))))))))
     (cond (cte (funcall (if (dbt-mode-server-p) #'dbt-lsp-preview-cte #'dbt-cli-preview-cte) (car query)))
