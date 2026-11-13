@@ -580,13 +580,17 @@ that reads it are none of its tests."
                           "unit_tests:\n  - name: test_orders\n    model: orders\n    given:\n"
                           "      - input: ref('stg_orders')\n")
                   nil (expand-file-name "models/marts/_marts.yml" root))
+    ;; tests: is the older name of data_tests.
+    (write-region (concat "models:\n  - name: orders\n    columns:\n      - name: customer_id\n        tests:\n"
+                          "          - relationships:\n              to: ref('stg_orders')\n")
+                  nil (expand-file-name "models/marts/_legacy.yml" root))
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (let* (shown
            (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
       (dbt-visit-tests)
       (should (equal (sort (dbt-test-xref-files shown root) (lambda (a b) (string< (format "%S" a) (format "%S" b))))
-                     '(("models/marts/_marts.yml" . 11) ("models/staging/_staging.yml" . 4)
-                       ("tests/assert_positive_amount.sql" . 1)))))
+                     '(("models/marts/_legacy.yml" . 7) ("models/marts/_marts.yml" . 11)
+                       ("models/staging/_staging.yml" . 4) ("tests/assert_positive_amount.sql" . 1)))))
     (dbt-test-visit root "models/marts/customers.sql")
     (should-error (dbt-visit-tests) :type 'user-error)))
 
