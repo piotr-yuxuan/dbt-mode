@@ -286,16 +286,18 @@ place in the text, or goes to the indentation from within it.  For
 They indent as `dbt-edit-indent-line' indents them.  The Jinja blocks
 are read once, as markers, which follow the changes of indentation.
 For `indent-region-function'."
-  (let* ((end (copy-marker end))
-         (blocks (mapcar (lambda (block) (cons (car block) (mapcar #'copy-marker (cdr block))))
-                         (let ((blocks (dbt-edit-blocks end))) (append (car blocks) (cdr blocks))))))
+  (let ((end (copy-marker end))
+        blocks)
     (save-excursion
-      (goto-char start)
       (unwind-protect
-          (while (< (point) end)
-            (unless (looking-at-p "[ \t]*$")
-              (dbt-edit--indent blocks))
-            (forward-line 1))
+          (progn
+            (dolist (block (let ((scan (dbt-edit-blocks end))) (append (car scan) (cdr scan))))
+              (push (cons (car block) (mapcar #'copy-marker (cdr block))) blocks))
+            (goto-char start)
+            (while (< (point) end)
+              (unless (looking-at-p "[ \t]*$")
+                (dbt-edit--indent blocks))
+              (forward-line 1)))
         (dolist (block blocks)
           (mapc (lambda (marker) (set-marker marker nil)) (cdr block)))
         (set-marker end nil)))))
