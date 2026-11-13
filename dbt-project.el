@@ -388,23 +388,27 @@ edited."
               (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))
                         (list dbt-project-file "pyvenv.cfg" "conda-meta")))))))
 
-(defvar-local dbt-project--manifest-time nil
-  "The modification time of the manifest whose text this buffer holds.")
+(defvar-local dbt-project--manifest-stamp nil
+  "The manifest whose text this buffer holds, as (FILE TIME SIZE).
+FILE is its true name, TIME and SIZE those of the file it names.")
 
 (defun dbt-project-manifest-node (file id)
   "Return the node ID of the manifest FILE, as a hash table, or nil.
 Nil when FILE cannot be read or holds no such node.  Only the node is
 parsed, as a manifest grows to tens of MB: its id is the key of an
 object in \"nodes\" or \"sources\" only, as elsewhere, such as in
-\"child_map\", its value is an array.  The text of FILE is kept, and
-read again once its modification time changes, as the mode line of each
-model asks.  The manifest is dbt's, read as it is."
-  (with-current-buffer (get-buffer-create (concat " *dbt manifest: " (expand-file-name file) "*"))
-    (let ((time (file-attribute-modification-time (file-attributes file))))
-      (unless (equal time dbt-project--manifest-time)
+\"child_map\", its value is an array.  The text of the last manifest
+read is kept, in one buffer, and read again once the file that FILE
+names, through its links, changes its modification time or its size, as
+the mode line of each model asks.  The manifest is dbt's, read as it is."
+  (with-current-buffer (get-buffer-create " *dbt manifest*")
+    (let* ((true (file-truename file))
+           (attributes (file-attributes true))
+           (stamp (list true (file-attribute-modification-time attributes) (file-attribute-size attributes))))
+      (unless (equal stamp dbt-project--manifest-stamp)
         (erase-buffer)
-        (ignore-errors (insert-file-contents file))
-        (setq dbt-project--manifest-time time)))
+        (ignore-errors (insert-file-contents true))
+        (setq dbt-project--manifest-stamp stamp)))
     (goto-char (point-min))
     (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
          (progn (backward-char)

@@ -492,6 +492,18 @@ as long, not sixty-four."
       (write-region "{\"nodes\": {\"model.shop.orders\": {\"n\": 2}}}" nil manifest)
       (set-file-times manifest (time-add (current-time) 10))
       (should (equal (gethash "n" (dbt-project-manifest-node manifest "model.shop.orders")) 2))
+      ;; Kept while the file keeps its time and its size.
+      (let ((time (file-attribute-modification-time (file-attributes manifest))))
+        (write-region "{\"nodes\": {\"model.shop.orders\": {\"n\": 3}}}" nil manifest)
+        (set-file-times manifest time))
+      (should (equal (gethash "n" (dbt-project-manifest-node manifest "model.shop.orders")) 2))
+      ;; Read through a link, by the file it names.
+      (let ((link (expand-file-name "target/link.json" root)))
+        (make-symbolic-link manifest link)
+        (should (equal (gethash "n" (dbt-project-manifest-node link "model.shop.orders")) 2))
+        (write-region "{\"nodes\": {\"model.shop.orders\": {\"n\": 44}}}" nil manifest)
+        (set-file-times manifest (time-add (current-time) 20))
+        (should (equal (gethash "n" (dbt-project-manifest-node link "model.shop.orders")) 44)))
       (delete-file manifest)
       (should-not (dbt-project-manifest-node manifest "model.shop.orders")))))
 
