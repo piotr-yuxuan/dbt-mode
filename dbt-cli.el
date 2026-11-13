@@ -45,6 +45,10 @@ dbt 2.0.9 rejects --full-refresh and --limit on any other command, and
 lists --defer, --state and --vars for every one but docs generate.  The
 other options, --target and --fail-fast, go to every command.")
 
+(defconst dbt-cli-environment '("NO_COLOR=1" "TERM=dumb")
+  "What dbt runs with, so that it draws no colours nor progress bars.
+It would otherwise, when Emacs passes on the TERM of a terminal.")
+
 (defvar dbt-cli--last (make-hash-table :test #'equal)
   "The last dbt command run in each project: its root, to (COMMAND . ARGUMENTS).")
 
@@ -85,7 +89,7 @@ terminal.  The project's modified buffers are offered for saving first,
 under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
-         (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
+         (compilation-environment (append dbt-cli-environment compilation-environment)))
     (dbt-cli--save-project root)
     (when (functionp arguments)
       (setq arguments (funcall arguments)))
@@ -107,7 +111,7 @@ query."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (limit (or limit dbt-preview-limit))
-         (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
+         (process-environment (append dbt-cli-environment process-environment))
          ;; Before any buffer or process exists, which a refusal would leave.
          (executable (progn (dbt-cli--save-project root) (dbt-project-executable)))
          (output (generate-new-buffer " *dbt show*"))
