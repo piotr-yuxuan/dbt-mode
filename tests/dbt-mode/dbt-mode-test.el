@@ -169,6 +169,48 @@
     (goto-char (point-max))
     (should (equal (dbt-mode-jinja-bounds) (cons 30 nil)))))
 
+(ert-deftest dbt-mode-reads-the-strings-of-a-tag ()
+  "A quote of the other kind, or escaped, in a Jinja string ends nothing."
+  (with-temp-buffer
+    (insert "{{ exceptions.raise_compiler_error(\"Model doesn't exist\") }}\n"
+            "select id, -- the key\n"
+            "{% set msg = \"it's late\" %}\n"
+            "{{ log('can\\'t run', info=true) }}\n"
+            "select 2 from {{ ref('customers') }}\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (dolist (text '("Model" "it's" "can"))
+      (should (eq (dbt-test-face text) 'font-lock-string-face)))
+    (dolist (text '("select id" "select 2"))
+      (should (eq (dbt-test-face text) 'font-lock-keyword-face))
+      (should-not (nth 8 (syntax-ppss))))
+    (should (eq (dbt-test-face "the key") 'font-lock-comment-face))
+    (should (eq (dbt-test-face "ref(") 'font-lock-builtin-face)))
+  (with-temp-buffer
+    (insert "{{\n  log(\n    \"it's\")\n}}\nselect 1\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    ;; A change within the tag, on a line of its own, reads it again whole.
+    (dbt-test-goto "\"it's")
+    (insert "'a', ")
+    (font-lock-ensure)
+    (dbt-test-goto "select")
+    (should-not (nth 8 (syntax-ppss)))))
+
+(ert-deftest dbt-mode-reads-a-tag-in-a-sql-string-as-the-string ()
+  "A tag within a SQL literal leaves the literal one string."
+  (with-temp-buffer
+    (insert "select * from t\nwhere d >= '{{ var('start_date') }}' and x = 1\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (dbt-test-goto "start_date")
+    (should (nth 3 (syntax-ppss)))
+    (should (eq (dbt-test-face "start_date") 'font-lock-string-face))
+    (should (eq (dbt-test-face "{{") 'dbt-jinja-delimiter-face))
+    (dbt-test-goto "and x")
+    (should-not (nth 3 (syntax-ppss)))
+    (should (eq (dbt-test-face "and x") 'font-lock-keyword-face))))
+
 (ert-deftest dbt-mode-ends-a-tag-at-its-own-closer ()
   "A closer that ends a nested dict, or in a string, does not end the tag."
   (with-temp-buffer

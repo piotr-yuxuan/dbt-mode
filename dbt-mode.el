@@ -110,11 +110,13 @@ finds the tag around point, within this many characters."
   :type 'natnum
   :group 'dbt)
 
-(defun dbt-mode--tag-end (limit)
+(defun dbt-mode--tag-end (limit &optional mark)
   "Return the end of the Jinja tag whose opener ends at point, or nil.
 The closer `}}' or `%}' ends the tag, outside its strings and the braces
 of its dict literals.  When another opener, or LIMIT, comes first, the
-tag is not closed: return nil, with point at that opener or at LIMIT."
+tag is not closed: return nil, with point at that opener or at LIMIT.
+With MARK, give the quotes of each string of the tag the syntax of
+string fences, for `syntax-propertize-function'."
   (let ((depth 0))
     (catch 'end
       (while (re-search-forward
@@ -122,7 +124,11 @@ tag is not closed: return nil, with point at that opener or at LIMIT."
                       "\"[^\"\\]*\\(?:\\\\\\(?:.\\|\n\\)[^\"\\]*\\)*\""
                       "\\|'[^'\\]*\\(?:\\\\\\(?:.\\|\n\\)[^'\\]*\\)*'\\)")
               limit 'move)
-        (cond ((match-beginning 1))
+        (cond ((match-beginning 1)
+               (when mark
+                 (put-text-property (match-beginning 1) (1+ (match-beginning 1))
+                                    'syntax-table (string-to-syntax "|"))
+                 (put-text-property (1- (match-end 1)) (match-end 1) 'syntax-table (string-to-syntax "|"))))
               ((equal (match-string 0) "{") (setq depth (1+ depth)))
               ((equal (match-string 0) "}")
                (if (and (zerop depth) (eq (char-after) ?}))
@@ -220,12 +226,26 @@ makes no tag, so that it does not swallow the next tag's closer."
          (string-to-syntax "!"))))
    ("#\\(}\\)"
     (1 (when (eq (nth 7 (save-excursion (syntax-ppss (match-beginning 1)))) 'syntax-table)
-         (string-to-syntax "!")))))
-  "Make each Jinja comment `{# #}' a comment, as generic comment fences.
-Each fence is decided alone, from the state before it: `{#' opens a
-comment outside a string or a comment, and `#}' closes the comment that
-a fence opened.  So the comment is one whatever the chunks that
-`syntax-propertize' reads, and when its closer is typed after.")
+         (string-to-syntax "!"))))
+   ("{[{%]"
+    (0 (ignore
+        (let ((start (match-beginning 0))
+              (state (save-excursion (syntax-ppss (match-beginning 0)))))
+          (unless (or (nth 4 state) (eq (nth 3 state) t))
+            (save-excursion
+              (put-text-property start (or (dbt-mode--tag-end (min (point-max) (+ (point) dbt-mode-jinja-max-tag-length))
+                                                              t)
+                                           (point))
+                                 'syntax-multiline t))))))))
+  "Make each Jinja comment `{# #}' a comment, and the strings of a tag strings.
+A comment is fenced by generic comment fences, each decided alone, from
+the state before it: `{#' opens a comment outside a string or a comment,
+and `#}' closes the comment that a fence opened.  So the comment is one
+whatever the chunks that `syntax-propertize' reads, and when its closer
+is typed after.  The quotes of a string of a tag are string fences, so
+that a quote of the other kind, or one that a backslash escapes, ends
+nothing; a tag within a SQL string stays in it.  A tag is marked as one
+multiline construct, read again whole after a change within it.")
 
 ;;;; What point is on
 
@@ -621,6 +641,7 @@ commentary of dbt-mode.el for the rest.
                   (funcall dbt-mode--syntax-propertize start end)
                   (syntax-ppss-flush-cache start)
                   (funcall sql-propertize start end))))
+  (add-hook 'syntax-propertize-extend-region-functions #'syntax-propertize-multiline 'append 'local)
   (add-hook 'font-lock-extend-region-functions #'dbt-mode--extend-region 'append 'local)
   (setq-local imenu-generic-expression dbt-mode-imenu-generic-expression
               imenu-case-fold-search t)
