@@ -158,39 +158,59 @@ for again from its grid, the query is taken again from the model's file."
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))
 
+(defvar-local dbt-cli--format-process nil
+  "The `dbt format' of this buffer while it runs, which a save waits for.")
+
+(defun dbt-cli--await-format ()
+  "Wait until the `dbt format' of the current buffer ends.
+For `before-save-hook': dbt writes the file once it ends, and would
+otherwise write over a later save."
+  (while (process-live-p dbt-cli--format-process)
+    (accept-process-output dbt-cli--format-process 0.05)))
+
 (defun dbt-cli-format (buffer)
-  "Have `dbt format' format the file of BUFFER, then read BUFFER again.
-dbt formats the saved file.  Once it ends, BUFFER is read again when the
-file changed and BUFFER was not modified meanwhile; a message says so
-when it was.  When dbt fails, its error is the message."
+  "Have `dbt format' format the saved file of BUFFER, then read BUFFER again.
+BUFFER is saved: its file is what dbt formats.  Once dbt ends, BUFFER
+is read again when the file changed, unless its text changed meanwhile:
+then that text wins the next save, which a message says.  dbt may fail
+on another file of the project and still format this one; its error is
+the last message.  A save of BUFFER waits for its format to end."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
-         (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
-         ;; Before the buffer of its output exists, which a refusal would leave.
+         (process-environment (append dbt-cli-environment process-environment))
          (executable (dbt-project-executable))
-         (output (generate-new-buffer " *dbt format*"))
+         (name (buffer-name buffer))
+         (command (list executable "format" "--no-write-json" (file-relative-name (buffer-file-name buffer) root)))
          (tick (buffer-chars-modified-tick buffer)))
-    (make-process
-     :name "dbt format" :buffer output :noquery t :connection-type 'pipe
-     :command (list executable "format" (file-relative-name (buffer-file-name buffer) root))
-     :sentinel
-     (lambda (process _event)
-       (unless (process-live-p process)
-         (unwind-protect
-             (cond ((/= 0 (process-exit-status process))
-                    (message "dbt could not format %s: %s" (buffer-name buffer)
-                             (with-current-buffer output
-                               (goto-char (point-min))
-                               (if (re-search-forward "^\\[error\\] \\(.*\\)" nil t)
-                                   (match-string 1)
-                                 (format "exit status %d" (process-exit-status process))))))
-                   ((and (buffer-live-p buffer) (not (verify-visited-file-modtime buffer)))
-                    (if (= tick (buffer-chars-modified-tick buffer))
-                        (with-current-buffer buffer
-                          (revert-buffer t t t))
-                      (message "dbt formatted %s on disk, but not its buffer, modified meanwhile"
-                               (buffer-name buffer)))))
-           (kill-buffer output)))))))
+    (with-current-buffer buffer
+      (dbt-cli--await-format)
+      (add-hook 'before-save-hook #'dbt-cli--await-format nil t)
+      (setq dbt-cli--format-process
+            (make-process
+             :name "dbt format" :buffer (generate-new-buffer " *dbt format*") :noquery t :connection-type 'pipe
+             :command command
+             :sentinel
+             (lambda (process _event)
+               (unless (process-live-p process)
+                 (unwind-protect
+                     (let ((failure (and (/= 0 (process-exit-status process))
+                                         (with-current-buffer (process-buffer process)
+                                           (goto-char (point-min))
+                                           (if (re-search-forward "^\\[error\\] \\(.*\\)" nil t)
+                                               (match-string 1)
+                                             (format "exit status %d" (process-exit-status process))))))
+                           (changed (and (buffer-live-p buffer) (not (verify-visited-file-modtime buffer)))))
+                       (when changed
+                         (with-current-buffer buffer
+                           (if (= tick (buffer-chars-modified-tick))
+                               (revert-buffer t t t)
+                             ;; dbt's own write: the text typed since wins the next save.
+                             (set-visited-file-modtime)
+                             (message "dbt formatted %s on disk; your edits since win the next save" name))))
+                       (when failure
+                         (message (if changed "dbt formatted %s, with errors: %s" "dbt could not format %s: %s")
+                                  name failure)))
+                   (kill-buffer (process-buffer process))))))))))
 
 (defun dbt-cli-arguments (arguments &optional changed)
   "Return the command-line arguments that the transient ARGUMENTS mean.

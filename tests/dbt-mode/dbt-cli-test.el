@@ -430,12 +430,14 @@ A buffer outside the project is left alone."
 
 (ert-deftest dbt-cli-formats-the-saved-file ()
   "Without a server, C-c C-q saves, then the buffer shows what dbt format made of the file.
-A buffer modified while dbt runs is left alone, with a message, and a
-failure of dbt is a message, the buffer as saved."
+Text typed while dbt runs wins the next save, which asks nothing; a
+failure of dbt that formatted nothing is a message, the buffer as
+saved; dbt's runs leave no buffer behind."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
-      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (buffers (buffer-list)))
         (let ((process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
           (goto-char (point-min))
           (insert "-- edited\n")
@@ -445,19 +447,63 @@ failure of dbt is a message, the buffer as saved."
           (let ((start (with-current-buffer (messages-buffer) (point-max))))
             (execute-kbd-macro (kbd "C-c C-q"))
             (insert "-- typed meanwhile\n")
-            (dbt-test-message-since start "dbt formatted orders\\.sql on disk, but not its buffer"))
+            (dbt-test-message-since start "dbt formatted orders\\.sql on disk; your edits since win the next save"))
           (dbt-test-formatted)
           (should (buffer-modified-p))
-          (should (string-prefix-p "-- formatted\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql")))
-          (should-not (string-match-p "-- formatted\n-- formatted\n" (buffer-string))))
-        (revert-buffer t t)
+          (should (verify-visited-file-modtime))
+          (should (string-prefix-p "-- formatted\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql"))))
         (let ((start (with-current-buffer (messages-buffer) (point-max))))
-          (insert "-- edited again\n")
           (execute-kbd-macro (kbd "C-c C-q"))
           (dbt-test-message-since start "dbt could not format orders\\.sql: \\[DependencyNotFound (dbt1048)\\]")
           (dbt-test-formatted)
           (should-not (buffer-modified-p))
-          (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql"))))))))
+          (should (string-search "-- typed meanwhile\n" (buffer-string)))
+          (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql"))))
+        (should-not (seq-difference (buffer-list) buffers))))))
+
+(ert-deftest dbt-cli-formats-the-file-that-dbt-formats-despite-another-file ()
+  "dbt formats the file and fails on another file's error: the buffer shows the file, the error the message."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_EXIT=1") process-environment))
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-message-since start "dbt formatted orders\\.sql, with errors: .*models/wip\\.sql")
+        (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+        (should-not (buffer-modified-p))
+        (should (verify-visited-file-modtime))))))
+
+(ert-deftest dbt-cli-formats-each-save-after-the-one-before ()
+  "A save waits for the format that runs: an older format never writes over a newer save.
+C-c C-q with the mode on formats once."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.5") process-environment)))
+        (dbt-format-on-save-mode 1)
+        (goto-char (point-min))
+        (insert "-- first\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (goto-char (point-max))
+        (insert "-- second\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (dbt-test-formatted)
+        (let ((text (dbt-test-file-text root "models/marts/orders.sql")))
+          (should (string-prefix-p "-- formatted\n-- first\n" text))
+          (should (string-suffix-p "-- second\n" text)))
+        ;; Read again with its modes, the mode on save among them.
+        (revert-buffer t t t)
+        (should dbt-format-on-save-mode)
+        (goto-char (point-min))
+        (insert "-- third\n")
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- third\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
 
 (ert-deftest dbt-cli-format-leaves-nothing-behind-without-dbt ()
   "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind."
