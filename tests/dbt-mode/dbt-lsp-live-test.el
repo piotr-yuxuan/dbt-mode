@@ -21,9 +21,13 @@
 (defconst dbt-test-live-dbt (getenv "DBT_MODE_TEST_DBT")
   "The dbt 2 executable of the live tests, or nil.")
 
+(defvar dbt-test-live-warnings nil
+  "Where the warnings of the running test start in the *Warnings* buffer.")
+
 (defmacro dbt-test-with-server (root &rest body)
   "Run BODY in models/marts/orders.sql of a fresh project ROOT, with dbt lsp.
-The server runs with the profile of the fixture and stops afterwards."
+The server runs with the profile of the fixture and stops afterwards,
+and the buffers of rows and lineage are killed."
   (declare (indent 1) (debug (symbolp body)))
   `(progn
      (unless dbt-test-live-dbt (ert-skip "no dbt 2 executable"))
@@ -36,7 +40,7 @@ The server runs with the profile of the fixture and stops afterwards."
              (lsp-keep-workspace-alive nil)
              (lsp-auto-guess-root nil)
              (lsp-client-packages nil)
-             (warning-minimum-log-level :error))
+             (dbt-test-live-warnings (with-current-buffer (get-buffer-create "*Warnings*") (point-max))))
          (unwind-protect
              (progn
                (dbt-test-visit ,root "models/marts/orders.sql")
@@ -44,7 +48,10 @@ The server runs with the profile of the fixture and stops afterwards."
                (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
                ,@body)
            (dolist (workspace (lsp--session-workspaces (lsp-session)))
-             (lsp-workspace-shutdown workspace)))))))
+             (lsp-workspace-shutdown workspace))
+           (dolist (buffer (buffer-list))
+             (when (string-match-p "\\`\\*dbt \\(?:rows\\|lineage\\): " (buffer-name buffer))
+               (kill-buffer buffer))))))))
 
 (defun dbt-test-lsp-definition-files ()
   "Return the files where lsp-mode's xref finds the definition at point."
@@ -52,7 +59,9 @@ The server runs with the profile of the fixture and stops afterwards."
           (dbt-test-wait (lambda () (xref-backend-definitions 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))))))
 
 (ert-deftest dbt-lsp-live-navigates-a-project ()
-  "M-. on a ref and on macros, M-?, hover and completion come from the server."
+  "M-. on a ref and on macros, M-?, hover and completion come from the server.
+lsp-mode neither formats nor runs code actions, and takes the server's
+notifications."
   (dbt-test-with-server root
     (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
                    (directory-file-name root)))
@@ -69,7 +78,7 @@ The server runs with the profile of the fixture and stops afterwards."
     (should (member (expand-file-name "models/marts/orders.sql" root)
                     (mapcar (lambda (item) (xref-location-group (xref-item-location item)))
                             (xref-backend-references 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp)))))
-    (should (string-match-p "Parent Models[^z-a]*raw_orders"
+    (should (string-match-p "Parent Models\\(?:.\\|\n\\)*raw_orders"
                             (lsp-get (lsp-get (lsp-request "textDocument/hover" (lsp--text-document-position-params))
                                               :contents)
                                      :value)))
@@ -78,8 +87,9 @@ The server runs with the profile of the fixture and stops afterwards."
     (let ((completion (lsp-completion-at-point)))
       (should (member "stg_customers" (all-completions "stg_" (nth 2 completion)))))
     (should-not (lsp-feature? "textDocument/formatting"))
-    (should-not (with-current-buffer (get-buffer-create "*Warnings*")
-                  (string-match-p "Unknown notification" (buffer-string))))))
+    (should-not (lsp-feature? "textDocument/codeAction"))
+    (should-not (with-current-buffer "*Warnings*"
+                  (string-match-p "Unknown notification" (buffer-substring dbt-test-live-warnings (point-max)))))))
 
 (defun dbt-test-build (root)
   "Build the project at ROOT with the dbt of the live tests, so that it has rows."
@@ -96,7 +106,8 @@ The buffer is killed, so that the next preview makes a new one."
       (kill-buffer buffer))))
 
 (ert-deftest dbt-lsp-live-compiles-and-previews ()
-  "C-c C-v shows the compiled SQL; C-c C-p the rows of a model, a region, a CTE."
+  "C-c C-v shows the compiled SQL; C-c C-p the rows of a model, a region, a CTE.
+The rows of a model come from its buffer, unsaved changes included."
   (dbt-test-with-server root
     (dbt-test-build root)
     (dbt-visit-compiled)
@@ -119,7 +130,13 @@ The buffer is killed, so that the next preview makes a new one."
         (should (dbt-test-rows name))))
     (dbt-test-goto "customers.first_name")
     (dbt-preview nil nil t)
-    (should (equal (length (dbt-test-rows "final")) 3))))
+    (should (equal (length (dbt-test-rows "final")) 3))
+    ;; The rows of a model with unsaved changes are those of its saved text.
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
+      (goto-char (point-max))
+      (insert "\nwhere first_name = 'Ada'\n")
+      (dbt-preview)
+      (should (equal (mapcar #'cadr (dbt-test-rows "stg_customers")) '("Ada"))))))
 
 (ert-deftest dbt-lsp-live-shows-lineage ()
   "C-c C-g shows the upstream and downstream that the server computes."
@@ -137,6 +154,9 @@ The buffer is killed, so that the next preview makes a new one."
     (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
       (dbt-lsp)
       (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
+      (should-error (dbt-lsp-rename-model "stg clients") :type 'user-error)
+      (should-error (dbt-lsp-rename-model "orders") :type 'user-error)
+      (should (file-exists-p (expand-file-name "models/staging/stg_customers.sql" root)))
       (dbt-lsp-rename-model "stg_clients")
       (should (equal buffer-file-name (expand-file-name "models/staging/stg_clients.sql" root)))
       (should-not (file-exists-p (expand-file-name "models/staging/stg_customers.sql" root))))
@@ -150,24 +170,39 @@ The buffer is killed, so that the next preview makes a new one."
       (insert-file-contents (expand-file-name "models/staging/_staging.yml" root))
       (should (string-match-p "- name: stg_clients" (buffer-string))))))
 
+(defun dbt-test-file-text (root file)
+  "Return the text of FILE, relative to ROOT, as it is on disk."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file root))
+    (buffer-string)))
+
 (ert-deftest dbt-lsp-live-formats-and-reports-errors ()
-  "Formatting saves first, and an unknown ref is a diagnostic of its line."
-  (dbt-test-with-server root
-    (goto-char (point-max))
-    (insert "\n-- unsaved\n")
-    (dbt-lsp-format-buffer)
-    (should-not (buffer-modified-p))
-    (with-temp-buffer
-      (insert-file-contents (expand-file-name "models/marts/orders.sql" root))
-      (should (string-match-p "-- unsaved" (buffer-string))))
-    (dbt-test-goto "ref('stg_orders')")
-    (replace-match "ref('nope')")
-    (save-buffer)
-    (let ((file (lsp--fix-path-casing buffer-file-name)))
-      (dbt-test-wait (lambda ()
-                       (seq-find (lambda (diagnostic) (string-match-p "'nope' not found" (lsp-get diagnostic :message)))
-                                 (gethash file (lsp-diagnostics t))))
-                     60))))
+  "Formatting and fixing save first, then format; an unknown ref is a diagnostic of its line."
+  (let ((dbt-lsp-enable-linter t)
+        (unformatted "select   id as customer_id ,first_name, last_name\nfrom {{ ref('raw_customers') }}   \n")
+        (formatted "select\n    id as customer_id,\n    first_name,\n    last_name\nfrom {{ ref('raw_customers') }}\n"))
+    (dbt-test-with-server root
+      (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
+        (dbt-lsp)
+        (erase-buffer)
+        (insert "-- unsaved\n" unformatted)
+        ;; The server formats nothing until it has compiled the project.
+        (dbt-test-wait (lambda () (dbt-lsp-format-buffer) (buffer-modified-p)) 60)
+        (should (equal (dbt-test-file-text root "models/staging/stg_customers.sql") (concat "-- unsaved\n" unformatted)))
+        (should (equal (buffer-string) (concat "-- unsaved\n" formatted)))
+        (erase-buffer)
+        (insert "-- fixed\n" unformatted)
+        (dbt-lsp-fix-all)
+        (should (equal (dbt-test-file-text root "models/staging/stg_customers.sql") (concat "-- fixed\n" unformatted)))
+        (should (equal (buffer-string) (concat "-- fixed\n" formatted))))
+      (dbt-test-goto "ref('stg_orders')")
+      (replace-match "ref('nope')")
+      (save-buffer)
+      (let ((file (lsp--fix-path-casing buffer-file-name)))
+        (dbt-test-wait (lambda ()
+                         (seq-find (lambda (diagnostic) (string-match-p "'nope' not found" (lsp-get diagnostic :message)))
+                                   (gethash file (lsp-diagnostics t))))
+                       60)))))
 
 (provide 'dbt-lsp-live-test)
 ;;; dbt-lsp-live-test.el ends here
