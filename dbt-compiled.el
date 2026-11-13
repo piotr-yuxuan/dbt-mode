@@ -21,7 +21,6 @@
 
 (declare-function dbt-lsp-compiled "dbt-lsp")
 (declare-function dbt-edit-beginning-of-cte "dbt-edit")
-(declare-function dbt-edit-end-of-cte "dbt-edit")
 
 (defvar-local dbt-compiled--buffer nil
   "The buffer of the compiled SQL that the model faces, in the model's buffer.")
@@ -45,6 +44,7 @@ It is the same line of the same CTE, when COMPILED has a CTE of that
 name, or else the line at the same share of the buffer."
   (let* ((case-fold-search t)
          (line (line-number-at-pos))
+         (bol (line-beginning-position))
          ;; The CTE around point, as its name and point's line in it.
          (cte (save-excursion
                 (end-of-line)
@@ -52,8 +52,10 @@ name, or else the line at the same share of the buffer."
                      (looking-at (dbt-mode-cte-regexp))
                      (let ((name (match-string-no-properties 1))
                            (start (line-number-at-pos)))
-                       (and (ignore-error scan-error (dbt-edit-end-of-cte) t)
-                            (<= line (line-number-at-pos))
+                       ;; Point's line is in the CTE while the parenthesis
+                       ;; that the match ends with is open at its start:
+                       ;; only the text before it is read, at each command.
+                       (and (<= 0 (nth 6 (parse-partial-sexp (min bol (match-end 0)) bol)))
                             (cons name (- line start)))))))
          (share (/ (float (1- line)) (max 1 (count-lines (point-min) (point-max))))))
     (with-current-buffer compiled

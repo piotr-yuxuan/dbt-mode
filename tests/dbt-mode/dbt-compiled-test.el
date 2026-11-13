@@ -43,7 +43,15 @@ Outside a CTE, the line at the same share of the buffer."
                                  (save-excursion
                                    (goto-char (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
                                                 (dbt-compiled-position compiled)))
-                                   (buffer-substring (point) (line-end-position)))))))))
+                                   (buffer-substring (point) (line-end-position))))))
+      ;; The final select is in no CTE: the line at the same share.
+      (dbt-test-goto "select * from final")
+      (let ((share (/ (float (1- (line-number-at-pos))) (count-lines (point-min) (point-max))))
+            (position (dbt-compiled-position compiled)))
+        (with-current-buffer compiled
+          (should (= (line-number-at-pos position)
+                     (1+ (round (* share (count-lines (point-min) (point-max)))))))
+          (should (> (line-number-at-pos position) 1)))))))
 
 (ert-deftest dbt-compiled-faces-the-model-s-cte-not-an-ephemeral-s ()
   "A CTE of an ephemeral model that dbt inlines, named as one of the model's, is not the model's.
