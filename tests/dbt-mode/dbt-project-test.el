@@ -126,6 +126,17 @@
     (dbt-project-forget root)
     (should (dbt-project-entities root '(model) "new_model"))))
 
+(ert-deftest dbt-project-cached-keeps-a-slow-value-for-its-lifetime ()
+  "A value is fresh for the lifetime after it is ready, however long it took."
+  (let* ((dbt-project-index-lifetime 0.5)
+         (computed 0)
+         (slow (lambda (_root) (setq computed (1+ computed)) (sleep-for 0.6) computed)))
+    (unwind-protect
+        (progn
+          (should (= (dbt-project-cached "/slow/" 'value slow) 1))
+          (should (= (dbt-project-cached "/slow/" 'value slow) 1)))
+      (dbt-project-forget "/slow/"))))
+
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
   (dbt-test-with-project root

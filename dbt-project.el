@@ -217,7 +217,9 @@ Otherwise call COMPUTE with ROOT, and keep and return its value."
          (cached (gethash key dbt-project--cache)))
     (if (and cached (< (float-time (time-since (car cached))) dbt-project-index-lifetime))
         (cdr cached)
-      (cdr (puthash key (cons (current-time) (funcall compute root)) dbt-project--cache)))))
+      (let ((value (funcall compute root)))
+        (puthash key (cons (current-time) value) dbt-project--cache)
+        value))))
 
 (defun dbt-project-packages (root)
   "Return the projects of ROOT, each as (NAME DIRECTORY CONFIG).
