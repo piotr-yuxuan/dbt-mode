@@ -181,17 +181,17 @@ buffer is narrowed, and keeps the states it reaches."
 
 (defun dbt-edit--opener (position blocks)
   "Return the start of the parenthesis or Jinja block open at POSITION, or 0.
-It is the one that opened last.  BLOCKS are what `dbt-edit-blocks'
-returns for a position after POSITION."
+It is the one that opened last.  BLOCKS are Jinja blocks, closed or
+open, as `dbt-edit-blocks' gives them for a position after POSITION."
   (let ((opener (or (nth 1 (save-excursion (syntax-ppss position))) 0)))
-    (dolist (block (append (car blocks) (cdr blocks)) opener)
+    (dolist (block blocks opener)
       (when (and (<= (nth 2 block) position (or (nth 3 block) position)) (> (nth 1 block) opener))
         (setq opener (nth 1 block))))))
 
 (defun dbt-edit-indentation (blocks)
   "Return the column that the current line indents to, given BLOCKS.
-BLOCKS are what `dbt-edit-blocks' returns for a position after the
-line's start.
+BLOCKS are Jinja blocks, closed or open, as `dbt-edit-blocks' gives them
+for a position after the line's start.
 The nearest construct open at the line's start, a parenthesis or a Jinja
 block, indents it by `dbt-indent-offset' from the line that opened it.
 A line that starts by closing it, with `)', `]', `}' or a tag such as
@@ -233,9 +233,11 @@ A line that starts in a string or a comment keeps its indentation."
 A line that starts in a string or a comment keeps its indentation.
 Point keeps its place in the text, or goes to the indentation from
 within it.  For `indent-line-function'."
-  (if (<= (current-column) (current-indentation))
-      (dbt-edit--indent (dbt-edit-blocks (line-beginning-position)))
-    (save-excursion (dbt-edit--indent (dbt-edit-blocks (line-beginning-position))))))
+  (let* ((blocks (dbt-edit-blocks (line-beginning-position)))
+         (blocks (append (car blocks) (cdr blocks))))
+    (if (<= (current-column) (current-indentation))
+        (dbt-edit--indent blocks)
+      (save-excursion (dbt-edit--indent blocks)))))
 
 (defun dbt-edit-indent-region (start end)
   "Indent the lines from START to END that hold text.
@@ -250,7 +252,7 @@ For `indent-region-function'."
       (unwind-protect
           (while (< (point) end)
             (unless (looking-at-p "[ \t]*$")
-              (dbt-edit--indent (list blocks)))
+              (dbt-edit--indent blocks))
             (forward-line 1))
         (dolist (block blocks)
           (mapc (lambda (marker) (set-marker marker nil)) (cdr block)))
