@@ -81,6 +81,7 @@
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
 (autoload 'dbt-edit-blocks "dbt-edit")
 (autoload 'dbt-compiled-show "dbt-compiled")
+(autoload 'dbt-compiled-diff "dbt-compiled" nil t)
 (autoload 'dbt-cli-show "dbt-cli")
 (autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
@@ -743,15 +744,9 @@ write; the message says when it was written."
          (file (expand-file-name "manifest.json"
                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
          (id (dbt-project-node-id entity))
-         ;; Only the node is parsed, as a manifest grows to tens of MB.
-         ;; Its id is a key of an object in "nodes" or "sources" only:
-         ;; elsewhere, as in "child_map", its value is an array.
-         (node (with-temp-buffer
-                 (unless (ignore-errors (insert-file-contents file) t)
-                   (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
-                 (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
-                      (progn (backward-char)
-                             (ignore-errors (json-parse-buffer :null-object nil))))))
+         (node (if (file-readable-p file)
+                   (dbt-project-manifest-node file id)
+                 (user-error "No readable %s: run dbt parse first" (file-relative-name file root))))
          ;; The manifest is dbt's, read as it is: anything but a table
          ;; holding a string is no relation.
          (relation (and (hash-table-p node) (gethash "relation_name" node))))
@@ -848,6 +843,7 @@ CTE rather than by statement."
     ["Insert ref..." dbt-insert-ref]
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
+    ["Compiled SQL against a state..." dbt-compiled-diff]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     "---"

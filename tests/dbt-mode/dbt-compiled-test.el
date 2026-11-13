@@ -5,7 +5,7 @@
 ;;; Commentary:
 
 ;; The compiled SQL that C-c C-v shows beside a model: the line it faces,
-;; how it follows point and saves.
+;; how it follows point and saves, and its diff with another state.
 
 ;;; Code:
 
@@ -67,6 +67,29 @@ point moves the compiled SQL along; once its window goes, so does the mode."
         (delete-window (get-buffer-window (get-file-buffer compiled)))
         (execute-kbd-macro (kbd "C-e"))
         (should-not dbt-compiled-follow-mode)))))
+
+(ert-deftest dbt-compiled-diffs-with-another-state ()
+  "The diff with a state shows how the model compiles there and here."
+  (dbt-test-with-project root
+    (dbt-test-compile root)
+    (let ((state (expand-file-name "prod-state/" root)))
+      (make-directory state)
+      (write-region (concat "{\"nodes\": {\"model.shop.orders\": {\"compiled_code\": "
+                            (json-encode (concat "with orders as (\n    select * from \"db\".\"prod\".\"stg_orders\"\n),"
+                                                 "\n\nselect * from orders\n"))
+                            "}}}")
+                    nil (expand-file-name "manifest.json" state))
+      (dbt-test-visit root "models/marts/orders.sql")
+      (let ((diff-switches "-u"))
+        (dbt-compiled-diff state))
+      (with-current-buffer (dbt-test-wait (lambda () (and (get-buffer "*Diff*")
+                                                          (not (get-buffer-process "*Diff*"))
+                                                          (get-buffer "*Diff*"))))
+        (should (string-match-p "^-    select \\* from \"db\"\\.\"prod\"\\.\"stg_orders\"$" (buffer-string)))
+        (should (string-match-p "^\\+    select \\* from \"db\"\\.\"main\"\\.\"stg_orders\"$" (buffer-string)))
+        (kill-buffer))
+      (dbt-test-visit root "models/staging/stg_orders.sql")
+      (should-error (dbt-compiled-diff state) :type 'user-error))))
 
 (provide 'dbt-compiled-test)
 ;;; dbt-compiled-test.el ends here

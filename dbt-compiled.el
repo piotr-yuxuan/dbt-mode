@@ -10,11 +10,14 @@
 ;; `dbt-visit-compiled' shows the compiled SQL of a model beside it, with
 ;; `dbt-compiled-show'.  While it shows, `dbt-compiled-follow-mode' keeps
 ;; point's line in it facing point's line in the model, CTE by CTE, and
-;; saving the model compiles it again with dbt lsp.
+;; saving the model compiles it again with dbt lsp.  `dbt-compiled-diff'
+;; compares the compiled SQL with that of another state's manifest, such
+;; as a compile of main, or production's artifacts.
 
 ;;; Code:
 
 (require 'dbt-mode)
+(require 'dbt-project)
 
 (declare-function dbt-lsp-compiled "dbt-lsp")
 (declare-function dbt-edit-beginning-of-cte "dbt-edit")
@@ -114,6 +117,32 @@ window shows the compiled SQL."
            (setq dbt-compiled--buffer compiled)
            (dbt-compiled-follow-mode 1)
            (dbt-compiled--follow)))))))
+
+;;;###autoload
+(defun dbt-compiled-diff (state)
+  "Show how the current model's compiled SQL differs from that of STATE.
+STATE is a directory of another revision's artifacts, such as those of
+`dbt compile --target-path STATE' on main, or production's: the
+`compiled_code' of the model in its manifest.json is compared with the
+compiled SQL that `dbt-visit-compiled' shows."
+  (interactive (list (read-directory-name "Compare with the state in: " nil nil t)))
+  (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (manifest (expand-file-name "manifest.json" state))
+         (node (dbt-project-manifest-node manifest (dbt-project-node-id resource)))
+         (before (and (hash-table-p node) (gethash "compiled_code" node)))
+         (label (format "%s in %s" (dbt-mode-resource-selector resource) (abbreviate-file-name state))))
+    (unless (stringp before)
+      (user-error "No compiled SQL of %s in %s" (dbt-mode-resource-selector resource) manifest))
+    (dbt-compiled-with-buffer
+     (lambda ()
+       (let ((old (get-buffer-create (format "*dbt compiled: %s*" label))))
+         (with-current-buffer old
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (insert before)))
+         (diff-buffers old (current-buffer))
+         (message "Compiled SQL of %s, from a manifest written at %s" label
+                  (format-time-string "%F %R" (file-attribute-modification-time (file-attributes manifest)))))))))
 
 (provide 'dbt-compiled)
 ;;; dbt-compiled.el ends here
