@@ -333,6 +333,7 @@ of a model is not renamed, as the server would edit nothing."
     (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
          (entity (dbt-project-file-entity root buffer-file-name))
+         (file buffer-file-name)
          (old (file-name-base buffer-file-name))
          (new (expand-file-name (concat name "." (file-name-extension buffer-file-name))
                                 (file-name-directory buffer-file-name))))
@@ -349,22 +350,32 @@ of a model is not renamed, as the server would edit nothing."
       (rename-visited-file new)
       ;; The next rename's check must know the new name.
       (dbt-project-forget root)
-      ;; What still names the model, in the buffers that the server edited
-      ;; or else in the files.
+      ;; What still names the model where it was used: a call of it or its
+      ;; YAML entry, in the buffers that the server edited or else in the
+      ;; files.  An edit before a use on its line moves the use, and the
+      ;; server edits every use of a line or none.
       (setq uses (seq-filter (lambda (item)
-                               (let* ((location (xref-item-location item))
-                                      (file (xref-location-group location)))
+                               (let ((location (xref-item-location item)))
+                                 ;; A use in the renamed file is now in its new one.
+                                 (when (equal (xref-file-location-file location) file)
+                                   (setf (xref-file-location-file location) new))
                                  (with-temp-buffer
-                                   (if-let* ((buffer (get-file-buffer file)))
+                                   (if-let* ((buffer (get-file-buffer (xref-file-location-file location))))
                                        (insert-buffer-substring buffer)
-                                     (insert-file-contents file))
+                                     (insert-file-contents (xref-file-location-file location)))
+                                   (goto-char (point-min))
                                    (forward-line (1- (xref-location-line location)))
-                                   (re-search-forward (format "\\_<%s\\_>" (regexp-quote old)) (line-end-position) t))))
+                                   (forward-char (min (xref-file-location-column location)
+                                                      (- (line-end-position) (point))))
+                                   (and (looking-at (concat (alist-get 'ref dbt-project-call-regexps)
+                                                            "\\|[ \t-]*name:[ \t]*['\"]?\\(?1:[^'\"\n \t]+\\)"))
+                                        (equal (match-string 1) old)))))
                              uses))
-      (when uses
-        (xref-show-xrefs (lambda () uses) nil))
-      (message "Renamed to %s; save the buffers it edited with C-x s%s" name
-               (if uses (format "; %d uses still name %s, which dbt lsp leaves" (length uses) old) "")))))
+      (if (not uses)
+          (message "Renamed to %s; save the buffers it edited with C-x s" name)
+        (xref-show-xrefs (lambda () uses) nil)
+        (message "Renamed to %s; save the buffers it edited with C-x s; %d uses still name %s, which dbt lsp leaves"
+                 name (length uses) old)))))
 
 (defun dbt-lsp-format-buffer ()
   "Save the buffer, and format it with the server."

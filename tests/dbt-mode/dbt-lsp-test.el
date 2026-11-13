@@ -427,18 +427,38 @@ The new name is then taken, before any buffer is saved."
     (should (equal buffer-file-name (expand-file-name "models/marts/orders.sql" root)))))
 
 (ert-deftest dbt-lsp-rename-model-lists-the-uses-the-server-leaves ()
-  "The uses that still name a renamed model are listed; a version is not renamed."
-  (dbt-lsp-test-with-server root nil
+  "The uses that still name a renamed model are listed; a version is not renamed.
+The server edits the ref of orders.sql and that of a CTE named as the
+model, in their buffers; the uses it leaves are listed wherever they
+are, in a visited buffer or a file, the renamed file included."
+  (dbt-lsp-test-with-server root
+      `(("workspace/willRenameFiles"
+         . (:changes ((,(lsp--path-to-uri (expand-file-name "models/marts/orders.sql" root))
+                       . [(:range (:start (:line 11 :character 26) :end (:line 11 :character 36))
+                                  :newText "stg_sales")])
+                      (,(lsp--path-to-uri (expand-file-name "models/marts/recent.sql" root))
+                       . [(:range (:start (:line 0 :character 42) :end (:line 0 :character 52))
+                                  :newText "stg_sales")])))))
+    (write-region "with stg_orders as (select * from {{ ref('stg_orders') }})\nselect * from stg_orders\n" nil
+                  (expand-file-name "models/marts/recent.sql" root))
+    (write-region "-- formerly {{ ref('stg_orders') }}\n" nil
+                  (expand-file-name "models/staging/stg_orders.sql" root) t)
+    (dbt-project-forget root)
+    (dbt-test-visit root "analyses/order_counts.sql")
     (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
       (dbt-lsp)
       (let* (shown
              (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
-        ;; The scripted server edits nothing: every use is left.
         (dbt-lsp-rename-model "stg_sales")
-        (should (member "analyses/order_counts.sql"
-                        (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
-                                shown)))
-        (dbt-lsp-test-message "uses still name stg_orders, which dbt lsp leaves")))
+        (should (equal (sort (mapcar (lambda (item)
+                                       (let ((location (xref-item-location item)))
+                                         (format "%s:%d" (file-relative-name (xref-location-group location) root)
+                                                 (xref-location-line location))))
+                                     shown))
+                       '("analyses/order_counts.sql:1" "models/staging/_staging.yml:4"
+                         "models/staging/stg_sales.sql:18" "snapshots/orders_snapshot.sql:3"
+                         "tests/assert_positive_amount.sql:1")))
+        (dbt-lsp-test-message "5 uses still name stg_orders, which dbt lsp leaves")))
     (dolist (file '("dim_v1" "dim_v2"))
       (write-region "select 1" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
     (write-region "models:\n  - name: dim\n    versions:\n      - v: 1\n      - v: 2\n" nil
