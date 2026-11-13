@@ -629,17 +629,18 @@ write; the message says when it was written."
                      (user-error "No model or source here")))
          (file (expand-file-name "manifest.json"
                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
-         (manifest (or (ignore-errors (with-temp-buffer
-                                        (insert-file-contents file)
-                                        (json-parse-buffer :null-object nil)))
-                       (user-error "No readable %s: run dbt parse first" (file-relative-name file root))))
          (id (dbt-project-node-id entity))
-         ;; The manifest is dbt's, read as it is: anything but a table of
-         ;; tables holding a string is no relation.
-         (node (seq-some (lambda (section)
-                           (let ((nodes (and (hash-table-p manifest) (gethash section manifest))))
-                             (and (hash-table-p nodes) (gethash id nodes))))
-                         '("nodes" "sources")))
+         ;; Only the node is parsed, as a manifest grows to tens of MB.
+         ;; Its id is a key of an object in "nodes" or "sources" only:
+         ;; elsewhere, as in "child_map", its value is an array.
+         (node (with-temp-buffer
+                 (unless (ignore-errors (insert-file-contents file) t)
+                   (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
+                 (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+                      (progn (backward-char)
+                             (ignore-errors (json-parse-buffer :null-object nil))))))
+         ;; The manifest is dbt's, read as it is: anything but a table
+         ;; holding a string is no relation.
          (relation (and (hash-table-p node) (gethash "relation_name" node))))
     (unless (stringp relation)
       (user-error "%s has no relation in the manifest: run dbt parse again" id))

@@ -535,12 +535,16 @@
                    '(("models/staging/stg_customers.sql" . 1))))))
 
 (ert-deftest dbt-mode-copies-relations-from-the-manifest ()
-  "The relation of the model, or of the ref or source at point, comes from the manifest."
+  "The relation of the model, or of the ref or source at point, comes from the manifest.
+It is that of the node with this very id, not a list of its children,
+nor a node whose id it begins."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (should-error (dbt-copy-relation) :type 'user-error)
     (make-directory (expand-file-name "target" root))
-    (write-region (concat "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"main\\\".\\\"orders\\\"\"},"
+    (write-region (concat "{\"child_map\": {\"model.shop.orders\": [\"model.shop.x\"]},"
+                          " \"nodes\": {\"model.shop.orders_v2\": {\"relation_name\": \"wrong\"},"
+                          " \"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"main\\\".\\\"orders\\\"\"},"
                           " \"model.shop.stg_orders\": {\"relation_name\": null}},"
                           " \"sources\": {\"source.shop.raw.raw_orders\": {\"relation_name\": \"raw.main.raw_orders\"}}}")
                   nil (expand-file-name "target/manifest.json" root))
