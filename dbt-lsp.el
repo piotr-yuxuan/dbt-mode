@@ -30,7 +30,9 @@
 ;; - `dbt-lsp-format-buffer' formats the buffer.  The server formats the
 ;;   file on disk, not the buffer, so its edits would corrupt unsaved
 ;;   changes: this client hides formatting from lsp-mode, and this
-;;   command saves the buffer first.
+;;   command saves the buffer first;
+;; - `dbt-lsp-fix-all' fixes the lint issues of the buffer and formats it,
+;;   with the linter on, and saves it first likewise.
 ;;
 ;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
 ;; project a folder of the lsp session before lsp-mode starts, so that
@@ -89,11 +91,12 @@ in the buffer that starts it."
   "Hide the formatting of the server of WORKSPACE from lsp-mode.
 The server formats the file on disk rather than the buffer, so lsp-mode
 would apply its edits to unsaved text; `dbt-lsp-format-buffer' saves
-first."
+first.  Its code actions go too: it has one, which fixes lint issues
+and formats, also from the file on disk; `dbt-lsp-fix-all' saves first."
   ;; A key with a nil value would still mean support to lsp-mode: the keys
   ;; go.  They are strings in a hash table, keywords in a plist.
   (let ((capabilities (lsp--workspace-server-capabilities workspace)))
-    (dolist (key '(:documentFormattingProvider :documentRangeFormattingProvider))
+    (dolist (key '(:documentFormattingProvider :documentRangeFormattingProvider :codeActionProvider))
       (setq capabilities (map-delete capabilities (if (hash-table-p capabilities) (lsp-keyword->string key) key))))
     (setf (lsp--workspace-server-capabilities workspace) capabilities)))
 
@@ -331,6 +334,18 @@ the same.  The current buffer is saved first."
                                     (:newText stringp)))))
         (error "%s" (dbt-lsp--unreadable "textDocument/formatting" edits)))
       (lsp--apply-text-edits edits 'format))))
+
+(defun dbt-lsp-fix-all ()
+  "Save the buffer, then fix its lint issues and format it with the server.
+The server offers this with `dbt-lsp-enable-linter' only."
+  (interactive)
+  (save-buffer)
+  (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
+    ;; Without its requirement, lsp-mode sends the method that
+    ;; `dbt-lsp--hide-formatting' hid, here only.
+    (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"
+                                                     (copy-alist lsp-method-requirements))))
+      (call-interactively #'lsp-fix-all))))
 
 ;;;; The client
 

@@ -115,11 +115,13 @@ The buffer is killed, so that the next preview makes a new one."
                              "--lint-enabled" "true" "--profiles-dir" "/profiles"))))))
 
 (ert-deftest dbt-lsp-hides-formatting-from-lsp-mode ()
-  "lsp-mode does not format by itself, as the server formats the file on disk."
+  "lsp-mode does not format by itself, as the server formats the file on disk.
+Its one code action, which fixes and formats, is hidden too."
   (dbt-lsp-test-with-server root nil
     (should (lsp-feature? "textDocument/hover"))
     (should-not (lsp-feature? "textDocument/formatting"))
-    (should-not (lsp-feature? "textDocument/rangeFormatting"))))
+    (should-not (lsp-feature? "textDocument/rangeFormatting"))
+    (should-not (lsp-feature? "textDocument/codeAction"))))
 
 (ert-deftest dbt-lsp-takes-the-notifications-of-the-server ()
   "The notifications of the server's own raise no warning."
@@ -318,6 +320,22 @@ A node of a package that dbt-mode does not know has no file."
     (should (member "textDocument/didSave"
                     (member "textDocument/didChange" (dbt-lsp-test-methods))))
     (should (member "textDocument/formatting"
+                    (member "textDocument/didSave" (dbt-lsp-test-methods))))))
+
+(ert-deftest dbt-lsp-fix-all-saves-then-fixes ()
+  "Fixing the lint issues saves the buffer, then applies the edits of the server."
+  (dbt-lsp-test-with-server root
+      `(("textDocument/codeAction"
+         . [(:title "Fix all auto-fixable lint issues and format document" :kind "source.fixAll"
+                    :edit (:changes ((,(lsp--path-to-uri (expand-file-name "models/marts/orders.sql" root))
+                                      . [(:range (:start (:line 0 :character 0) :end (:line 0 :character 0))
+                                                 :newText "-- fixed\n")]))))]))
+    (goto-char (point-min))
+    (insert "-- unsaved\n")
+    (dbt-lsp-fix-all)
+    (should (string-prefix-p "-- unsaved\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-prefix-p "-- fixed\n-- unsaved\n" (buffer-string)))
+    (should (member "textDocument/codeAction"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))
 
 ;; What the server answers is checked before it is read.
