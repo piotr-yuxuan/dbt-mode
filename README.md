@@ -255,12 +255,12 @@ could only fail.
 `C-c C-q`, `dbt-format-buffer`, saves the buffer, then formats it while you
 go on: with dbt lsp by the server, whose edits leave the buffer modified;
 without one by `dbt format FILE`, which formats the saved file, the buffer
-then showing the result. Text you type meanwhile wins the next save, which
-asks nothing. A save waits for a format that runs, so that an older one
-never writes over it, and stops it after `dbt-cli-format-deadline`, 30
-seconds. dbt may format the file and still fail on another file of the
-project: the buffer shows the file, and dbt's error, which names the file
-it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
+then showing the result. Text you type meanwhile wins, unformatted, which
+a message says, and the next save asks nothing. A save waits for a
+format that runs, so that an older one never writes over it, and stops
+it after `dbt-cli-format-deadline`, 30 seconds. dbt may format the file
+and still fail on another file of the project: the buffer shows the
+file, and dbt's error, which names the file it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
 `dbt-mode-hook`, formats after each save, and with dbt lsp saves again
 when that changed the buffer; a failure to format is a message, and the
 save stands.

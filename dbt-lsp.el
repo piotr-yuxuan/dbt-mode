@@ -395,7 +395,8 @@ The server formats the file on disk, whose text is the buffer's once
 saved: its edits apply when it answers, while the buffer's text is
 still that, and leave the buffer modified.  THEN, when non-nil, is a
 function of no argument that runs in the buffer once they did.  An
-answer that dbt-mode cannot read is a message."
+answer that dbt-mode cannot read, or one that comes after an edit, is a
+message."
   (interactive)
   (save-buffer)
   (let ((buffer (current-buffer))
@@ -419,7 +420,10 @@ answer that dbt-mode cannot read is a message."
                                              (:newText stringp))))))
                   (message "dbt could not format %s: %s" (buffer-name buffer)
                            (dbt-lsp--unreadable "textDocument/formatting" edits)))
-                 ((and (buffer-live-p buffer) (= tick (buffer-chars-modified-tick buffer)))
+                 ((not (buffer-live-p buffer)))
+                 ((/= tick (buffer-chars-modified-tick buffer))
+                  (message "dbt formatted %s as saved: your edits since win, unformatted" (buffer-name buffer)))
+                 (t
                   (with-current-buffer buffer
                     (lsp--apply-text-edits edits 'format)
                     (when then

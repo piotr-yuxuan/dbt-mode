@@ -685,6 +685,24 @@ stands."
     (should (member "textDocument/formatting"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))
 
+(ert-deftest dbt-lsp-formats-while-emacs-goes-on ()
+  "C-c C-q returns before the server answers; text typed meanwhile wins, unformatted, which a message says."
+  (dbt-lsp-test-with-server root
+      '(("$delays" ("textDocument/formatting" . 1))
+        ("textDocument/formatting"
+         . [(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "-- formatted\n")]))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (should (string-prefix-p "-- edited\n" (buffer-string)))
+      (should-not (buffer-modified-p))
+      (execute-kbd-macro (kbd "x"))
+      (dbt-lsp-test-message "dbt formatted orders\\.sql as saved: your edits since win, unformatted")
+      (should (string-prefix-p "-- edited\nx" (buffer-string)))
+      (should (buffer-modified-p)))))
+
 (ert-deftest dbt-lsp-fix-all-saves-then-fixes ()
   "Fixing the lint issues saves the buffer, then applies the edits of the server."
   (dbt-lsp-test-with-server root

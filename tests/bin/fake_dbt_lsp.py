@@ -8,7 +8,8 @@ file of answers, whose keys are a method, or "workspace/executeCommand
 COMMAND" for a command: a request without an answer there gets null.  After
 `initialized`, it sends the notifications of its own that dbt lsp sends, or
 those that the key "$notifications" of the answers lists.  The key
-"$experimental" gives its capabilities an experimental object.
+"$experimental" gives its capabilities an experimental object, and the key
+"$delays" maps a method to the seconds it waits before it answers it.
 
 Environment:
 - DBT_MODE_FAKE_ANSWERS: the file of answers, optional;
@@ -21,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import BinaryIO
 
@@ -111,6 +113,7 @@ def main() -> None:
             if method == "exit":
                 return
             if "id" in message and method is not None:
+                time.sleep(answers.get("$delays", {}).get(method, 0))
                 write_message({"id": message["id"], "result": answer(message, answers)})
             if method == "initialized":
                 for notification in answers.get("$notifications", NOTIFICATIONS):
