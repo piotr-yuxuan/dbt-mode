@@ -538,33 +538,48 @@ or not a language server runs."
                         entries))
      nil)))
 
+(defun dbt-mode-compiled-file (directory)
+  "Return the file of the current model's SQL that dbt wrote in DIRECTORY.
+DIRECTORY is \"compiled\", where `dbt compile' and every run write the
+compiled SQL, or \"run\", where a run writes the SQL it ran, its DDL
+included.  Return nil when dbt has not written it."
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         ;; dbt writes the SQL of a file under the directory of its
+         ;; package, at its path from the root of the project.
+         (file (expand-file-name
+                (file-relative-name (plist-get resource :file) root)
+                (expand-file-name (concat directory "/" (plist-get resource :package))
+                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
+         ;; dbt 2 writes that of a snapshot in a directory of that path,
+         ;; named after the snapshot.
+         (file (if (file-directory-p file)
+                   (expand-file-name (concat (plist-get resource :name) ".sql") file)
+                 file)))
+    (and (file-regular-p file) file)))
+
+(defun dbt-visit-run ()
+  "Show the SQL that the last `dbt run' or `dbt build' ran for the current model.
+That is its compiled SQL within the DDL that dbt ran."
+  (interactive)
+  (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "run")
+                                               (user-error "Not run yet: run dbt run or dbt build")))
+    (read-only-mode 1)
+    (pop-to-buffer (current-buffer))))
+
 (defun dbt-visit-compiled (&optional run)
   "Show the SQL that the current model compiles to.
 With dbt lsp, the buffer is saved and the server compiles it.
-Otherwise, show what the last `dbt compile' or `dbt run' wrote.  With
-RUN, interactively a prefix argument, show what the last `dbt run' or
-`dbt build' ran, its DDL included."
+Otherwise, show what the last `dbt compile' or run wrote.  With RUN,
+interactively a prefix argument, show the SQL of the last run instead,
+as `dbt-visit-run' does."
   (interactive "P")
-  (if (and (dbt-mode-server-p) (not run))
-      (dbt-lsp-compile-file)
-    (let* ((root (dbt-mode--root))
-           (resource (or (dbt-mode-current-resource) (user-error "No model here")))
-           ;; dbt writes the SQL of a file under the directory of its
-           ;; package, at its path from the root of the project.
-           (file (expand-file-name
-                  (file-relative-name (plist-get resource :file) root)
-                  (expand-file-name (concat (if run "run/" "compiled/") (plist-get resource :package))
-                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
-           ;; dbt 2 writes that of a snapshot in a directory of that path,
-           ;; named after the snapshot.
-           (file (if (file-directory-p file)
-                     (expand-file-name (concat (plist-get resource :name) ".sql") file)
-                   file)))
-      (unless (file-regular-p file)
-        (user-error (if run "Not run yet: run dbt run or dbt build" "Not compiled yet: run dbt compile, or start dbt lsp")))
-      (with-current-buffer (find-file-noselect file)
-        (read-only-mode 1)
-        (pop-to-buffer (current-buffer))))))
+  (cond (run (dbt-visit-run))
+        ((dbt-mode-server-p) (dbt-lsp-compile-file))
+        (t (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "compiled")
+                                                        (user-error "Not compiled yet: run dbt compile, or start dbt lsp")))
+             (read-only-mode 1)
+             (pop-to-buffer (current-buffer))))))
 
 (defun dbt-preview (&optional start end cte)
   "Show the rows of the current model, of the SQL from START to END, or a CTE's.
@@ -714,7 +729,7 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
     ["Tests of this model" dbt-visit-tests]
-    ["SQL of the last run" (dbt-visit-compiled t)]
+    ["SQL of the last run" dbt-visit-run]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     "---"

@@ -76,7 +76,7 @@ need a dbt account: without one, the server says nothing about columns.
 | Key           | Command                | What it does                                                     |
 |---------------|------------------------|------------------------------------------------------------------|
 | `C-c C-d`     | `dbt-dispatch`         | Run a dbt command, by default on the current model               |
-| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model; with `C-u`, the SQL of the last run |
+| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model; with `C-u`, the SQL of the last run (`dbt-visit-run`) |
 | `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
