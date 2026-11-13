@@ -388,16 +388,25 @@ edited."
               (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))
                         (list dbt-project-file "pyvenv.cfg" "conda-meta")))))))
 
+(defvar-local dbt-project--manifest-time nil
+  "The modification time of the manifest whose text this buffer holds.")
+
 (defun dbt-project-manifest-node (file id)
   "Return the node ID of the manifest FILE, as a hash table, or nil.
 Nil when FILE cannot be read or holds no such node.  Only the node is
 parsed, as a manifest grows to tens of MB: its id is the key of an
 object in \"nodes\" or \"sources\" only, as elsewhere, such as in
-\"child_map\", its value is an array.  The manifest is dbt's, read as it
-is."
-  (with-temp-buffer
-    (and (ignore-errors (insert-file-contents file) t)
-         (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+\"child_map\", its value is an array.  The text of FILE is kept, and
+read again once its modification time changes, as the mode line of each
+model asks.  The manifest is dbt's, read as it is."
+  (with-current-buffer (get-buffer-create (concat " *dbt manifest: " (expand-file-name file) "*"))
+    (let ((time (file-attribute-modification-time (file-attributes file))))
+      (unless (equal time dbt-project--manifest-time)
+        (erase-buffer)
+        (ignore-errors (insert-file-contents file))
+        (setq dbt-project--manifest-time time)))
+    (goto-char (point-min))
+    (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
          (progn (backward-char)
                 (ignore-errors (json-parse-buffer :null-object nil))))))
 

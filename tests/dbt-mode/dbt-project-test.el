@@ -482,5 +482,18 @@ as long, not sixty-four."
           '(400 3200))))
     (should (< (nth 1 seconds) (+ 0.1 (* 16 (nth 0 seconds)))))))
 
+(ert-deftest dbt-project-reads-the-manifest-again-once-it-changes ()
+  "A node of the manifest is read from its text as it is since dbt last wrote it."
+  (dbt-test-with-project root
+    (let ((manifest (expand-file-name "target/manifest.json" root)))
+      (make-directory (file-name-directory manifest))
+      (write-region "{\"nodes\": {\"model.shop.orders\": {\"n\": 1}}}" nil manifest)
+      (should (equal (gethash "n" (dbt-project-manifest-node manifest "model.shop.orders")) 1))
+      (write-region "{\"nodes\": {\"model.shop.orders\": {\"n\": 2}}}" nil manifest)
+      (set-file-times manifest (time-add (current-time) 10))
+      (should (equal (gethash "n" (dbt-project-manifest-node manifest "model.shop.orders")) 2))
+      (delete-file manifest)
+      (should-not (dbt-project-manifest-node manifest "model.shop.orders")))))
+
 (provide 'dbt-project-test)
 ;;; dbt-project-test.el ends here
