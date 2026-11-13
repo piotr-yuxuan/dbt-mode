@@ -426,6 +426,19 @@ The new name is then taken, before any buffer is saved."
     (should-error (dbt-lsp-rename-model "stg_clients") :type 'user-error)
     (should (equal buffer-file-name (expand-file-name "models/marts/orders.sql" root)))))
 
+(ert-deftest dbt-lsp-rename-model-leaves-a-version-alone ()
+  "A version of a model is not renamed: the server would edit nothing."
+  (dbt-lsp-test-with-server root nil
+    (dolist (file '("dim_v1" "dim_v2"))
+      (write-region "select 1" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
+    (write-region "models:\n  - name: dim\n    versions:\n      - v: 1\n      - v: 2\n" nil
+                  (expand-file-name "models/marts/_dim.yml" root))
+    (dbt-project-forget root)
+    (with-current-buffer (dbt-test-visit root "models/marts/dim_v2.sql")
+      (dbt-lsp)
+      (should-error (dbt-lsp-rename-model "dim_clients") :type 'user-error)
+      (should (file-exists-p (expand-file-name "models/marts/dim_v2.sql" root))))))
+
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
   "Formatting saves the buffer, then applies the edits of the server."
   (dbt-lsp-test-with-server root

@@ -322,20 +322,24 @@ lsp-mode asks the server what renaming the file changes, and the server
 edits each `ref' and YAML entry that names the model; the edited buffers
 are left unsaved.  Renaming the file otherwise, such as in Dired, does
 the same.  The current buffer is saved first.  NAME must not be that of
-another model, seed or snapshot of the package."
+another model, seed or snapshot of the package; a version of a model is
+not renamed, as the server would edit nothing."
   (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
   (unless (dbt-lsp-workspace)
     (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
+         (entity (dbt-project-file-entity root buffer-file-name))
          (new (expand-file-name (concat name "." (file-name-extension buffer-file-name))
                                 (file-name-directory buffer-file-name))))
+    (when (plist-get entity :version)
+      (user-error "This file is version %s of %s, which dbt lsp does not rename"
+                  (plist-get entity :version) (plist-get entity :name)))
     (when (file-exists-p new)
       (user-error "%s exists already" new))
     ;; The server would make each ref of the model one of that resource.
-    (when (dbt-project-entities root '(model seed snapshot) name
-                                (plist-get (dbt-project-file-entity root buffer-file-name) :package))
+    (when (dbt-project-entities root '(model seed snapshot) name (plist-get entity :package))
       (user-error "A model, seed or snapshot named %s exists already" name))
     (save-buffer)
     (rename-visited-file new)
