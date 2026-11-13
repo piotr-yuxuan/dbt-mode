@@ -477,6 +477,10 @@ that other functions, such as those of a language server, still run."
 
 ;;;; Commands
 
+(defun dbt-mode-server-p ()
+  "Return non-nil when dbt lsp serves the current buffer."
+  (and (featurep 'dbt-lsp) (dbt-lsp-workspace)))
+
 (defun dbt-mode--root ()
   "Return the root of the current project, or signal a `user-error'."
   (or (dbt-project-root) (user-error "Not in a dbt project: no dbt_project.yml above")))
@@ -527,7 +531,7 @@ or not a language server runs."
 With dbt lsp, the server compiles it, unsaved changes included.
 Otherwise, show what the last `dbt compile' or `dbt run' wrote."
   (interactive)
-  (if (and (featurep 'dbt-lsp) (dbt-lsp-workspace))
+  (if (dbt-mode-server-p)
       (dbt-lsp-compile-file)
     (let* ((root (dbt-mode--root))
            (resource (or (dbt-mode-current-resource) (user-error "No model here")))
@@ -553,7 +557,7 @@ show' runs it, on the Jinja of the CTE."
                      ((use-region-p) (list (region-beginning) (region-end)))))
   (let ((query (cond (cte (dbt-mode-cte-query))
                      (start (cons "query" (buffer-substring-no-properties start end))))))
-    (cond ((not (and (featurep 'dbt-lsp) (dbt-lsp-workspace)))
+    (cond ((not (dbt-mode-server-p))
            (require 'dbt-cli)
            (dbt-cli-show (cdr query)
                          (unless query (plist-get (or (dbt-mode-current-resource) (user-error "No model here"))
@@ -567,7 +571,7 @@ With dbt lsp, the server gives the lineage; otherwise the `ref' and
 `source' calls of the project's files give it."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
-  (if (and (featurep 'dbt-lsp) (dbt-lsp-workspace))
+  (if (dbt-mode-server-p)
       (dbt-lsp-lineage name)
     (let ((root (dbt-mode--root)))
       (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls"))))
@@ -613,8 +617,8 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
     "---"
-    ["Rename model..." dbt-lsp-rename-model :active (and (featurep 'dbt-lsp) (dbt-lsp-workspace))]
-    ["Format buffer" dbt-lsp-format-buffer :active (and (featurep 'dbt-lsp) (dbt-lsp-workspace))]
+    ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
+    ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression

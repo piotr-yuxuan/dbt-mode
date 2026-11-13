@@ -422,6 +422,14 @@
     (goto-char (point-min))
     (should-error (dbt-mode-cte-query) :type 'user-error)))
 
+(ert-deftest dbt-mode-knows-when-no-server-runs ()
+  "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-not (dbt-mode-server-p))
+    (require 'dbt-lsp)
+    (should-not (dbt-mode-server-p))))
+
 (ert-deftest dbt-mode-visits-the-compiled-sql ()
   "C-c C-v without a server shows what dbt compile wrote, read-only."
   (dbt-test-with-project root
