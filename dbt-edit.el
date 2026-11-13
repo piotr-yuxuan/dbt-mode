@@ -1,0 +1,157 @@
+;;; dbt-edit.el --- Type and move through Jinja and CTEs  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 piotr-yuxuan
+;; SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+
+;; This file is not part of GNU Emacs.
+
+;;; Commentary:
+
+;; The editing commands of dbt-mode:
+;;
+;; - typing `{' then `{', `%' or `#' gives `{{ | }}', `{% | %}' or
+;;   `{# | #}', point in the middle (`dbt-edit-pair-jinja', on
+;;   `post-self-insert-hook');
+;; - `dbt-close-block' inserts the closing tag of the innermost Jinja block
+;;   open at point, such as `{% endif %}';
+;; - `dbt-jump-to-matching-tag' moves between the opening and the closing
+;;   tags of a block;
+;; - CTEs are the defuns of a model: C-M-a, C-M-e, C-M-h and C-x n d
+;;   (`narrow-to-defun') work on them;
+;; - `dbt-edit-expreg-regions' gives expreg the Jinja tag around point and
+;;   its contents, the blocks and their contents, and the CTE and its body.
+
+;;; Code:
+
+(require 'seq)
+
+(declare-function dbt-mode-jinja-bounds "dbt-mode")
+(declare-function dbt-mode-cte-regexp "dbt-mode")
+
+(defcustom dbt-edit-pair-jinja t
+  "Whether typing the second character of a Jinja opener inserts its closer."
+  :type 'boolean
+  :group 'dbt)
+
+(defconst dbt-edit-closers '((?{ . "}}") (?% . "%}") (?# . "#}"))
+  "Alist from the second character of a Jinja opener to its closer.")
+
+(defun dbt-edit-pair-jinja ()
+  "Close the Jinja opener that the character just typed completes.
+For `post-self-insert-hook': typing `{', `%' or `#' after `{' leaves
+point in `{{ | }}', `{% | %}' or `{# | #}'.  A `}' or `}}' right after
+point, as `electric-pair-mode' inserts, makes way for the closer; a
+closer after a space is that of a tag being edited, and stays alone."
+  (when-let* ((dbt-edit-pair-jinja)
+              (closer (alist-get last-command-event dbt-edit-closers))
+              ((eq (char-before (1- (point))) ?{))
+              ((not (looking-at-p (concat "[ \t]+" (regexp-quote closer))))))
+    (when (looking-at "}}?")
+      (delete-region (match-beginning 0) (match-end 0)))
+    (insert " ")
+    (save-excursion (insert " " closer))))
+
+(defconst dbt-edit-block-keywords
+  '("if" "for" "macro" "call" "filter" "set" "raw" "docs" "snapshot" "test"
+    "materialization" "block" "with")
+  "The Jinja statements that open a block, which `end' and their name close.")
+
+(defun dbt-edit-blocks (&optional limit)
+  "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
+LIMIT defaults to the end of the buffer.  CLOSED lists the closed
+blocks, OPEN those still open at LIMIT, innermost first.  A block is
+\(KEYWORD OPEN-START OPEN-END CLOSE-START CLOSE-END), the last two only
+when it is closed.  A `set' opens a block only without `=', and a tag
+in a `{# #}' comment or not closed yet counts for nothing."
+  (save-excursion
+    (goto-char (point-min))
+    (let (closed open)
+      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" limit t)
+        ;; dbt-mode-jinja-bounds searches: read the match before it.
+        (let* ((start (match-beginning 0))
+               (closing (match-beginning 1))
+               (keyword (match-string-no-properties 2))
+               (end (and (not (nth 4 (syntax-ppss start))) (cdr (dbt-mode-jinja-bounds (match-end 0)))))
+               (text (and end (buffer-substring-no-properties start end))))
+          (cond ((null end))
+                (closing
+                 (when-let* ((block (assoc keyword open)))
+                   (setq open (delq block open))
+                   (push (append block (list start end)) closed)))
+                ;; A `set' with `=' assigns a value, and opens no block.
+                ((member keyword (if (string-search "=" text) (remove "set" dbt-edit-block-keywords)
+                                   dbt-edit-block-keywords))
+                 (push (list keyword start end) open)))
+          (goto-char (or end (match-end 0)))))
+      (cons closed open))))
+
+(defun dbt-close-block ()
+  "Insert the closing tag of the innermost Jinja block open at point.
+On a blank line, the tag is indented as its opening tag."
+  (interactive)
+  (let ((block (or (car (cdr (dbt-edit-blocks (point)))) (user-error "No Jinja block is open here"))))
+    (when (looking-back "^[ \t]*" (line-beginning-position))
+      (indent-line-to (save-excursion (goto-char (nth 1 block)) (current-column))))
+    (insert (format "{%% end%s %%}" (car block)))))
+
+(defun dbt-jump-to-matching-tag ()
+  "Move between the opening and the closing tags of the Jinja block at point."
+  (interactive)
+  (let* ((position (point))
+         ;; A tag holds point from its `{' up to its end, which is after it.
+         (opening (lambda (block) (and (<= (nth 1 block) position) (< position (nth 2 block)))))
+         (block (or (seq-find (lambda (block) (or (funcall opening block)
+                                                  (and (<= (nth 3 block) position) (< position (nth 4 block)))))
+                              (car (dbt-edit-blocks)))
+                    (user-error "Not on a tag of a closed Jinja block"))))
+    (goto-char (if (funcall opening block) (nth 3 block) (nth 1 block)))))
+
+(defun dbt-edit-beginning-of-cte (&optional arg)
+  "Move to the start of the ARGth CTE before point; forward if ARG is negative.
+For `beginning-of-defun-function': return non-nil when there is one,
+and leave point at the start of its line."
+  (let ((case-fold-search t)
+        (arg (or arg 1)))
+    (if (> arg 0)
+        (re-search-backward (dbt-mode-cte-regexp) nil 'move arg)
+      (end-of-line)
+      (prog1 (re-search-forward (dbt-mode-cte-regexp) nil 'move (- arg))
+        (beginning-of-line)))))
+
+(defun dbt-edit-end-of-cte ()
+  "Move after the parenthesis that closes the CTE starting at point.
+For `end-of-defun-function'.  Outside a CTE, move to the end of the
+buffer, as the final select runs to it."
+  (let ((case-fold-search t))
+    (if (looking-at (dbt-mode-cte-regexp))
+        (progn (goto-char (1- (match-end 0)))
+               (forward-sexp))
+      (goto-char (point-max)))))
+
+(defun dbt-edit-expreg-regions ()
+  "Return the regions around point that expreg can select, in `dbt-mode'.
+They are the Jinja tag and its contents, each Jinja block and its
+contents, and the CTE and its body.  For `expreg-functions'; nil in any
+other mode."
+  (when (derived-mode-p 'dbt-mode)
+    (let* ((position (point))
+           (tag (dbt-mode-jinja-bounds))
+           (cte (save-excursion
+                  (end-of-line)
+                  (and (dbt-edit-beginning-of-cte 1)
+                       (let ((start (point)))
+                         (dbt-edit-end-of-cte)
+                         (and (<= start position (point)) (list start (point))))))))
+      (append (and (cdr tag) (list tag (cons (+ (car tag) 2) (- (cdr tag) 2))))
+              (and cte (list (cons (nth 0 cte) (nth 1 cte)) (cons (save-excursion
+                                                                     (goto-char (nth 0 cte))
+                                                                     (search-forward "(")
+                                                                     (point))
+                                                                   (1- (nth 1 cte)))))
+              (mapcan (lambda (block)
+                        (and (<= (nth 1 block) position (nth 4 block))
+                             (list (cons (nth 1 block) (nth 4 block)) (cons (nth 2 block) (nth 3 block)))))
+                      (car (dbt-edit-blocks)))))))
+
+(provide 'dbt-edit)
+;;; dbt-edit.el ends here

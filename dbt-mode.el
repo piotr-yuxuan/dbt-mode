@@ -52,6 +52,7 @@
 
 ;;; Code:
 
+(require 'dbt-edit)
 (require 'dbt-project)
 (require 'sql)
 (require 'xref)
@@ -63,6 +64,7 @@
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
+(defvar expreg-functions)
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
@@ -619,7 +621,9 @@ For `after-save-hook', so that the index sees what was just saved."
   "C-c C-g" #'dbt-lineage
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
-  "C-c C-e" #'dbt-insert-ref)
+  "C-c C-e" #'dbt-insert-ref
+  "C-c /" #'dbt-close-block
+  "C-c %" #'dbt-jump-to-matching-tag)
 
 (easy-menu-define dbt-mode-menu dbt-mode-map
   "Menu of `dbt-mode'."
@@ -631,6 +635,9 @@ For `after-save-hook', so that the index sees what was just saved."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    "---"
+    ["Close the Jinja block" dbt-close-block]
+    ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
     ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
@@ -667,7 +674,12 @@ commentary of dbt-mode.el for the rest.
               imenu-case-fold-search t)
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend nil 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
-  (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local))
+  (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
+  (add-hook 'post-self-insert-hook #'dbt-edit-pair-jinja nil 'local)
+  (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte
+              end-of-defun-function #'dbt-edit-end-of-cte)
+  (when (boundp 'expreg-functions)
+    (setq-local expreg-functions (cons #'dbt-edit-expreg-regions expreg-functions))))
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 
