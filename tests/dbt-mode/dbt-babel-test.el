@@ -104,10 +104,20 @@ leaves no file behind."
                      '(("a\\vert{}b" "nl") hline ("x\\vert{}y" "one\\ntwo")))))))
 
 (ert-deftest dbt-babel-refuses-parameters-that-dbt-cannot-take ()
-  "A :var that is a table or a list, and a :compile other than yes or no, are refused.
-A :target that Org reads as a number reaches dbt as its text."
+  "A :var that is a table or a list, and a :compile other than yes or no, are refused, before any question.
+A :target that Org reads as a number reaches dbt as its text.  Without
+dbt, a block says so."
   (dbt-test-with-project root
-    (should-error (dbt-test-babel root ":var t='((1 2) (3 4))" "select 1") :type 'user-error)
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_prompt) (error "Asked"))))
+      (should-error (dbt-test-babel root ":target prod :var t='((1 2) (3 4))" "select 1") :type 'user-error))
+    (let ((dbt-executable (expand-file-name "no-dbt-here" root))
+          (org-confirm-babel-evaluate nil))
+      (with-temp-buffer
+        (setq default-directory root)
+        (org-mode)
+        (insert "#+begin_src dbt\nselect 1\n#+end_src\n")
+        (goto-char (point-min))
+        (should-error (org-babel-execute-src-block nil nil '((:results . "value"))) :type 'user-error)))
     (should-error (dbt-test-babel root ":compile maybe" "select 1") :type 'user-error)
     (should (string-match-p "--target 42\\'" (car (nth 2 (dbt-test-babel root ":target 42" "select 1")))))))
 

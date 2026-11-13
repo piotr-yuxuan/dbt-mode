@@ -33,10 +33,11 @@ Babel's error buffer."
          (named (cdr (assq :target params)))
          (target (and named (format "%s" named)))
          (vars (org-babel--get-vars params))
-         (executable (dbt-project-executable))
+         ;; What the block gets wrong goes before the question.
+         (executable (if (seq-some (lambda (var) (consp (cdr var))) vars)
+                         (user-error "A :var of a dbt block is a string or a number, which dbt's --vars takes")
+                       (dbt-project-executable)))
          (label (dbt-project-confirm-target root target)))
-    (when (seq-some (lambda (var) (consp (cdr var))) vars)
-      (user-error "A :var of a dbt block is a string or a number, which dbt's --vars takes"))
     (let ((errors (make-temp-file "dbt-babel")))
       (unwind-protect
           (with-temp-buffer
