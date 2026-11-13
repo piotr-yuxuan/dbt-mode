@@ -198,9 +198,9 @@ them."
   (let ((leads (concat "\\(?:,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp "\\)")))
     (concat "\\(?:" leads
             ;; A tag, of one line or more, past tags, comments and blank
-            ;; lines, before one, a closer or the end: {% if
+            ;; lines, 50 at most, before one, a closer or the end: {% if
             ;; is_incremental() %} then where.
-            "\\|\\(?:{%\\(?:[^%]\\|%+[^%}]\\)*%+}\\|{%\\).*\\(?:\n[ \t]*\\(?:\\(?:{[%#]\\|--\\).*\\)?\\)*"
+            "\\|\\(?:{%\\(?:[^%]\\|%+[^%}]\\)*%+}\\|{%\\).*\\(?:\n[ \t]*\\(?:\\(?:{[%#]\\|--\\).*\\)?\\)\\{0,50\\}"
             "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
   "What a line starts with when it stays at the base of its construct.
 A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
