@@ -162,6 +162,9 @@ whoever read the JSON."
                  '(("a") ("1"))))
   (should (equal (dbt-rows-read-json "[{\"id\":3,\"id\":1,\"name\":\"Ada\"},{\"id\":4,\"id\":2,\"name\":\"Alan\"}]")
                  '(("id" "id_1" "name") ("3" "1" "Ada") ("4" "2" "Alan"))))
+  ;; As dbt lsp 2.0.9 names select 1 as id, 2 as id, 3 as id_1, 4 as id.
+  (should (equal (car (dbt-rows-read-json "[{\"id\":1,\"id\":2,\"id_1\":3,\"id\":4}]"))
+                 '("id" "id_1" "id_1_1" "id_2")))
   (should (equal (dbt-rows-read-json "[{\"o\":{\"name\":\"Zoë\",\"n\":null}}]")
                  '(("o") ("{\"name\":\"Zoë\",\"n\":null}"))))
   (let ((value (make-hash-table :test #'equal)))

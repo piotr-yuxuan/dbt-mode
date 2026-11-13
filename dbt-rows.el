@@ -91,31 +91,36 @@ lsp-mode."
 
 (defun dbt-rows-read-json (json)
   "Return the rows of JSON, as `dbt show --output json' prints them.
-JSON is an array of objects, one per row, whose keys are the columns,
-in order; the lines before it, such as dbt's \"Waiting for lease\", are
-skipped.  The rows are (COLUMNS . ROWS), as `dbt-rows-show' takes them,
-each cell as `dbt-rows-cell' reads it.  A key that repeats, as the
-columns of a join may, is a column of its own, renamed as dbt lsp
-renames it: the second id is id_1.  An array of no row has no columns
-either: (nil).  Return nil when JSON is not such an array."
+JSON is an array of objects, one per row, whose keys are the columns, in
+the same order in every row, as dbt prints them; a row's missing last
+keys are NULL.  The lines before the array, such as dbt's \"Waiting for
+lease\", are skipped.  The rows are (COLUMNS . ROWS), as `dbt-rows-show'
+takes them, each cell as `dbt-rows-cell' reads it.  A name that repeats,
+as the columns of a join may, is renamed as dbt lsp renames it, until no
+other column has it: id, id, id_1 and id are id, id_1, id_1_1 and id_2.
+An array of no row has no columns either: (nil).  Return nil when JSON
+is not such an array."
   ;; json.el, which lsp-mode loads, redefines some errors of
   ;; `json-parse-string' as errors of json-error only.
   (let ((rows (ignore-error json-error
                 (json-parse-string (substring json (or (string-match "^\\[" json) 0)) :object-type 'alist))))
     (when (and (vectorp rows) (seq-every-p #'listp rows))
-      (let ((columns (and (not (seq-empty-p rows)) (mapcar #'car (aref rows 0)))))
-        (cons (seq-map-indexed (lambda (column index)
-                                 (let ((before (seq-count (lambda (other) (eq other column)) (seq-take columns index))))
-                                   (if (zerop before) (symbol-name column) (format "%s_%d" column before))))
-                               columns)
+      (let ((columns (and (not (seq-empty-p rows)) (mapcar #'car (aref rows 0))))
+            (taken (make-hash-table :test #'equal)))
+        (cons (mapcar (lambda (column)
+                        (let* ((name (symbol-name column))
+                               (renamed name)
+                               (count 0))
+                          (while (gethash renamed taken)
+                            (setq count (1+ count)
+                                  renamed (format "%s_%d" name count)))
+                          (puthash renamed t taken)
+                          renamed))
+                      columns)
               (mapcar (lambda (row)
-                        ;; Each pair is read once, in order: the next is
-                        ;; first, unless a row has its keys in another order.
-                        (mapcar (lambda (column)
-                                  (let ((pair (assq column row)))
-                                    (setq row (if (eq pair (car row)) (cdr row) (delq pair row)))
-                                    (dbt-rows-cell (if pair (cdr pair) :null) :null)))
-                                columns))
+                        (mapcar (lambda (value) (dbt-rows-cell value :null))
+                                (seq-take (append (mapcar #'cdr row) (make-list (length columns) :null))
+                                          (length columns))))
                       rows))))))
 
 (defun dbt-rows-show (title columns rows limit rerun)
