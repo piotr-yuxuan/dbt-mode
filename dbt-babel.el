@@ -82,7 +82,7 @@ table is on one line, as `dbt-rows-org-text' writes it.  For
               ((null (car rows)) "No rows")
               (t (cons (mapcar #'dbt-rows-org-text (car rows))
                        (cons 'hline (mapcar (lambda (row)
-                                              (mapcar (lambda (cell) (if cell (dbt-rows-org-text cell) "NULL")) row))
+                                              (mapcar #'dbt-rows-org-text row))
                                             (cdr rows))))))))))
 
 (provide 'dbt-babel)

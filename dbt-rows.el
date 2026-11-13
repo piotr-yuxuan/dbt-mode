@@ -194,8 +194,11 @@ in `occur', an upper-case letter in REGEXP makes the case matter."
   (dbt-rows--print))
 
 (defun dbt-rows-org-text (text)
-  "Return TEXT on one line of an Org table: a newline as \\n, | as \\vert{}."
-  (string-replace "|" "\\vert{}" (string-replace "\n" "\\n" text)))
+  "Return TEXT on one line of an Org table: a newline as \\n, | as \\vert{}.
+TEXT nil, a NULL cell, is NULL."
+  (if text
+      (string-replace "|" "\\vert{}" (string-replace "\n" "\\n" text))
+    "NULL"))
 
 (defun dbt-rows-copy (format)
   "Copy the rows shown, in their order, as FORMAT, with their header.
