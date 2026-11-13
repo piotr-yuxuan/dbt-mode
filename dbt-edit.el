@@ -291,6 +291,18 @@ For `indent-region-function'."
           (mapc (lambda (marker) (set-marker marker nil)) (cdr block)))
         (set-marker end nil)))))
 
+(defun dbt-edit-electric-indent-p (char)
+  "Return non-nil when CHAR, just typed, decides the indentation of its line.
+For `electric-indent-functions': a `)', `]' or `}' that starts the
+line's text, and each letter of the first word of a `{%' tag that
+starts it, as `end...', `else' and `elif' move it."
+  (let ((end (point)))
+    (save-excursion
+      (back-to-indentation)
+      (cond ((memq char '(?\) ?\] ?\})) (= (1+ (point)) end))
+            ((or (eq char ?_) (<= ?a char ?z))
+             (and (looking-at "{%-?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
+
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.
 On a blank line, the tag is indented as its opening tag."

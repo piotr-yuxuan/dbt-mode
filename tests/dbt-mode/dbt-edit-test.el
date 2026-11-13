@@ -380,6 +380,17 @@ Its text is left as it is."
                       "from a\nleft outer join b on a.id = b.id\nnatural left join c\n")))
     (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
 
+(ert-deftest dbt-edit-reindents-a-closer-as-it-is-typed ()
+  "Typing `{% endif' or `)' at the start of a line moves it to its opener's column at once."
+  (dbt-test-with-window "select\n    id,\n{% if x %}\n    name,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% endif")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{% if x %}\n    name,\n{% endif-!- %}")))
+  (dbt-test-with-window "with a as (\n    select 1\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "),")
+    (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-"))))
+
 (ert-deftest dbt-edit-indents-the-buffer-as-it-is-now ()
   "TAB reads the Jinja blocks of the text as it is after an edit above it; in a narrowing, the blocks are its own.
 TAB indents in the whole buffer, as Emacs widens it; C-c / reads the
