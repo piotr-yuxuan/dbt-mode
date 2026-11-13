@@ -127,5 +127,28 @@ buffer, and the error must still link to its file."
         (should-not (string-search "\e" (buffer-string)))
         (should (member '("models/marts/customers.sql" 4 6 2) (dbt-test-compilation-messages)))))))
 
+(ert-deftest dbt-cli-saves-the-project-before-running-dbt ()
+  "dbt reads files, so the project's modified buffers are saved first.
+A buffer outside the project is left alone."
+  (dbt-test-with-project root
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (compilation-ask-about-save nil)
+          (outside (make-temp-file "outside" nil ".sql" "select 1")))
+      (unwind-protect
+          (let ((other (find-file-noselect outside)))
+            (with-current-buffer other (insert "-- unsaved\n"))
+            (dbt-test-visit root "models/staging/stg_customers.sql")
+            (goto-char (point-max))
+            (insert "-- unsaved\n")
+            (with-current-buffer (dbt-cli-run "build")
+              (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer))))))
+            (should-not (buffer-modified-p (get-file-buffer (expand-file-name "models/staging/stg_customers.sql" root))))
+            (with-temp-buffer
+              (insert-file-contents (expand-file-name "models/staging/stg_customers.sql" root))
+              (should (string-suffix-p "-- unsaved\n" (buffer-string))))
+            (should (buffer-modified-p other))
+            (with-current-buffer other (set-buffer-modified-p nil) (kill-buffer)))
+        (delete-file outside)))))
+
 (provide 'dbt-cli-test)
 ;;; dbt-cli-test.el ends here
