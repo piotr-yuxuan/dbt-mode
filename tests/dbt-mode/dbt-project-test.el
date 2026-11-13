@@ -318,6 +318,18 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
     (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
 
+(ert-deftest dbt-project-file-entity-takes-the-nearest-package ()
+  "In integration_tests that installs its parent with local: ../, a new model is its own."
+  (dbt-test-with-project outer
+    (let ((root (expand-file-name "integration_tests/" outer)))
+      (make-directory (expand-file-name "models" root) t)
+      (write-region "name: 'shop_tests'\nconfig-version: 2\n" nil (expand-file-name "dbt_project.yml" root))
+      (write-region "packages:\n  - local: ../\n" nil (expand-file-name "packages.yml" root))
+      (should (equal (dbt-project-root (expand-file-name "models/new.sql" root)) root))
+      (let ((entity (dbt-project-file-entity root (expand-file-name "models/new.sql" root))))
+        (should (equal (plist-get entity :kind) 'model))
+        (should (equal (plist-get entity :package) "shop_tests"))))))
+
 (ert-deftest dbt-project-index-names-versioned-models-after-the-model ()
   "A version's file is the model with that version; a ref without one means the latest."
   (dbt-test-with-project root
