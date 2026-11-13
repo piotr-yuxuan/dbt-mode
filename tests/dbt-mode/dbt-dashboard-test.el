@@ -34,7 +34,7 @@ freshness capitalised, a freshness that failed."
                     ((status . "fail") (unique_id . "test.shop.assert_positive_amount") (execution_time . 0.5)
                      (message . "Error") (failures . 1))
                     ((status . "skipped") (unique_id . "model.shop.customers") (execution_time . 0)
-                     (message . "Skipped"))
+                     (message . "Skipped due to upstream failure"))
                     ((status . "skipped") (unique_id . "test.shop.not_null_customers_customer_id.5c9bf9911d")
                      (execution_time . 0) (message))
                     ((status . "error") (unique_id . "model.shop_utils.util") (execution_time . 0.75)
@@ -93,7 +93,7 @@ error; a missing file says so."
                          "  error   util  Compilation Error"
                          "  fail    assert_positive_amount  Error, 1 failing rows"
                          "  warn    not_null_stg_orders_order_id.81cfe2fe64  Warn, 2 failing rows"
-                         "  skipped customers  Skipped"
+                         "  skipped customers  Skipped due to upstream failure"
                          "  skipped not_null_customers_customer_id.5c9bf9911d  "
                          "")))
         (should (equal (seq-take (nthcdr 9 lines) 3)
