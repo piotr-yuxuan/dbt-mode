@@ -317,7 +317,7 @@ tags are code, in SQL strings or in comments."
                     (:kind macro :qualifier nil :name "m" :version nil)
                     (:kind analysis :qualifier nil :name "counts" :version nil)))
     (should (equal (dbt-mode-parse-identifier (dbt-mode-identifier target)) target)))
-  (should-not (dbt-mode-parse-identifier "model:orders")))
+  (should-error (dbt-mode-parse-identifier "model:orders") :type 'user-error))
 
 (defun dbt-test-xref-files (items root)
   "Return the files of the xref ITEMS, relative to ROOT, with their lines."
@@ -371,6 +371,8 @@ A dangling link among the project's files holds none and stops nothing."
                    '(("models/staging/stg_orders.sql" . 13))))
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt "doc:order_status") root)
                    '(("models/staging/_staging.yml" . 5))))
+    ;; A name typed at the prompt, which is no KIND:NAME, is refused.
+    (should-error (xref-backend-references 'dbt "orders") :type 'user-error)
     (write-region "select * from {{ source('raw', 'raw_orders') }}" nil
                   (expand-file-name "models/staging/from_raw.sql" root))
     (dolist (case '(("source:raw" ("models/staging/from_raw.sql" . 1))

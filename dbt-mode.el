@@ -365,13 +365,15 @@ names a version of a model."
 
 (defun dbt-mode-parse-identifier (identifier)
   "Return the target plist of IDENTIFIER, as `dbt-mode-identifier' writes it.
-Return nil when IDENTIFIER is not one."
-  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\([^@]+\\)\\(?:@\\(.+\\)\\)?\\'"
-                      identifier)
-    (list :kind (intern (match-string 1 identifier))
-          :qualifier (match-string 2 identifier)
-          :name (match-string 3 identifier)
-          :version (match-string 4 identifier))))
+IDENTIFIER may be typed at the prompt of xref: refuse one that is not
+KIND:NAME."
+  (if (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\([^@]+\\)\\(?:@\\(.+\\)\\)?\\'"
+                    identifier)
+      (list :kind (intern (match-string 1 identifier))
+            :qualifier (match-string 2 identifier)
+            :name (match-string 3 identifier)
+            :version (match-string 4 identifier))
+    (user-error "Not a dbt identifier: %s; complete one, such as ref:NAME" identifier)))
 
 (defun dbt-mode-entity-target (entity project)
   "Return the target that names ENTITY, an entity of the PROJECT's index.
