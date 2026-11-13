@@ -434,12 +434,14 @@ TARGET is the one given to dbt, or nil for dbt's default, which
 `dbt-project-default-target' reads.  The question comes on a target of
 `dbt-protected-targets', or on a default target that dbt-mode cannot
 read while a target is protected; a no is a `user-error'.  The label
-names the target for messages, as \"target dev\"."
+names the target for messages, as \"target dev\", or \"dbt's default
+target\" when dbt-mode cannot read it."
   (let* ((target (or target (dbt-project-default-target root)))
-         (label (if target (concat "target " target) "dbt's default target, which dbt-mode cannot read")))
+         (label (if target (concat "target " target) "dbt's default target")))
     (when (and (if target (member target dbt-protected-targets) dbt-protected-targets)
-               (not (yes-or-no-p (format "Protected: %s.  Run on %s? "
-                                         (string-join dbt-protected-targets ", ") label))))
+               (not (yes-or-no-p (format "Protected: %s.  Run on %s%s? "
+                                         (string-join dbt-protected-targets ", ") label
+                                         (if target "" ", which dbt-mode cannot read")))))
       (user-error "Not run on %s" label))
     label))
 
