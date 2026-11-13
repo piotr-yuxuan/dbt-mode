@@ -281,10 +281,10 @@ call gives one.")
   "Return what point is on, as a target plist, or nil.
 The plist is (:kind KIND :qualifier QUALIFIER :name NAME :version
 VERSION), as `dbt-project-resolve' reads it: a call of `ref', `source'
-or `doc', or,
-within a Jinja tag, of a macro.  In a YAML file, the `name' of an entry
-stands for what it describes, as `dbt-mode-entity-target' tells: the
-index of the project gives the entry of the line, as last saved."
+or `doc', or, within a Jinja tag, of a macro.  In a YAML file, the
+`name' of an entry stands for what it describes, as
+`dbt-mode-entity-target' tells: the index of the project gives the entry
+of the line, as last saved."
   (let ((position (point))
         (line (line-number-at-pos))
         (limit dbt-mode-jinja-max-tag-length))
