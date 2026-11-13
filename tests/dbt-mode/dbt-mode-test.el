@@ -626,6 +626,11 @@ A name alone is the latest version, as for `ref'."
       (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
                       (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
       (kill-buffer))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer "*dbt lineage: stg_orders*"
+      (should (member "dim.v1" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (should (member "dim.v2" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (kill-buffer))
     (dbt-lineage "dim")
     (with-current-buffer "*dbt lineage: dim.v2*"
       (should-not (assoc "downstream" (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
