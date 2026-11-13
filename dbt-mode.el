@@ -79,6 +79,7 @@
 (autoload 'dbt-edit-skip-jinja-closer "dbt-edit")
 (autoload 'dbt-edit-beginning-of-cte "dbt-edit")
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
+(autoload 'dbt-edit-blocks "dbt-edit")
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
@@ -282,11 +283,10 @@ multiline construct, read again whole after a change within it.")
 (defun dbt-mode-cte-query (&optional name)
   "Return the name of a CTE and a query of its rows, as a pair.
 The CTE is that named NAME, or else the last that starts before the end
-of the line of point.  The query is the WITH of the buffer up to the end
-of that CTE, then a select from it; Jinja stays as it is.  The tags
-before the WITH that define a name for the CTE, a `set' with `=', an
-`import' or a `from', come first; a block `set' or a macro there does
-not."
+of the line of point.  The query is the buffer up to the end of that
+CTE, then a select from it; Jinja stays as it is.  The query starts at
+the WITH of the CTE's chain when a Jinja block is open there, as that of
+a snapshot."
   (let ((case-fold-search t))
     (save-excursion
       (unless (if name
@@ -301,18 +301,12 @@ not."
         (while (and (re-search-backward "\\_<with\\_>" nil 'move)
                     (let ((state (syntax-ppss)))
                       (or (> (car state) 0) (nth 8 state)))))
-        (cons name (format "%s%s\nselect * from %s"
-                           (let ((with (point))
-                                 (definitions ""))
-                             (save-excursion
-                               (goto-char (point-min))
-                               (while (re-search-forward (concat "{%-?[ \t\n]*\\(?:set\\_>[^%=]*=\\|import\\_>\\|from\\_>\\)"
-                                                                 "[^%]*%}")
-                                                         with t)
-                                 (unless (nth 4 (save-excursion (syntax-ppss (match-beginning 0))))
-                                   (setq definitions (concat definitions (match-string-no-properties 0) "\n")))))
-                             definitions)
-                           (buffer-substring-no-properties (point) end) name))))))
+        ;; What comes before the WITH defines what the CTE may use, sets in
+        ;; their if blocks included, unless a block opens there, as that of
+        ;; a snapshot does.
+        (cons name (format "%s\nselect * from %s"
+                           (buffer-substring-no-properties (if (cdr (dbt-edit-blocks (point))) (point) (point-min)) end)
+                           name))))))
 
 (defconst dbt-mode-macro-call-regexp
   "\\_<\\(?:\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\)?\\(?1:[A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*("

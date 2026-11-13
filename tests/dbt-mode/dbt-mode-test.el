@@ -452,32 +452,38 @@ A dangling link among the project's files holds none and stops nothing."
                    '(("Macros" "cents_to_dollars"))))))
 
 (ert-deftest dbt-mode-cte-query-selects-from-the-cte ()
-  "A CTE's query is the model's WITH up to the CTE, then a select from it."
+  "A CTE's query is the model up to the CTE, then a select from it."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (dbt-test-goto "customers.first_name")
     (let ((query (dbt-mode-cte-query)))
       (should (equal (car query) "final"))
-      (should (string-prefix-p "with orders as (" (cdr query)))
+      (should (string-prefix-p (buffer-substring-no-properties (point-min) (progn (dbt-test-goto "with orders as (")
+                                                                                     (point)))
+                               (cdr query)))
       (should (string-suffix-p "{% endif %}\n)\nselect * from final" (cdr query))))
     (let ((query (dbt-mode-cte-query "customers")))
       (should (string-suffix-p "{{ ref('stg_customers') }}\n)\nselect * from customers" (cdr query))))
     (goto-char (point-min))
     (should-error (dbt-mode-cte-query) :type 'user-error)))
 
-(ert-deftest dbt-mode-cte-query-keeps-the-definitions-before-the-with ()
-  "A set with `=', an import and a from before the WITH come first in the query.
-A commented tag, a block set and a snapshot block do not: the query would
-not parse."
-  (with-temp-buffer
-    (insert "{# {% set old = 1 %} #}\n{% snapshot s %}\n{% set cols = ['a',\n 'b'] %}\n"
-            "{%- import 'm.sql' as m -%}\n{% set block %}x{% endset %}\n"
-            "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)\nselect * from x\n")
-    (dbt-mode)
-    (dbt-test-goto "select {%")
-    (should (equal (cdr (dbt-mode-cte-query))
-                   (concat "{% set cols = ['a',\n 'b'] %}\n{%- import 'm.sql' as m -%}\n"
-                           "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)\nselect * from x")))))
+(ert-deftest dbt-mode-cte-query-keeps-what-comes-before-the-with ()
+  "What comes before the WITH comes first in a CTE's query, sets in their blocks.
+Unless a Jinja block is open at the WITH, as a legacy snapshot's."
+  (let ((before (concat "{# {% set old = 1 %} #}\n{% if target.name == 'prod' %}\n{% set cols = ['a'] %}\n"
+                        "{% else %}\n{% set cols = ['a', 'b'] %}\n{% endif %}\n-- {% set commented = 'x' %}\n"
+                        "{% set pattern = 'p%' %}\n"))
+        (chain "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)"))
+    (with-temp-buffer
+      (insert before chain "\nselect * from x\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query)) (concat before chain "\nselect * from x"))))
+    (with-temp-buffer
+      (insert "{% snapshot s %}\n" chain "\nselect * from x\n{% endsnapshot %}\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query)) (concat chain "\nselect * from x"))))))
 
 (ert-deftest dbt-mode-knows-when-no-server-runs ()
   "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."
