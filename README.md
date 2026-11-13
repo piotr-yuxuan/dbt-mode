@@ -54,6 +54,28 @@ Writing and moving:
   reads. An entry joins its list as the file writes its items, and a name
   that the list has already is refused.
 
+Rows and compiled SQL:
+
+- `C-c C-p` shows the rows of the model, of the region, or, with `C-u`, of
+  the CTE around point, in one grid, whether dbt lsp or `dbt show` runs the
+  query: each row on one line, `NULL` in its own face, a column of numbers
+  sorted as numbers. `/` keeps the rows with a cell that matches a regexp
+  (with `C-u`, in one column), `w` copies the rows shown as CSV, Markdown
+  or Org, `+` asks again with twice the limit, or a numeric prefix's, as
+  dbt has no offset, `g` asks again, and `RET` shows a cell's whole value.
+  Asked again, a CTE is taken from the model as it is now;
+- `C-c C-v` shows the compiled SQL beside the model and keeps it there:
+  point's line in it faces point's line in the model, CTE by CTE, and
+  saving compiles it again with dbt lsp; without a server, it is read again
+  when dbt writes it. `dbt-compiled-diff` shows how it differs from the
+  compiled SQL of another state, such as that of `dbt compile --target-path
+  STATE` on main, or production's artifacts;
+- in Org, `C-c C-c` on a `#+begin_src dbt` block gives its rows as a table,
+  or its compiled SQL with `:compile yes`; `:limit`, `:target`, `:var`,
+  passed as dbt's `--vars`, and Babel's `:dir` apply. A block on a target of
+  `dbt-protected-targets`, `prod` by default, asks first: the target is
+  `:target`, else `DBT_TARGET`, else the profile's default.
+
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
 `{# #}` comments out. A project nested in another, such as a package's
@@ -88,7 +110,7 @@ need a dbt account: without one, the server says nothing about columns.
 | Key           | Command                | What it does                                                     |
 |---------------|------------------------|------------------------------------------------------------------|
 | `C-c C-d`     | `dbt-dispatch`         | Run a dbt command, by default on the current model               |
-| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model; with `C-u`, the SQL of the last run (`dbt-visit-run`) |
+| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL beside the model, facing point; with `C-u`, the SQL of the last run (`dbt-visit-run`) |
 | `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
@@ -113,10 +135,10 @@ and `seed`, the limit to `build`, `run`, `test`, `compile`, `show` and
 passes on, and the project's modified buffers are offered for saving first,
 as `compile` does.
 
-In the lineage and the rows, `RET` visits a node's file and `g` asks again;
-without a server, `g` reads the project again. The rows show nested values
-as JSON and newlines as `\n`; lsp-mode reads JSON `false` as null, so it
-shows as `NULL`.
+In the lineage, `RET` visits a node's file; in the lineage and the rows,
+`g` asks again, and without a server the lineage reads the project again.
+The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
+JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
 ## Installation
 
@@ -161,6 +183,7 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 | `dbt-lsp-arguments`            | `nil`   | More arguments of `dbt lsp`, such as `("--profiles-dir" "dir")` |
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
+| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block asks before it runs        |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
 | `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
 
@@ -188,9 +211,11 @@ of the package already has.
   with dbt-mode.
 - The server gives the YAML files nothing in dbt 2.0.9; dbt-mode's own
   navigation and completion work there.
-- Without a server, previewing a CTE runs its Jinja as an inline query, so
-  a CTE that uses a model's context, such as `is_incremental()`, needs the
-  server, which previews the compiled SQL.
+- Without a server, previewing a CTE runs its Jinja as an inline query, with
+  all that comes before its WITH, so a CTE that uses a model's context, such
+  as `is_incremental()`, needs the server, which previews the compiled SQL.
+- `dbt-compiled-diff` compares with a state's manifest, not with another
+  git revision: dbt compiles the project on disk.
 - Only lsp-mode is supported, not Eglot.
 
 ## Tests
