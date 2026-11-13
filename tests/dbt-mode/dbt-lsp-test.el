@@ -114,6 +114,24 @@ The buffer is killed, so that the next preview makes a new one."
                      (vector "lsp" "--project-dir" (directory-file-name root)
                              "--lint-enabled" "true" "--profiles-dir" "/profiles"))))))
 
+(ert-deftest dbt-lsp-runs-a-nested-project-on-itself ()
+  "A project nested in another, as the integration tests of a package, has its server."
+  (dbt-lsp-test-with-server root nil
+    (let ((nested (expand-file-name "integration_tests/" root)))
+      (make-directory (expand-file-name "models" nested) t)
+      (with-temp-file (expand-file-name "dbt_project.yml" nested)
+        (insert "name: 'shop_tests'\nprofile: 'shop'\n"))
+      (with-temp-file (expand-file-name "packages.yml" nested)
+        (insert "packages:\n  - local: ../\n"))
+      (with-temp-file (expand-file-name "models/uses_shop.sql" nested)
+        (insert "select * from {{ ref('orders') }}\n"))
+      (with-current-buffer (dbt-test-visit nested "models/uses_shop.sql")
+        (dbt-lsp)
+        (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
+        (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
+                       (directory-file-name nested)))
+        (should (equal (lsp--workspace-root (dbt-lsp-workspace)) (lsp-f-canonical nested)))))))
+
 (ert-deftest dbt-lsp-runs-a-server-for-each-project-of-a-repository ()
   "Two dbt projects of a repository get a server each, though lsp-mode guesses roots."
   (dbt-lsp-test-with-server root nil
