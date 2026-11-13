@@ -187,6 +187,22 @@ An empty list is empty, as dbt keeps its default for a missing key only."
     (should (equal (dbt-test-entity root 'macro "is_positive")
                    '(macro "is_positive" "shop_utils" "dbt_modules/shop_utils/macros/is_positive.sql" 1)))))
 
+(ert-deftest dbt-project-index-names-a-file-it-cannot-read ()
+  "A dangling link or an unreadable file is a model by its name, and breaks nothing.
+A package whose dbt_project.yml cannot be read is named after its directory."
+  (dbt-test-with-project root
+    (make-symbolic-link (expand-file-name "missing/shared_model.sql" root)
+                        (expand-file-name "models/shared_model.sql" root))
+    (write-region "select 1" nil (expand-file-name "models/secret.sql" root))
+    (set-file-modes (expand-file-name "models/secret.sql" root) 0)
+    (set-file-modes (expand-file-name "dbt_packages/shop_utils/dbt_project.yml" root) 0)
+    (should (equal (dbt-test-entity root 'model "shared_model")
+                   '(model "shared_model" "shop" "models/shared_model.sql" 1)))
+    (should (equal (dbt-test-entity root 'model "secret") '(model "secret" "shop" "models/secret.sql" 1)))
+    (should (dbt-project-entities root '(macro) "cents_to_dollars"))
+    (should (dbt-project-entities root '(macro) "is_positive" "shop_utils"))
+    (should (seq-find (lambda (node) (equal (plist-get node :id) "model.shop.secret")) (dbt-project-graph root)))))
+
 (ert-deftest dbt-project-index-sees-saved-files-once-forgotten ()
   "A new model shows once the project is forgotten, as saving a buffer does."
   (dbt-test-with-project root

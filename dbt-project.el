@@ -185,10 +185,12 @@ list of paths.")
 (defun dbt-project-config (root)
   "Return the configuration of the project at ROOT as a plist.
 The plist has a property for each key of `dbt-project-config-keys', with
-dbt's default when dbt_project.yml does not set it.  A list of paths is
-either [a, b] on the line of its key, or the items below it."
+dbt's default when dbt_project.yml does not set it, or cannot be read.
+A list of paths is either [a, b] on the line of its key, or the items
+below it."
   (let ((lines (dbt-project-yaml-scan (with-temp-buffer
-                                        (insert-file-contents (expand-file-name dbt-project-file root))
+                                        (ignore-error file-error
+                                          (insert-file-contents (expand-file-name dbt-project-file root)))
                                         (buffer-string)))))
     (mapcan
      (pcase-lambda (`(,key ,property ,default))
@@ -322,7 +324,8 @@ the lock files .#NAME of the buffers being edited."
               (file-exists-p (expand-file-name dbt-project-file subdirectory)))))))
 
 (defun dbt-project-index (root)
-  "Return the entities that the project at ROOT and its packages define."
+  "Return the entities that the project at ROOT and its packages define.
+A file that cannot be read defines what its place tells only."
   (dbt-project-cached
    root 'index
    (lambda (root)
@@ -335,7 +338,7 @@ the lock files .#NAME of the buffers being edited."
                (push (append (list :kind kind :name (file-name-base file) :line 1) head) entities))
              (unless (equal extension "csv")
                (with-temp-buffer
-                 (insert-file-contents file)
+                 (ignore-error file-error (insert-file-contents file))
                  (pcase-dolist (`(,kind . ,regexp) dbt-project-block-regexps)
                    (goto-char (point-min))
                    (while (re-search-forward regexp nil t)
@@ -430,7 +433,7 @@ itself.  CALLER is the package of the calling file, for a `ref'."
               parents)
           (unless (memq (plist-get entity :kind) '(seed table))
             (with-temp-buffer
-              (insert-file-contents (plist-get entity :file))
+              (ignore-error file-error (insert-file-contents (plist-get entity :file)))
               (pcase-dolist (`(,kind . ,regexp) dbt-project-call-regexps)
                 (goto-char (point-min))
                 (while (re-search-forward regexp nil t)
