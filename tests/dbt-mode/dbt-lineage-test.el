@@ -20,12 +20,12 @@
     (:id "e" :name "e" :type model :parents ("e" "d")))
   "A diamond with a shortcut, and a node that depends on itself.")
 
-(ert-deftest dbt-lineage-depths-are-shortest-paths ()
-  "Each node comes once, at the length of its shortest path."
-  (should (equal (dbt-lineage-depths dbt-test-diamond "d" 'upstream) '(("b" . 1) ("c" . 1) ("a" . 2))))
-  (should (equal (dbt-lineage-depths dbt-test-diamond "a" 'downstream)
-                 '(("b" . 1) ("c" . 1) ("d" . 2) ("e" . 3))))
-  (should (equal (dbt-lineage-depths dbt-test-diamond "e" 'downstream) nil)))
+(ert-deftest dbt-lineage-reach-is-a-tree-of-shortest-paths ()
+  "Each node comes once, at the length of its shortest path, under its nearest parent."
+  (should (equal (dbt-lineage-reach dbt-test-diamond "d" 'upstream) '(("b" 1 "d") ("c" 1 "d") ("a" 2 "b"))))
+  (should (equal (dbt-lineage-reach dbt-test-diamond "a" 'downstream)
+                 '(("b" 1 "a") ("c" 1 "a") ("d" 2 "b") ("e" 3 "d"))))
+  (should (equal (dbt-lineage-reach dbt-test-diamond "e" 'downstream) nil)))
 
 (ert-deftest dbt-lineage-shows-thousands-of-nodes-at-once ()
   "The lineage of a project of 4,000 models shows at once, not in seconds.
@@ -43,7 +43,7 @@ downstream of all of them."
     (should (< (- (float-time) start) 1.5))
     (dolist (name '("m0" "m3999"))
       (with-current-buffer (format "*dbt lineage: %s*" name)
-        (should (= (length tabulated-list-entries) 3999))
+        (should (= (length (dbt-test-lineage-rows)) 3999))
         (kill-buffer)))))
 
 (ert-deftest dbt-lineage-reads-the-project-again-on-g-only ()
@@ -59,21 +59,90 @@ downstream of all of them."
         (kill-buffer)))))
 
 (ert-deftest dbt-lineage-shows-the-project-lineage ()
-  "C-c C-g without a server lists upstream and downstream rows."
+  "C-c C-g without a server shows the upstream and downstream trees.
+A node is under the node through which it is nearest."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (dbt-lineage "stg_orders")
     (with-current-buffer "*dbt lineage: stg_orders*"
-      (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+      (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
                        ("downstream" "1" "analysis" "order_counts" "analyses/order_counts.sql")
                        ("downstream" "1" "model" "orders" "models/marts/orders.sql")
-                       ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql")
-                       ("downstream" "2" "model" "customers" "models/marts/customers.sql"))))
+                       ("downstream" "2" "model" "customers" "models/marts/customers.sql")
+                       ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql"))))
       (goto-char (point-min))
+      (forward-line 1)
+      (end-of-line)
       (dbt-lineage-visit)
       (should (equal (file-relative-name buffer-file-name root) "seeds/raw_orders.csv"))
       (kill-buffer "*dbt lineage: stg_orders*"))))
+
+(ert-deftest dbt-lineage-folds-limits-and-exports-the-tree ()
+  "TAB folds a node; - and + show one level less and more, point on its node; e writes the graph as dot.
+Each node of the graph is named by its unique id and labelled by its
+name, so two nodes of one name stay apart."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (dbt-lineage "stg_orders")
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: stg_orders*")
+      (goto-char (point-min))
+      (search-forward "  orders  ")
+      (beginning-of-line)
+      (execute-kbd-macro (kbd "TAB"))
+      (should (save-excursion (search-forward "customers") (outline-invisible-p)))
+      (execute-kbd-macro (kbd "-"))
+      (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (should (looking-at "  orders  "))
+      (execute-kbd-macro (kbd "+"))
+      (should (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (let ((file (expand-file-name "lineage.dot" root)))
+        ;; No dot, whose rendering would outlive the project.
+        (let ((exec-path nil))
+          (dbt-lineage-export file))
+        (let ((dot (with-temp-buffer (insert-file-contents file) (buffer-string))))
+          (dolist (line '("\"seed.shop.raw_orders\" -> \"model.shop.stg_orders\";"
+                          "\"model.shop.stg_orders\" -> \"model.shop.orders\";"
+                          "\"model.shop.orders\" -> \"model.shop.customers\";"
+                          "\"model.shop.orders\" [label=\"orders\"];"))
+            (should (string-search line dot)))))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-renders-the-graph-while-emacs-goes-on ()
+  "With dot, e renders an SVG while Emacs goes on, and says when it is there, or why not."
+  (dbt-test-with-project root
+    (let* ((bin (make-temp-file "dot" t))
+           (dot (expand-file-name "dot" bin))
+           (exec-path (cons bin exec-path))
+           (messages (with-current-buffer (messages-buffer) (point-max-marker)))
+           (said (lambda (regexp)
+                   (dbt-test-wait (lambda () (with-current-buffer (messages-buffer)
+                                               (save-excursion
+                                                 (goto-char messages)
+                                                 (re-search-forward regexp nil t))))))))
+      (unwind-protect
+          (progn
+            ;; dot -Tsvg FILE -o SVG
+            (write-region "#!/bin/sh\necho '<svg/>' > \"$4\"\n" nil dot)
+            (set-file-modes dot #o755)
+            (dbt-test-visit root "models/staging/stg_orders.sql")
+            (dbt-lineage "stg_orders")
+            (with-current-buffer "*dbt lineage: stg_orders*"
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (funcall said "^Wrote .*/lineage\\.svg$")
+              (should (file-exists-p (expand-file-name "lineage.svg" root)))
+              ;; Emacs goes on while dot renders.
+              (write-region "#!/bin/sh\nsleep 1\necho '<svg/>' > \"$4\"\n" nil dot)
+              (delete-file (expand-file-name "lineage.svg" root))
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (should-not (file-exists-p (expand-file-name "lineage.svg" root)))
+              (dbt-test-wait (lambda () (file-exists-p (expand-file-name "lineage.svg" root))))
+              (write-region "#!/bin/sh\necho 'syntax error in line 3' >&2\nexit 1\n" nil dot)
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (funcall said "^dot failed on .*/lineage\\.dot: syntax error in line 3$")
+              (kill-buffer)))
+        (delete-directory bin t)))))
 
 (provide 'dbt-lineage-test)
 ;;; dbt-lineage-test.el ends here

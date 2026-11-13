@@ -221,6 +221,24 @@ Its one code action, which fixes and formats, is hidden too."
       (should-not (string-match-p "Unknown notification"
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
+(ert-deftest dbt-lsp-says-in-the-mode-line-when-the-server-compiles ()
+  "While the server compiles, as it notifies, the mode line says so; once it stops, no more.
+A start, background or not, says so; a completion ends it.  The
+notifications come before the answer to a later request."
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileStart"]))
+    (dbt-test-wait (lambda () dbt-mode-compiling))
+    ;; In batch, `format-mode-line' formats nothing: what it would show,
+    ;; kept within the spinner that lsp-mode adds around it.
+    (should (string-search "(dbt-mode-compiling \" compiling\")" (format "%S" mode-line-process))))
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileStart" "dbt/lspCompileComplete"]))
+    (lsp-request "textDocument/hover" (lsp--text-document-position-params))
+    (should-not dbt-mode-compiling))
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileComplete" "dbt/lspBackgroundCompileStart"]))
+    (lsp-request "textDocument/hover" (lsp--text-document-position-params))
+    (should dbt-mode-compiling)
+    (lsp-workspace-shutdown (dbt-lsp-workspace))
+    (dbt-test-wait (lambda () (not dbt-mode-compiling)))))
+
 (ert-deftest dbt-lsp-turns-off-lsp-mode-s-formatting-on-save ()
   "Set for other languages, lsp-mode's formatting and fixes on save log no error here."
   (let ((lsp-format-buffer-on-save t)
@@ -243,10 +261,81 @@ Choosing the server reads nothing of the project."
     (dbt-test-goto "customers.first_name")
     (should (eq (xref-find-backend) 'xref-lsp))
     (should-not (seq-some (lambda (key) (equal (car key) root)) (hash-table-keys dbt-project--cache)))
+    ;; dbt lsp alone: a source is dbt-mode's.
+    (goto-char (point-max))
+    (insert "\n{{ source('raw', 'raw_orders') }}")
+    (dbt-test-goto "raw_orders')")
+    (should (eq (xref-find-backend) 'dbt))
     (with-current-buffer (dbt-test-visit root "snapshots/orders_snapshot.sql")
       (dbt-lsp)
       (dbt-test-goto "orders_snapshot %}")
       (should (eq (xref-find-backend) 'dbt)))))
+
+(ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
+  "With dbt-lsp-plus listing sources for a request, that request on a source is the server's.
+M-? goes to the server when references lists source, M-. when definition
+does; the rest stays dbt-mode's.  dbt-lsp-plus runs the server, given
+after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
+  (let* ((bin (make-temp-file "dbt-lsp-plus" t))
+         (exec-path (cons bin exec-path))
+         (dbt-lsp-proxy t))
+    (write-region "#!/bin/sh\nshift\nexec \"$@\"\n" nil (expand-file-name "dbt-lsp-plus" bin))
+    (set-file-modes (expand-file-name "dbt-lsp-plus" bin) #o755)
+    (unwind-protect
+        (progn
+          (dbt-lsp-test-with-server root
+              `(("$experimental" . (:dbtLspPlus (:version 1 :references ["source"] :rename ["source"])))
+                ("textDocument/references"
+                 . [(:uri ,(lsp--path-to-uri (expand-file-name "models/marts/customers.sql" root))
+                          :range (:start (:line 0 :character 0) :end (:line 0 :character 1)))]))
+            (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 3)
+                           (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))
+            (goto-char (point-max))
+            (insert "\n{{ source('raw', 'raw_orders') }}\n{{ source('raw', 'raw_customers') }}")
+            (save-buffer)
+            (dbt-test-goto "raw_orders')")
+            (should (eq (xref-find-backend) 'dbt))
+            (let* (shown
+                   (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher))))
+                   (xref-show-definitions-function xref-show-xrefs-function))
+              (save-window-excursion
+                (switch-to-buffer (current-buffer))
+                (execute-kbd-macro (kbd "M-?"))
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/marts/customers.sql")))
+                (execute-kbd-macro (kbd "M-."))
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/staging/_sources.yml")))
+                ;; A source typed at the prompt is not the one at point: dbt-mode's.
+                (setq shown nil)
+                (xref-find-references "source:raw/raw_customers")
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/marts/orders.sql")))
+                ;; A ref stays dbt-mode's.
+                (dbt-test-goto "ref('stg_orders')" 6)
+                (execute-kbd-macro (kbd "M-?"))))
+            (should (= 1 (seq-count (lambda (method) (equal method "textDocument/references")) (dbt-lsp-test-methods))))
+            (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))
+          (dbt-lsp-test-with-server root
+              `(("$experimental" . (:dbtLspPlus (:version 1 :definition ["source"])))
+                ("textDocument/definition"
+                 . [(:uri ,(lsp--path-to-uri (expand-file-name "models/staging/_sources.yml" root))
+                          :range (:start (:line 7 :character 8) :end (:line 7 :character 18)))]))
+            (goto-char (point-max))
+            (insert "\n{{ source('raw', 'raw_orders') }}")
+            (dbt-test-goto "raw_orders')")
+            (save-window-excursion
+              (switch-to-buffer (current-buffer))
+              (execute-kbd-macro (kbd "M-.")))
+            (should (member "textDocument/definition" (dbt-lsp-test-methods)))
+            ;; dbt, as found on exec-path, which dbt-lsp-plus does not search.
+            (let ((dbt-executable (file-name-nondirectory dbt-lsp-test-dbt))
+                  (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
+              (should (equal (seq-take (dbt-lsp--command) 3) (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt))))))
+      (delete-directory bin t))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.
@@ -455,7 +544,7 @@ A node of a package that dbt-mode does not know has no file."
          :error nil))
     (dbt-lsp-lineage "stg_orders" "model.shop.stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
-      (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+      (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
                        ("downstream" "1" "model" "util" "dbt_packages/shop_utils/models/util.sql")
                        ("downstream" "2" "model" "internal" "")))))

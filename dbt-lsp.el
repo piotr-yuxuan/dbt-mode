@@ -53,6 +53,13 @@
   :type '(repeat string)
   :group 'dbt)
 
+(defcustom dbt-lsp-proxy nil
+  "Whether dbt lsp runs through dbt-lsp-plus, when that executable exists.
+dbt-lsp-plus adds what dbt lsp lacks, such as the references of sources
+over the project; dbt-mode steps aside where it says that it answers."
+  :type 'boolean
+  :group 'dbt)
+
 (defcustom dbt-lsp-enable-linter nil
   "Whether the server lints the SQL, with dbt's built-in linter."
   :type 'boolean
@@ -87,8 +94,12 @@ answer within `dbt-lsp--probe-seconds' runs none."
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.
 lsp-mode calls it with `default-directory' at the root of the workspace,
-in the buffer that starts it."
-  (append (list dbt-executable "lsp" "--project-dir"
+in the buffer that starts it.  With `dbt-lsp-proxy', dbt-lsp-plus runs
+it, as `dbt-lsp-plus -- COMMAND'."
+  (append (and dbt-lsp-proxy (executable-find "dbt-lsp-plus") (list "dbt-lsp-plus" "--"))
+          ;; dbt-lsp-plus runs the server as given, from PATH, not
+          ;; `exec-path'.
+          (list (dbt-project-executable) "lsp" "--project-dir"
                 (directory-file-name (or (and buffer-file-name (dbt-project-root buffer-file-name))
                                          (dbt-project-root default-directory)
                                          default-directory)))
@@ -169,6 +180,17 @@ value that its SCHEMA fits, a missing key holding null."
      (and (or (hash-table-p value) (and lsp-use-plists (consp value)))
           (seq-every-p (pcase-lambda (`(,key ,field)) (dbt-lsp--conforms-p (lsp-get value key) field)) fields)))
     (_ (funcall schema value))))
+
+(defun dbt-lsp-proxy-answers-p (request kind)
+  "Return non-nil when the server of the buffer answers REQUEST on targets of KIND.
+REQUEST is the key of a request that dbt-lsp-plus lists under
+experimental.dbtLspPlus of its capabilities, such as :references or
+:definition, and KIND a kind of target it lists there, such as
+\"source\": dbt-mode then leaves that request to the server."
+  (let* ((workspace (dbt-lsp-workspace))
+         (capabilities (and workspace (lsp--workspace-server-capabilities workspace))))
+    (and (dbt-lsp--conforms-p capabilities `(object (:experimental (object (:dbtLspPlus (object (,request (array stringp))))))))
+         (seq-contains-p (lsp-get (lsp-get (lsp-get capabilities :experimental) :dbtLspPlus) request) kind))))
 
 (defun dbt-lsp--unreadable (method answer)
   "Return the message that dbt-mode cannot read ANSWER, of dbt lsp to METHOD."
@@ -404,6 +426,14 @@ dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
 
 ;;;; The client
 
+(defun dbt-lsp--compiling (workspace compiling)
+  "Say in the mode line of WORKSPACE's buffers whether its server is COMPILING."
+  (dolist (buffer (lsp--workspace-buffers workspace))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq dbt-mode-compiling compiling))))
+  (force-mode-line-update t))
+
 (lsp-register-client
  (make-lsp-client
   :new-connection (lsp-stdio-connection #'dbt-lsp--command #'dbt-lsp-server-p)
@@ -415,14 +445,24 @@ dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   :initialized-fn #'dbt-lsp--hide-formatting
   ;; lsp-mode's own formatting and fixes on save would ask for what
   ;; `dbt-lsp--hide-formatting' hid, and log an error at each save.
-  :after-open-fn (lambda () (setq-local lsp-format-buffer-on-save nil
-                                        lsp-fix-all-on-save nil))
-  ;; The server tells of its compilations with notifications of its own;
-  ;; lsp-mode already shows their progress, from $/progress.
-  :notification-handlers (lsp-ht ("dbt/lspCompileStart" #'ignore)
-                                  ("dbt/lspCompileComplete" #'ignore)
-                                  ("dbt/lspBackgroundCompileStart" #'ignore)
-                                  ("dbt/lspBackgroundCompileComplete" #'ignore)
+  :after-open-fn (lambda ()
+                   (setq-local lsp-format-buffer-on-save nil
+                               lsp-fix-all-on-save nil)
+                   ;; Once no server serves the buffer, nothing compiles it.
+                   (add-hook 'lsp-unconfigure-hook
+                             (lambda ()
+                               (setq dbt-mode-compiling nil)
+                               (force-mode-line-update))
+                             nil t))
+  ;; The server tells of its compilations with notifications of its own,
+  ;; which the mode line shows; lsp-mode shows their progress, from
+  ;; $/progress.
+  :notification-handlers (lsp-ht ("dbt/lspCompileStart" (lambda (workspace _) (dbt-lsp--compiling workspace t)))
+                                  ("dbt/lspCompileComplete" (lambda (workspace _) (dbt-lsp--compiling workspace nil)))
+                                  ("dbt/lspBackgroundCompileStart"
+                                   (lambda (workspace _) (dbt-lsp--compiling workspace t)))
+                                  ("dbt/lspBackgroundCompileComplete"
+                                   (lambda (workspace _) (dbt-lsp--compiling workspace nil)))
                                   ("dbt/renameModel" #'ignore))
   :action-handlers (lsp-ht ("dbt.previewCte" #'dbt-lsp--preview-cte))))
 

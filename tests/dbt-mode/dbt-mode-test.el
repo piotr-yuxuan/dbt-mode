@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'dbt-mode-test-helpers)
+(require 'ert-x)
 (require 'dbt-mode)
 (require 'imenu)
 
@@ -569,11 +570,11 @@ dbt compiles a local package in the copy it installs."
     (with-current-buffer "*dbt lineage: orders*"
       (unwind-protect
           (dolist (name '("order_report" "order_audit"))
-            (should-not (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+            (should-not (member name (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
             (write-region "select * from {{ ref('orders') }}" nil
                           (expand-file-name (format "models/marts/%s.sql" name) root))
             (revert-buffer)
-            (should (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries))))
+            (should (member name (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)))))
         (kill-buffer)))))
 
 (ert-deftest dbt-mode-inserts-refs ()
@@ -640,16 +641,16 @@ A name alone is the latest version, as for `ref'."
     (dbt-lineage "dim.v1")
     (with-current-buffer "*dbt lineage: dim.v1*"
       (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
-                      (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+                      (dbt-test-lineage-rows)))
       (kill-buffer))
     (dbt-lineage "stg_orders")
     (with-current-buffer "*dbt lineage: stg_orders*"
-      (should (member "dim.v1" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
-      (should (member "dim.v2" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (should (member "dim.v1" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (should (member "dim.v2" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
       (kill-buffer))
     (dbt-lineage "dim")
     (with-current-buffer "*dbt lineage: dim.v2*"
-      (should-not (assoc "downstream" (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (should-not (assoc "downstream" (dbt-test-lineage-rows)))
       (kill-buffer))
     (goto-char (point-max))
     (insert "\n")
@@ -694,14 +695,68 @@ nor a node whose id it begins."
     (dbt-copy-relation)
     (should (equal (current-kill 0) "raw.main.raw_orders"))))
 
+(ert-deftest dbt-mode-shows-the-target-and-the-materialization ()
+  "The mode line says the target dbt runs on and the model's materialization.
+It is that of the config() call, else that of the manifest; DBT_TARGET
+names the target.  In batch, `format-mode-line' formats nothing at all,
+so the test reads what `mode-line-process' shows."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "target" root))
+    (write-region "{\"nodes\": {\"model.shop.stg_orders\": {\"config\": {\"materialized\": \"view\"}}}}"
+                  nil (expand-file-name "target/manifest.json" root))
+    (dbt-test-visit root "models/marts/orders.sql")
+    (set-buffer-modified-p t)
+    (save-buffer)
+    (should (member '(dbt-mode--status (" " dbt-mode--status)) mode-line-process))
+    (should (equal dbt-mode--status "dev table"))
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let ((process-environment (cons "DBT_TARGET=prod" process-environment)))
+      (set-buffer-modified-p t)
+      (save-buffer))
+    (should (equal dbt-mode--status "prod view"))))
+
+(ert-deftest dbt-mode-reads-the-materialization-from-the-manifest-only-without-config ()
+  "Without a config() call the materialization is the manifest's; a config() call wins over it.
+The mode line says so once the buffer opens, unsaved; a save reads the
+project's index no more, as the opening found the buffer's node."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"nodes\": {\"model.shop.customers\": {\"config\": {\"materialized\": \"incremental\"}},"
+                          " \"model.shop.orders\": {\"config\": {\"materialized\": \"view\"}}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (with-current-buffer (dbt-test-visit root "models/marts/customers.sql")
+      ;; The user goes idle.
+      (ert-run-idle-timers)
+      (should (equal dbt-mode--status "dev incremental"))
+      (dbt-project-forget root)
+      (set-buffer-modified-p t)
+      (save-buffer)
+      (should (equal dbt-mode--status "dev incremental"))
+      (should-not (gethash (cons root 'index) dbt-project--cache)))
+    ;; config() names the materialization of orders: no manifest is read.
+    (when (get-buffer " *dbt manifest*")
+      (kill-buffer " *dbt manifest*"))
+    (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+      (ert-run-idle-timers)
+      (should (equal dbt-mode--status "dev table"))
+      (should-not (get-buffer " *dbt manifest*")))))
+
 (ert-deftest dbt-mode-copies-the-build-command ()
-  "The build command selects the model, or with a prefix its family."
+  "The build command selects the model, or with a prefix its family.
+On a ref or a source, it selects what they name."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
+    (goto-char (point-max))
     (dbt-copy-build-command)
     (should (equal (current-kill 0) "dbt build -s orders"))
     (dbt-copy-build-command t)
-    (should (equal (current-kill 0) "dbt build -s +orders+"))))
+    (should (equal (current-kill 0) "dbt build -s +orders+"))
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (dbt-copy-build-command)
+    (should (equal (current-kill 0) "dbt build -s stg_orders"))
+    (insert "{{ source('raw', 'raw_orders') }} ")
+    (dbt-test-goto "raw_orders')")
+    (should (equal (dbt-mode-selection-at-point) "source:raw.raw_orders"))))
 
 (ert-deftest dbt-mode-lists-the-tests-of-a-model ()
   "The tests of a model are its YAML entries, the data tests that name it and

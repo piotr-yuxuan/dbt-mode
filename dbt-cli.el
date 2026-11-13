@@ -26,14 +26,27 @@
   '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint")
   "The commands of dbt that take a selection.")
 
+(defconst dbt-cli-state-commands
+  '("build" "run" "test" "seed" "snapshot" "compile" "show" "list" "lint" "format" "parse" "deps" "debug"
+    "retry")
+  "The commands of `dbt-dispatch' that take --defer, --state and --vars.
+All of them but docs generate.")
+
 (defconst dbt-cli-option-commands
   `(("--select" . ,dbt-cli-selecting-commands)
     ("--exclude" . ,dbt-cli-selecting-commands)
     ("--full-refresh" "build" "run" "compile" "seed")
-    ("--limit" "build" "run" "test" "compile" "show" "list"))
+    ("--limit" "build" "run" "test" "compile" "show" "list")
+    ("--defer" . ,dbt-cli-state-commands)
+    ("--state" . ,dbt-cli-state-commands)
+    ("--vars" . ,dbt-cli-state-commands))
   "The options of `dbt-dispatch' that only some commands take, with these commands.
-dbt 2.0.9 rejects --full-refresh and --limit on any other command.  The
+dbt 2.0.9 rejects --full-refresh and --limit on any other command, and
+lists --defer, --state and --vars for every one but docs generate.  The
 other options, --target and --fail-fast, go to every command.")
+
+(defvar dbt-cli--last (make-hash-table :test #'equal)
+  "The last dbt command run in each project: its root, to (COMMAND . ARGUMENTS).")
 
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
@@ -62,16 +75,21 @@ dbt reads the project's files, not its buffers."
                      (lambda () (and buffer-file-name (string-prefix-p root (expand-file-name buffer-file-name))))))
 
 (defun dbt-cli-run (command &optional arguments)
-  "Run the dbt COMMAND with ARGUMENTS, a list of strings, in the project.
-It runs at the root of the project of the current buffer, in a
-compilation buffer of `dbt-compilation-mode'.  dbt runs without colours
-or progress bars, which it would otherwise draw when Emacs passes on the
-TERM of a terminal.  The project's modified buffers are offered for
-saving first, under `compilation-ask-about-save'."
+  "Run the dbt COMMAND with ARGUMENTS in the project.
+ARGUMENTS is a list of strings, or a function that returns one, called
+at the root once the project's buffers are saved.  It runs at the root
+of the project of the current buffer, in a compilation buffer of
+`dbt-compilation-mode'.  dbt runs without colours or progress bars,
+which it would otherwise draw when Emacs passes on the TERM of a
+terminal.  The project's modified buffers are offered for saving first,
+under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
     (dbt-cli--save-project root)
+    (when (functionp arguments)
+      (setq arguments (funcall arguments)))
+    (puthash root (cons command arguments) dbt-cli--last)
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")
@@ -135,32 +153,86 @@ for again from its grid, the query is taken again from the model's file."
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))
 
-(defun dbt-cli-arguments (arguments)
+(defun dbt-cli-arguments (arguments &optional changed)
   "Return the command-line arguments that the transient ARGUMENTS mean.
 The switches --upstream and --downstream are `dbt-dispatch''s own: they
-add a `+' before or after the selection."
+add a `+' before or after each selector.  So is --changed: the selectors
+are then CHANGED, those of `dbt-cli-changed-selection', rather than
+those of --select."
   (let* ((upstream (member "--upstream" arguments))
-         (downstream (member "--downstream" arguments)))
-    (mapcan (lambda (argument)
-              (cond ((member argument '("--upstream" "--downstream")) nil)
-                    ((string-match "\\`--select=\\(.*\\)\\'" argument)
-                     (list "--select" (concat (if upstream "+" "") (match-string 1 argument)
-                                              (if downstream "+" ""))))
-                    ((string-match "\\`\\(--[a-z-]+\\)=\\(.*\\)\\'" argument)
-                     (list (match-string 1 argument) (match-string 2 argument)))
-                    (t (list argument))))
-            arguments)))
+         (downstream (member "--downstream" arguments))
+         (wrap (lambda (selector) (concat (if upstream "+" "") selector (if downstream "+" "")))))
+    (append (and (member "--changed" arguments)
+                 (cons "--select" (mapcar wrap changed)))
+            (mapcan (lambda (argument)
+                      (cond ((member argument '("--upstream" "--downstream" "--changed")) nil)
+                            ((string-match "\\`--select=\\(.*\\)\\'" argument)
+                             (and (not (member "--changed" arguments))
+                                  (list "--select" (funcall wrap (match-string 1 argument)))))
+                            ((string-match "\\`\\(--[a-z-]+\\)=\\(.*\\)\\'" argument)
+                             (list (match-string 1 argument) (match-string 2 argument)))
+                            (t (list argument))))
+                    arguments))))
+
+(defun dbt-cli-changed-selection (root)
+  "Return the selectors of what changed in ROOT on the branch.
+They are path:FILE for each file of the project that dbt reads, SQL,
+Python, YAML or CSV, that git sees changed since the merge base with the
+default branch, origin/HEAD or else main: committed, uncommitted and
+untracked ones.  dbt 2.0.9 selects by path what a file defines, and what
+a YAML file describes and tests; a macro, by path, selects nothing.  A
+character that dbt's selectors read as an operator, such as a space, a
+comma or +, is the glob ? in the path.  git's own errors are the message."
+  (let* ((default-directory root)
+         (coding-system-for-read 'utf-8)
+         ;; git's lines, split on SEPARATOR; its error output, on failure.
+         (git (lambda (separator &rest arguments)
+                (let ((errors (make-temp-file "dbt-git")))
+                  (unwind-protect
+                      (with-temp-buffer
+                        (unless (eql 0 (apply #'process-file "git" nil (list t errors) nil
+                                              "-c" "core.quotepath=off" arguments))
+                          (user-error "Git %s failed: %s" (car arguments)
+                                      (with-temp-buffer
+                                        (insert-file-contents errors)
+                                        (string-trim (buffer-string)))))
+                        (split-string (buffer-string) separator t))
+                    (delete-file errors)))))
+         (branch (progn (funcall git "\n" "rev-parse" "--git-dir")
+                        (or (ignore-errors (car (funcall git "\n" "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main")))
+         (base (or (ignore-error user-error (car (funcall git "\n" "merge-base" "HEAD" branch)))
+                   (user-error "No merge base with %s to compare with" branch)))
+         (selectors (delete-dups
+                     (mapcar (lambda (file) (concat "path:" (replace-regexp-in-string "[][ ,+*?@\n]" "?" file)))
+                             (seq-filter (lambda (file)
+                                           (and (string-match-p "\\.\\(?:sql\\|py\\|ya?ml\\|csv\\)\\'" file)
+                                                (file-exists-p file)))
+                                         (append (funcall git "\0" "diff" "--name-only" "-z" "--relative" base "--")
+                                                 (funcall git "\0" "ls-files" "-z" "--others" "--exclude-standard")))))))
+    (or selectors (user-error "Nothing that dbt reads changed since %s" branch))))
 
 (defun dbt-cli-dispatch (command)
   "Run the dbt COMMAND with those arguments of `dbt-dispatch' that it takes.
-See `dbt-cli-option-commands'."
-  (dbt-cli-run command
-               (dbt-cli-arguments
-                (seq-filter (lambda (argument)
-                              (let ((commands (assoc (car (split-string argument "="))
-                                                     dbt-cli-option-commands)))
-                                (or (not commands) (member command (cdr commands)))))
-                            (transient-args 'dbt-dispatch)))))
+See `dbt-cli-option-commands'.  With --changed, git tells the selection,
+as `dbt-cli-changed-selection' does, for a command that selects."
+  (let ((arguments (seq-filter (lambda (argument)
+                                 (let ((commands (assoc (car (split-string argument "="))
+                                                        `(("--changed" . ,dbt-cli-selecting-commands)
+                                                          ,@dbt-cli-option-commands))))
+                                   (or (not commands) (member command (cdr commands)))))
+                               (transient-args 'dbt-dispatch))))
+    ;; git reads the files once dbt-cli-run has saved their buffers.
+    (dbt-cli-run command
+                 (lambda ()
+                   (dbt-cli-arguments arguments (and (member "--changed" arguments)
+                                                     (dbt-cli-changed-selection default-directory)))))))
+
+(defun dbt-cli-again ()
+  "Run the last dbt command of the project again, with its arguments."
+  (interactive)
+  (let ((last (or (gethash (dbt-project-root) dbt-cli--last)
+                  (user-error "No dbt command has run in this project yet"))))
+    (dbt-cli-run (car last) (cdr last))))
 
 ;;;###autoload (autoload 'dbt-dispatch "dbt-cli" nil t)
 (transient-define-prefix dbt-dispatch ()
@@ -168,14 +240,16 @@ See `dbt-cli-option-commands'."
   ["Selection"
    ("-s" "Select" "--select="
     :init-value (lambda (option)
-                  (oset option value (when-let* (((dbt-project-root))
-                                                 (resource (dbt-mode-current-resource)))
-                                       (dbt-mode-resource-selector resource)))))
+                  (oset option value (and (dbt-project-root) (dbt-mode-selection-at-point)))))
+   ("-c" "Changed on the branch" "--changed")
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
    ("-x" "Exclude" "--exclude=")]
   ["Options"
    ("-t" "Target" "--target=")
+   ("-v" "Variables" "--vars=")
+   ("-S" "State" "--state=" :reader transient-read-existing-directory)
+   ("-e" "Defer to the state" "--defer")
    ("-f" "Full refresh" "--full-refresh")
    ("-F" "Fail fast" "--fail-fast")
    ("-l" "Limit of show" "--limit=")]
@@ -196,7 +270,14 @@ See `dbt-cli-option-commands'."
     ("d" "deps" (lambda () (interactive) (dbt-cli-dispatch "deps")))
     ("D" "debug" (lambda () (interactive) (dbt-cli-dispatch "debug")))
     ("R" "retry" (lambda () (interactive) (dbt-cli-dispatch "retry")))
-    ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))]])
+    ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))
+    ("." dbt-cli-again
+     :description (lambda ()
+                    (let ((last (gethash (dbt-project-root) dbt-cli--last)))
+                      (if last
+                          (truncate-string-to-width (format "Again: %s" (string-join (cons (car last) (cdr last)) " "))
+                                                    100 nil nil "...")
+                        "Again"))))]])
 
 (provide 'dbt-cli)
 ;;; dbt-cli.el ends here

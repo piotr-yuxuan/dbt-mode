@@ -86,6 +86,7 @@
 (autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
+(declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
@@ -424,7 +425,8 @@ its version."
 For `xref-backend-functions', ahead of lsp-mode's.  Where dbt lsp runs,
 it answers only what dbt-mode does not resolve, such as dbt's own
 macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
-the version of a `ref' and resolves no `doc'."
+the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
+a request on a source, where it says so: the request goes to it."
   (and (dbt-project-root)
        (or (not (dbt-mode-server-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
@@ -437,6 +439,30 @@ the version of a `ref' and resolves no `doc'."
                            (dbt-mode-call-at-point))))
              (and target (dbt-mode-definitions target))))
        'dbt))
+
+(defun dbt-mode--proxy-answers-p (request identifier)
+  "Return non-nil when dbt-lsp-plus answers REQUEST on IDENTIFIER.
+IDENTIFIER is that of a source at point.  REQUEST is :definition or
+:references, as `dbt-lsp-proxy-answers-p' takes it: the proxy contract
+steps aside per request and per kind.  The server answers for point: an
+identifier typed at the prompt, which names another target, stays
+dbt-mode's."
+  (and (equal identifier (xref-backend-identifier-at-point 'dbt))
+       (eq (plist-get (dbt-mode-parse-identifier identifier) :kind) 'source)
+       (dbt-mode-server-p)
+       (dbt-lsp-proxy-answers-p request "source")))
+
+(cl-defmethod xref-backend-definitions :around ((_backend (eql dbt)) identifier)
+  "Leave the definition of a source to dbt-lsp-plus where it answers it."
+  (if (dbt-mode--proxy-answers-p :definition identifier)
+      (xref-backend-definitions 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+    (cl-call-next-method)))
+
+(cl-defmethod xref-backend-references :around ((_backend (eql dbt)) identifier)
+  "Leave the uses of a source to dbt-lsp-plus where it answers them."
+  (if (dbt-mode--proxy-answers-p :references identifier)
+      (xref-backend-references 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+    (cl-call-next-method)))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql dbt)))
   "Return the identifier of what point is on, or nil."
@@ -589,6 +615,59 @@ In a YAML file, it is the resource whose entry holds point."
   "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version."
   (concat (plist-get resource :name)
           (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
+
+(defvar-local dbt-mode--status nil
+  "What the mode line says of the buffer: the target, the materialization.")
+
+(defvar-local dbt-mode-compiling nil
+  "Non-nil while dbt lsp compiles the project of the buffer, as it notifies.")
+
+(defvar-local dbt-mode--node-id nil
+  "The file of the buffer and the node id of its resource, or nil for none.
+Found once for each file name: a save, which forgets the project, would
+read its index again.")
+
+(defun dbt-mode--update-status ()
+  "Set what the mode line says: the target that dbt runs on, the materialization.
+The materialization is that of the model's config() call, else that of
+its node in the manifest of the user's runs, read only then.  For
+`after-save-hook', and once the buffer is shown, which finds its node."
+  (when-let* ((root (dbt-project-root)))
+    (let* ((id (cdr (if (equal (car dbt-mode--node-id) buffer-file-name)
+                        dbt-mode--node-id
+                      (setq dbt-mode--node-id
+                            (cons buffer-file-name (when-let* ((resource (dbt-mode-current-resource)))
+                                                     (dbt-project-node-id resource)))))))
+           (materialization
+            (or (save-excursion
+                  (goto-char (point-min))
+                  (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
+                       (match-string-no-properties 1)))
+                (let* ((manifest (expand-file-name "manifest.json" (expand-file-name (plist-get (dbt-project-config root)
+                                                                                                :target-path)
+                                                                                      root)))
+                       (node (and id (dbt-project-manifest-node manifest id)))
+                       (config (and (hash-table-p node) (gethash "config" node))))
+                  (and (hash-table-p config) (gethash "materialized" config))))))
+      (setq dbt-mode--status
+            (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
+                         " ")))))
+
+(defun dbt-mode-selection-at-point ()
+  "Return dbt's selector of what point is on, else of the current file.
+On a `ref', it is the model, seed or snapshot that it names, as NAME or
+NAME.vVERSION; on a `source', source:SOURCE.TABLE.  Else it is the
+current resource, or path:FILE for a file of the project that holds
+none, such as a singular test or a properties file, as dbt selects by
+path.  Nil outside a file of a project."
+  (let* ((target (dbt-mode-target-at-point))
+         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+                     (dbt-mode-current-resource))))
+    (pcase (plist-get entity :kind)
+      ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
+      ('source (format "source:%s" (plist-get entity :name)))
+      ((pred identity) (dbt-mode-resource-selector entity))
+      (_ (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root))))))))
 
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).
@@ -778,12 +857,15 @@ write; the message says when it was written."
              (format-time-string "%F %R" (file-attribute-modification-time (file-attributes file))))))
 
 (defun dbt-copy-build-command (&optional family)
-  "Copy the command that builds the current model, dbt build -s MODEL.
-With FAMILY, interactively a prefix argument, the selection takes in
-its upstream and downstream: +MODEL+."
+  "Copy the command that builds what point is on, dbt build -s SELECTOR.
+That is the model, seed or snapshot of the `ref' at point, the source
+of the `source' at point, or else the current resource, as
+`dbt-mode-selection-at-point' selects it.  With FAMILY, interactively a
+prefix argument, the selection takes in its upstream and downstream:
++SELECTOR+."
   (interactive "P")
-  (let* ((name (plist-get (or (dbt-mode-current-resource) (user-error "No model here")) :name))
-         (command (format "dbt build -s %s" (if family (format "+%s+" name) name))))
+  (let* ((selector (or (dbt-mode-selection-at-point) (user-error "No model here")))
+         (command (format "dbt build -s %s" (if family (format "+%s+" selector) selector))))
     (kill-new command)
     (message "Copied %s" command)))
 
@@ -909,6 +991,13 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
+  ;; The target, the materialization and the compilation, after the name.
+  (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))
+  (add-hook 'after-save-hook #'dbt-mode--update-status nil 'local)
+  (let ((buffer (current-buffer)))
+    (run-with-idle-timer 0 nil (lambda ()
+                                 (when (buffer-live-p buffer)
+                                   (with-current-buffer buffer (dbt-mode--update-status))))))
   (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))
     (add-hook 'post-self-insert-hook function nil 'local))
   (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte
