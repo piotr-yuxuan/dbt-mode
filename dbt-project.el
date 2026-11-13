@@ -13,8 +13,9 @@
 ;; file names; macros, generic tests, snapshots and docs blocks by their
 ;; Jinja blocks; sources, their tables, exposures and the properties of
 ;; the other resources by a scan of the YAML files that keeps the line of
-;; each entry.  Installed packages, under dbt_packages, are indexed with
-;; the project, each under its own name.
+;; each entry.  Installed packages, under the packages-install-path of
+;; the project, dbt_packages by default, are indexed with the project,
+;; each under its own name.
 ;;
 ;; An entity of the index is a plist:
 ;;
@@ -159,6 +160,7 @@ of its section, or right under the `tables' of a source."
 
 (defconst dbt-project-config-keys
   '(("name" :name nil) ("target-path" :target-path "target")
+    ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
     ("analysis-paths" :analysis-paths ("analyses")))
   "The keys of dbt_project.yml that the configuration keeps.
@@ -258,13 +260,13 @@ Otherwise call COMPUTE with ROOT, and keep and return its value."
   "Return the projects of ROOT, each as (NAME DIRECTORY CONFIG).
 The project itself comes first, then the local packages that its
 packages.yml or dependencies.yml declares, then each package installed
-under dbt_packages.  A package comes once, at its first place: a local
-package is edited where it lives, not in its copy under dbt_packages.
-NAME falls back to the name of the directory."
+under its packages-install-path.  A package comes once, at its first
+place: a local package is edited where it lives, not in its installed
+copy.  NAME falls back to the name of the directory."
   (dbt-project-cached
    root 'packages
    (lambda (root)
-     (let ((installed (expand-file-name "dbt_packages" root))
+     (let ((installed (expand-file-name (plist-get (dbt-project-config root) :packages-install-path) root))
            (locals (mapcan (lambda (file)
                              (with-temp-buffer
                                (ignore-errors (insert-file-contents (expand-file-name file root)))

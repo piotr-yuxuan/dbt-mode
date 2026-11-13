@@ -156,6 +156,16 @@ An empty list is empty, as dbt keeps its default for a missing key only."
                            (dbt-project-entities root '(macro) "normalise"))
                    '(("vocab" "local_packages/vocab/macros/normalise.sql"))))))
 
+(ert-deftest dbt-project-index-finds-packages-at-their-install-path ()
+  "Packages installed under packages-install-path are the project's packages."
+  (dbt-test-with-project root
+    (rename-file (expand-file-name "dbt_packages" root) (expand-file-name "dbt_modules" root))
+    (with-temp-file (expand-file-name "dbt_project.yml" root)
+      (insert "name: shop\npackages-install-path: dbt_modules\n"))
+    (should (equal (mapcar #'car (dbt-project-packages root)) '("shop" "shop_utils")))
+    (should (equal (dbt-test-entity root 'macro "is_positive")
+                   '(macro "is_positive" "shop_utils" "dbt_modules/shop_utils/macros/is_positive.sql" 1)))))
+
 (ert-deftest dbt-project-index-sees-saved-files-once-forgotten ()
   "A new model shows once the project is forgotten, as saving a buffer does."
   (dbt-test-with-project root
