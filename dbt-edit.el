@@ -111,33 +111,35 @@ otherwise, or with an active region, this is `delete-backward-char'."
     "materialization" "block" "with")
   "The Jinja statements that open a block, which `end' and their name close.")
 
-(defun dbt-edit-blocks (&optional limit)
+(defun dbt-edit-blocks (limit)
   "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
-LIMIT defaults to the end of the buffer.  CLOSED lists the closed
-blocks, OPEN those still open at LIMIT, innermost first.  A block is
-\(KEYWORD OPEN-START OPEN-END CLOSE-START CLOSE-END), the last two only
-when it is closed.  A `set' opens a block only without `=', and a tag
-in a `{# #}' comment or not closed yet counts for nothing."
+CLOSED lists the closed blocks, OPEN those still open at LIMIT,
+innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
+CLOSE-END), the last two only when it is closed.  A `set' opens a block
+only without `=', and a tag in a `{# #}' comment or not closed yet
+counts for nothing; a tag that starts before LIMIT counts whole."
   (save-excursion
     (goto-char (point-min))
     (let (closed open)
-      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" limit t)
+      ;; After a tag that ends past LIMIT, no search may bound behind point.
+      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
         ;; dbt-mode-jinja-bounds searches: read the match before it.
         (let* ((start (match-beginning 0))
                (closing (match-beginning 1))
                (keyword (match-string-no-properties 2))
-               (end (and (not (nth 4 (syntax-ppss start))) (cdr (dbt-mode-jinja-bounds (match-end 0)))))
-               (text (and end (buffer-substring-no-properties start end))))
-          (cond ((null end))
-                (closing
-                 (when-let* ((block (assoc keyword open)))
-                   (setq open (delq block open))
-                   (push (append block (list start end)) closed)))
-                ;; A `set' with `=' assigns a value, and opens no block.
-                ((member keyword (if (string-search "=" text) (remove "set" dbt-edit-block-keywords)
-                                   dbt-edit-block-keywords))
-                 (push (list keyword start end) open)))
-          (goto-char (or end (match-end 0)))))
+               (end (and (not (nth 4 (save-excursion (syntax-ppss start))))
+                         (cdr (dbt-mode-jinja-bounds (match-end 0))))))
+          (when end
+            (cond (closing
+                   (when-let* ((block (assoc keyword open)))
+                     (setq open (delq block open))
+                     (push (append block (list start end)) closed)))
+                  ;; A `set' with `=' assigns a value, and opens no block.
+                  ((member keyword (if (string-search "=" (buffer-substring-no-properties start end))
+                                       (remove "set" dbt-edit-block-keywords)
+                                     dbt-edit-block-keywords))
+                   (push (list keyword start end) open)))
+            (goto-char end))))
       (cons closed open))))
 
 (defcustom dbt-indent-offset 4
@@ -246,7 +248,7 @@ On a blank line, the tag is indented as its opening tag."
          (opening (lambda (block) (and (<= (nth 1 block) position) (< position (nth 2 block)))))
          (block (or (seq-find (lambda (block) (or (funcall opening block)
                                                   (and (<= (nth 3 block) position) (< position (nth 4 block)))))
-                              (car (dbt-edit-blocks)))
+                              (car (dbt-edit-blocks (point-max))))
                     (user-error "Not on a tag of a closed Jinja block"))))
     (goto-char (if (funcall opening block) (nth 3 block) (nth 1 block)))))
 
@@ -303,7 +305,7 @@ takes them.  For `expreg-functions'; nil in any other mode."
                         (and (<= (nth 1 block) position (nth 4 block))
                              `((dbt-block ,(nth 1 block) . ,(nth 4 block))
                                (dbt-block-contents ,(nth 2 block) . ,(nth 3 block)))))
-                      (car (dbt-edit-blocks)))))))
+                      (car (dbt-edit-blocks (point-max))))))))
 
 (provide 'dbt-edit)
 ;;; dbt-edit.el ends here

@@ -315,5 +315,33 @@ orders.sql does not indent the body of its block; dbt-mode does."
       (goto-char (point-min))
       (should (search-forward "\n        col_39,\n    {% if is_incremental() %}\n        updated_at,\n" nil t)))))
 
+(ert-deftest dbt-edit-indents-within-a-tag-of-several-lines ()
+  "TAB, RET and C-M-\\ indent the lines of a `{% %}' tag of several lines as those of its parenthesis or clause."
+  (dbt-test-with-window "{%- set payment_methods = [\n'credit_card',\n'coupon',\n] -%}\nselect 1\n"
+    (electric-indent-local-mode 1)
+    (dbt-test-goto "'coupon'")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (dbt-test-goto "] -%}")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0))
+    (dbt-test-goto "'coupon',")
+    (end-of-line)
+    (dbt-test-keys "RET")
+    (should (= (current-column) 4))
+    ;; A region that ends within the tag.
+    (goto-char (point-min))
+    (dbt-test-keys "C-SPC")
+    (dbt-test-goto "'coupon'")
+    (dbt-test-keys "C-M-\\")
+    (should (equal (buffer-substring-no-properties (point-min) (point))
+                   "{%- set payment_methods = [\n    'credit_card',\n    ")))
+  (should (equal (dbt-test-indented "{% macro generate_alias_name(\ncustom_alias_name=none,\nnode=none\n) -%}\nselect 1\n{%- endmacro %}\n")
+                 "{% macro generate_alias_name(\n    custom_alias_name=none,\n    node=none\n) -%}\n    select 1\n{%- endmacro %}\n"))
+  (dbt-test-with-window "select *\nfrom t\nwhere a = 1\n{% if target.name == 'prod'\nand var('full_refresh', false) %}\n"
+    (dbt-test-goto "and var")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
