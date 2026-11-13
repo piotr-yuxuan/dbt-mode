@@ -129,6 +129,19 @@
     (dbt-test-goto "order_status")
     (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status")))))
 
+(ert-deftest dbt-mode-target-at-point-qualifies-the-entries-of-a-package ()
+  "The YAML entry of a package's model names that model, not the project's."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/orders.sql" root))
+    (write-region "models:\n  - name: orders\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_utils.yml" root))
+    (dbt-test-visit root "dbt_packages/shop_utils/models/_utils.yml")
+    (dbt-test-goto "orders")
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders")))
+    (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
+
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
   (dolist (target '((:kind ref :qualifier nil :name "orders")
