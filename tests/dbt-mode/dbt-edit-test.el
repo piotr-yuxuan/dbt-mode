@@ -374,6 +374,12 @@ Its text is left as it is."
     (should (equal (dbt-test-indented text) text))
     (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
 
+(ert-deftest dbt-edit-indents-an-else-branch-by-itself ()
+  "A line in an else branch is one step in from it, whatever the if branch holds."
+  (let ((text (concat "select *\nfrom events\n{% if is_incremental() %}\n    where updated_at > (select max(updated_at) from {{ this }})\n"
+                      "{% else %}\n    -- a full refresh reads everything\n    {{ some_filter() }}\n{% endif %}\n")))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
 (ert-deftest dbt-edit-keeps-left-and-right-among-columns ()
   "Columns that call left() or right() are columns, one step in from select; a join with left or natural is a clause."
   (let ((text (concat "select\n    id,\n    left(name, 3) as initials,\n    RIGHT (code, 2) as suffix,\n    name\n"

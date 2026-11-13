@@ -218,7 +218,9 @@ with a CTE, NAME as (, stays at the base, and so does a Jinja statement
 tag that leads to one of them, to a closer or to the end of the buffer,
 past tags, comments and blank lines; any other line is one step in from
 the nearest line above at its level that starts a clause: the columns
-of a select, the conditions of a where, a tag among them."
+of a select, the conditions of a where, a tag among them.  In an else
+or elif branch, that line is in the branch, else the line is one step
+in from its block."
   (save-excursion
     (back-to-indentation)
     (let* ((opener (dbt-edit--opener (line-beginning-position) blocks))
@@ -232,14 +234,18 @@ of a select, the conditions of a where, a tag among them."
             (t
              ;; Up the clause lines of its level, past what a construct
              ;; closed since then holds, and past lines in a string or a
-             ;; comment.
+             ;; comment, up to an else or elif of its block.
              (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
                (beginning-of-line)
-               (while (and (not found) (re-search-backward (concat "^[ \t]*" dbt-edit-clause-regexp) bound t))
+               (while (and (not found)
+                           (re-search-backward (concat "^[ \t]*\\(?:{%-?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
+                                                       dbt-edit-clause-regexp "\\)")
+                                               bound t))
                  (let ((other (dbt-edit--opener (point) blocks)))
                    (cond ((> other opener) (goto-char other))
-                         ((not (nth 8 (syntax-ppss (point))))
-                          (setq found (current-indentation)))))))
+                         ((nth 8 (syntax-ppss (point))))
+                         ((looking-at-p "[ \t]*{") (setq found column))
+                         (t (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
 (defun dbt-edit--indent (blocks)
