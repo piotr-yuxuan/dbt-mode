@@ -10,6 +10,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'dbt-mode-test-helpers)
 (require 'dbt-mode)
 (require 'imenu)
@@ -492,6 +493,20 @@
     (insert " {{ ")
     (dbt-insert-ref "raw_orders")
     (should (string-suffix-p "{{ ref('raw_orders')" (buffer-string)))))
+
+(ert-deftest dbt-mode-inserts-no-ref-to-nothing ()
+  "RET on an empty answer inserts no ref: not to the buffer's own model, nor to nothing."
+  (dbt-test-with-project root
+    (dolist (file '("models/marts/customers.sql" "analyses/order_counts.sql" "macros/cents_to_dollars.sql"))
+      (dbt-test-visit root file)
+      (goto-char (point-max))
+      (let ((text (buffer-string)))
+        ;; The minibuffer: RET gives the default, or else the empty string.
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_prompt _collection &optional _predicate _require _initial _history default &rest _)
+                     (or (car-safe default) default ""))))
+          (should-error (call-interactively #'dbt-insert-ref) :type 'user-error))
+        (should (equal (buffer-string) text))))))
 
 (ert-deftest dbt-properties-mode-navigates-from-yaml ()
   "In a project's YAML, the mode turns on and M-. finds the model of an entry."

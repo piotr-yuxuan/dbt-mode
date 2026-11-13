@@ -495,11 +495,11 @@ In a YAML file, it is the resource whose entry holds point."
                     ((memq (plist-get target :kind) '(ref analysis))))
           (car (dbt-mode-definitions target))))))
 
-(defun dbt-mode-read-resource (prompt)
+(defun dbt-mode-read-resource (prompt &optional no-default)
   "Read the name of a model, seed or snapshot with PROMPT.
-The default is that of the current buffer."
+The default is that of the current buffer, unless NO-DEFAULT."
   (completing-read prompt (dbt-mode--candidates (dbt-project-entities (dbt-mode--root) '(model seed snapshot)))
-                   nil t nil nil (plist-get (dbt-mode-current-resource) :name)))
+                   nil t nil nil (unless no-default (plist-get (dbt-mode-current-resource) :name))))
 
 (defun dbt-find-resource (identifier)
   "Visit the definition of IDENTIFIER, read with completion.
@@ -586,10 +586,12 @@ With dbt lsp, the server gives the lineage; otherwise the `ref' and
 (defun dbt-insert-ref (name)
   "Insert a call of `ref' to NAME, read with completion.
 Outside a Jinja tag, the call comes within `{{ }}'.  A resource of an
-installed package is called with its package."
-  (interactive (list (dbt-mode-read-resource "ref: ")))
+installed package is called with its package.  The current resource is
+not the default: a model that refers to itself is a cycle."
+  (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
-         (entity (car (dbt-project-resolve-ref root nil name)))
+         (entity (or (car (dbt-project-resolve-ref root nil name))
+                     (user-error "No model, seed or snapshot named `%s'" name)))
          (call (if (equal (plist-get entity :package) (dbt-project-name root))
                    (format "ref('%s')" name)
                  (format "ref('%s', '%s')" (plist-get entity :package) name))))
