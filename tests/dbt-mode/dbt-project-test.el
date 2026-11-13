@@ -318,6 +318,20 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
     (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
 
+(ert-deftest dbt-project-index-skips-python-environments ()
+  "A virtual environment or a conda environment in the project is not read."
+  (dbt-test-with-project root
+    (dolist (environment '(("dbt-env" . "pyvenv.cfg") ("conda" . "conda-meta/history")))
+      (let ((directory (expand-file-name (car environment) root)))
+        (make-directory (expand-file-name "lib" directory) t)
+        (make-directory (file-name-directory (expand-file-name (cdr environment) directory)) t)
+        (write-region "" nil (expand-file-name (cdr environment) directory))
+        (write-region (format "{%% docs leaked_%s %%}x{%% enddocs %%}\n" (car environment)) nil
+                      (expand-file-name "lib/README.md" directory))))
+    (should-not (dbt-project-entities root '(doc) "leaked_dbt-env"))
+    (should-not (dbt-project-entities root '(doc) "leaked_conda"))
+    (should (dbt-project-entities root '(doc) "order_status"))))
+
 (ert-deftest dbt-project-file-entity-takes-the-nearest-package ()
   "In integration_tests that installs its parent with local: ../, a new model is its own."
   (dbt-test-with-project outer

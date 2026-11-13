@@ -357,16 +357,20 @@ copy.  NAME falls back to the name of the directory."
 (defun dbt-project-source-files (directory)
   "Return the source files of the project or package at DIRECTORY.
 They are its SQL, Python, CSV, Markdown and YAML files, outside hidden
-directories, those of `dbt-project-skipped-directories' and those of
-nested projects, such as local packages.  Hidden files go too, such as
-the lock files .#NAME of the buffers being edited."
+directories, those of `dbt-project-skipped-directories', those of
+nested projects, such as local packages, and Python environments, such
+as the dbt-env or venv that holds dbt itself: a directory with the
+pyvenv.cfg of venv, virtualenv and uv, or the conda-meta of conda.
+Hidden files go too, such as the lock files .#NAME of the buffers being
+edited."
   (directory-files-recursively
    directory "\\`[^.].*\\.\\(?:sql\\|py\\|csv\\|md\\|ya?ml\\)\\'" nil
    (lambda (subdirectory)
      (not (or (string-prefix-p "." (file-name-nondirectory subdirectory))
               (member (file-relative-name subdirectory directory)
                       dbt-project-skipped-directories)
-              (file-exists-p (expand-file-name dbt-project-file subdirectory)))))))
+              (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))
+                        (list dbt-project-file "pyvenv.cfg" "conda-meta")))))))
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.
