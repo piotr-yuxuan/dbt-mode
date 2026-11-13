@@ -60,6 +60,13 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
 Such as an Org Babel block of dbt."
   :type '(repeat string))
 
+(defun dbt-project-executable ()
+  "Return the file of the dbt to run, as `executable-find' finds it.
+That is `dbt-executable', a file or a name on the variable `exec-path'.
+Signal a `user-error' when there is none, before anything starts."
+  (or (executable-find dbt-executable)
+      (user-error "No dbt to run: no executable %s" dbt-executable)))
+
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
 Saving a buffer of the project forgets the index at once; this bounds how

@@ -90,13 +90,15 @@ query."
          (default-directory root)
          (limit (or limit dbt-preview-limit))
          (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
+         ;; Before any buffer or process exists, which a refusal would leave.
+         (executable (progn (dbt-cli--save-project root) (dbt-project-executable)))
          (output (generate-new-buffer " *dbt show*"))
          (errors (make-pipe-process :name "dbt show errors" :buffer (generate-new-buffer " *dbt show errors*")
                                     :noquery t :sentinel #'ignore)))
-    (dbt-cli--save-project root)
+    (message "dbt show runs for %s..." name)
     (make-process
      :name "dbt show" :buffer output :stderr errors :noquery t :connection-type 'pipe
-     :command `(,dbt-executable "show" "--quiet" "--output" "json" "--limit" ,(number-to-string limit)
+     :command `(,executable "show" "--quiet" "--output" "json" "--limit" ,(number-to-string limit)
                 ,@(if sql (list "--inline" sql) (list "--select" name)))
      :sentinel
      (lambda (process _event)

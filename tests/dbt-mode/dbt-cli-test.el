@@ -125,6 +125,17 @@ another dbt holds the project."
         (dbt-test-wait (lambda () (null tabulated-list-entries)))
         (kill-buffer)))))
 
+(ert-deftest dbt-cli-show-leaves-nothing-behind-without-dbt ()
+  "Without dbt, a preview says so, and leaves no buffer or process behind."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "no-dbt-here" root))
+          (buffers (buffer-list))
+          (processes (process-list)))
+      (should-error (dbt-cli-show "orders" nil) :type 'user-error)
+      (should (equal (process-list) processes))
+      (should-not (seq-difference (buffer-list) buffers)))))
+
 (ert-deftest dbt-cli-names-the-rows-of-a-cte-after-their-model ()
   "The rows of a CTE show in a grid of their model's: the renamed CTE of each model has its own."
   (dbt-test-with-project root
