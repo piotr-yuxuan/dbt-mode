@@ -173,8 +173,9 @@ otherwise write over a later save."
 BUFFER is saved: its file is what dbt formats.  Once dbt ends, BUFFER
 is read again when the file changed, unless its text changed meanwhile:
 then that text wins the next save, which a message says.  dbt may fail
-on another file of the project and still format this one; its error is
-the last message.  A save of BUFFER waits for its format to end."
+on another file of the project and still format this one; its error,
+which names its file, is the last message.  A save of BUFFER waits for
+its format to end."
   (with-current-buffer buffer
     (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
            (default-directory root)
@@ -190,15 +191,16 @@ the last message.  A save of BUFFER waits for its format to end."
                :name "dbt format" :buffer (generate-new-buffer " *dbt format*") :noquery t :connection-type 'pipe
                :command command
                :sentinel
-               (lambda (process _event)
+               (lambda (process event)
                  (unless (process-live-p process)
                    (unwind-protect
                        (let ((failure (and (/= 0 (process-exit-status process))
                                            (with-current-buffer (process-buffer process)
                                              (goto-char (point-min))
-                                             (if (re-search-forward "^\\[error\\] \\(.*\\)" nil t)
-                                                 (match-string 1)
-                                               (format "exit status %d" (process-exit-status process))))))
+                                             ;; dbt names the file of its error on the next line.
+                                             (if (re-search-forward "^\\[error\\] .*\\(?:\n[ \t]*--> .*\\)?" nil t)
+                                                 (replace-regexp-in-string "\n[ \t]*" " " (match-string 0))
+                                               (string-trim event)))))
                              (changed (and (buffer-live-p buffer) (not (verify-visited-file-modtime buffer)))))
                          (when changed
                            (with-current-buffer buffer
@@ -208,8 +210,7 @@ the last message.  A save of BUFFER waits for its format to end."
                                (set-visited-file-modtime)
                                (message "dbt formatted %s on disk; your edits since win the next save" name))))
                          (when failure
-                           (message (if changed "dbt formatted %s, with errors: %s" "dbt could not format %s: %s")
-                                    name failure)))
+                           (message "dbt format %s failed: %s" name failure)))
                      (kill-buffer (process-buffer process)))))))))))
 
 (defun dbt-cli-arguments (arguments &optional changed)

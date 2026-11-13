@@ -473,7 +473,8 @@ saved; dbt's runs leave no buffer behind."
           (should (string-prefix-p "-- formatted\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql"))))
         (let ((start (with-current-buffer (messages-buffer) (point-max))))
           (execute-kbd-macro (kbd "C-c C-q"))
-          (dbt-test-message-since start "dbt could not format orders\\.sql: \\[DependencyNotFound (dbt1048)\\]")
+          (dbt-test-message-since
+           start "dbt format orders\\.sql failed: \\[error\\] \\[DependencyNotFound (dbt1048)\\].* --> models/marts/orders\\.sql:12:19")
           (dbt-test-formatted)
           (should-not (buffer-modified-p))
           (should (string-search "-- typed meanwhile\n" (buffer-string)))
@@ -481,7 +482,9 @@ saved; dbt's runs leave no buffer behind."
         (should-not (seq-difference (buffer-list) buffers))))))
 
 (ert-deftest dbt-cli-formats-the-file-that-dbt-formats-despite-another-file ()
-  "dbt formats the file and fails on another file's error: the buffer shows the file, the error the message."
+  "dbt formats the file and fails on another file's error: the buffer shows the file, the message names the other.
+So it does when the file was formatted already, which dbt 2.0.9 leaves
+as it is."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
@@ -491,10 +494,18 @@ saved; dbt's runs leave no buffer behind."
         (goto-char (point-min))
         (insert "-- edited\n")
         (execute-kbd-macro (kbd "C-c C-q"))
-        (dbt-test-message-since start "dbt formatted orders\\.sql, with errors: .*models/wip\\.sql")
+        (dbt-test-message-since start "dbt format orders\\.sql failed: \\[error\\] .* --> models/wip\\.sql")
         (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
         (should-not (buffer-modified-p))
-        (should (verify-visited-file-modtime))))))
+        (should (verify-visited-file-modtime))
+        ;; Emacs folds a message that repeats the last into its line.
+        (message "Formatted already:")
+        (let ((process-environment (cons "FAKE_DBT_FORMATTED=1" process-environment))
+              (start (with-current-buffer (messages-buffer) (point-max))))
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-message-since start "dbt format orders\\.sql failed: \\[error\\] .* --> models/wip\\.sql")
+          (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+          (should-not (buffer-modified-p)))))))
 
 (ert-deftest dbt-cli-formats-twice-in-a-row ()
   "C-c C-q twice in a row: the buffer shows the file as both formats left it, and no edit is said to win."
