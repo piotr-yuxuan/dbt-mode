@@ -18,6 +18,8 @@
           pkgs.git
           # xref-matches-in-files searches with grep or ripgrep.
           pkgs.ripgrep
+          # tests/bin/dbt runs the scripted dbt lsp, fake_dbt_lsp.py.
+          pkgs.python3
         ];
       };
     in
