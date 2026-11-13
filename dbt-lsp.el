@@ -198,11 +198,12 @@ or holds an error, a message says so."
                          :error-handler (lambda (error)
                                           (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
 
-(defun dbt-lsp--compiled (callback)
+(defun dbt-lsp-compiled (callback)
   "Save the current buffer, have the server compile it, then call CALLBACK.
 CALLBACK runs with no argument in the buffer of the compiled SQL, which
 is read-only.  The server compiles the file on disk, hence the save."
-  (save-buffer)
+  (when (buffer-modified-p)
+    (save-buffer))
   (dbt-lsp--execute
    "dbt.compileFile" (list (lsp--buffer-uri)) '(object (:file_uri stringp))
    (lambda (result)
@@ -216,7 +217,7 @@ is read-only.  The server compiles the file on disk, hence the save."
   "Show the SQL that the current model compiles to, in another window.
 The buffer is saved first, as the server compiles the file on disk."
   (interactive)
-  (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
+  (dbt-lsp-compiled (lambda () (display-buffer (current-buffer)))))
 
 (defun dbt-lsp-show (&optional sql title limit rerun)
   "Show the rows of the current model, or of the query SQL, as TITLE.
@@ -262,7 +263,7 @@ the model is compiled again."
   (interactive (list (car (dbt-mode-cte-query))))
   (let ((source (current-buffer))
         (file buffer-file-name))
-    (dbt-lsp--compiled
+    (dbt-lsp-compiled
      (lambda ()
        (let ((query (dbt-mode-cte-query name)))
          (with-current-buffer source

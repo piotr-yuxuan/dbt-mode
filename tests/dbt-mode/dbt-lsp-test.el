@@ -324,6 +324,27 @@ for a CTE, the model is compiled again first."
           (revert-buffer)
           (dbt-test-wait (lambda () (> (length (dbt-lsp-test-methods)) asked))))))))
 
+(ert-deftest dbt-lsp-compiles-again-on-save-while-the-compiled-sql-shows ()
+  "With the compiled SQL beside it, saving the model has the server compile it again."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+         :error nil))
+    (let ((compiled (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+          (compiles (lambda () (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                          (dbt-lsp-test-methods)))))
+      (make-directory (file-name-directory compiled) t)
+      (write-region "select 1\n" nil compiled)
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (dbt-visit-compiled)
+        (dbt-test-wait (lambda () (get-file-buffer compiled)))
+        (should dbt-compiled-follow-mode)
+        (let ((before (funcall compiles)))
+          (insert " ")
+          (save-buffer)
+          (dbt-test-wait (lambda () (> (funcall compiles) before))))))))
+
 (ert-deftest dbt-lsp-compile-file-shows-the-compiled-sql ()
   "C-c C-v shows, read-only, the file of compiled SQL that the server names."
   (dbt-lsp-test-with-server root

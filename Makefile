@@ -9,7 +9,7 @@
 EMACS ?= emacs
 DEPS ?=
 SCRATCH := scripts/with-scratch-home
-PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-new.el dbt-lsp.el
+PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-lsp.el
 TOOL_EL := $(wildcard scripts/*.el tests/helpers/*.el) tests/run-ert.el
 LOAD := -L . $(addprefix -L ,$(DEPS))
 # Without a dbt 2, the live tests skip for this reason only.

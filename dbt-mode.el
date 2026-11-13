@@ -80,11 +80,11 @@
 (autoload 'dbt-edit-beginning-of-cte "dbt-edit")
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
 (autoload 'dbt-edit-blocks "dbt-edit")
+(autoload 'dbt-compiled-show "dbt-compiled")
 (autoload 'dbt-cli-show "dbt-cli")
 (autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
-(declare-function dbt-lsp-compile-file "dbt-lsp")
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
@@ -656,18 +656,16 @@ That is its compiled SQL within the DDL that dbt ran."
     (pop-to-buffer (current-buffer))))
 
 (defun dbt-visit-compiled (&optional run)
-  "Show the SQL that the current model compiles to.
-With dbt lsp, the buffer is saved and the server compiles it.
-Otherwise, show what the last `dbt compile' or run wrote.  With RUN,
-interactively a prefix argument, show the SQL of the last run instead,
-as `dbt-visit-run' does."
+  "Show the SQL that the current model compiles to, beside the model.
+With dbt lsp, the buffer is saved and the server compiles it; otherwise
+it is what the last `dbt compile' or run wrote.  While it shows, it
+faces point and follows saves, as `dbt-compiled-follow-mode' says.  With
+RUN, interactively a prefix argument, show the SQL of the last run
+instead, as `dbt-visit-run' does."
   (interactive "P")
-  (cond (run (dbt-visit-run))
-        ((dbt-mode-server-p) (dbt-lsp-compile-file))
-        (t (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "compiled")
-                                                        (user-error "Not compiled yet: run dbt compile, or start dbt lsp")))
-             (read-only-mode 1)
-             (pop-to-buffer (current-buffer))))))
+  (if run
+      (dbt-visit-run)
+    (dbt-compiled-show)))
 
 (defun dbt-preview (&optional start end cte)
   "Show the rows of the current model, of the SQL from START to END, or a CTE's.
