@@ -155,6 +155,27 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
     (dbt-lsp-show "select 1 as a where false")
     (should (equal (dbt-lsp-test-rows "query") nil))))
 
+(ert-deftest dbt-lsp-show-shows-each-row-on-one-line ()
+  "A nested value shows as JSON, and a newline in a string as \\n."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show"
+         :columns ["s" "l" "nl"]
+         :data [(:s (:a "1" :b nil) :l ["1" "2"] :nl "line1\nline2")]
+         :error nil))
+    (dbt-lsp-show)
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+      (should (equal (count-lines (point-min) (point-max)) 1)))
+    (should (equal (dbt-lsp-test-rows "orders")
+                   '(("{\"a\":\"1\",\"b\":null}" "[\"1\",\"2\"]" "line1\\nline2"))))))
+
+(ert-deftest dbt-lsp-show-says-when-there-is-nothing-to-show ()
+  "When the server answers no columns, as for a macro, no table shows."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show" :columns nil :data nil :error nil))
+    (dbt-lsp-show)
+    (dbt-lsp-test-message "dbt lsp: dbt\\.show has no rows to show for orders")
+    (should-not (get-buffer "*dbt rows: orders*"))))
+
 (ert-deftest dbt-lsp-compile-file-shows-the-compiled-sql ()
   "C-c C-v shows, read-only, the file of compiled SQL that the server names."
   (dbt-lsp-test-with-server root
