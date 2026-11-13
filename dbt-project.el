@@ -55,6 +55,19 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   "The number of rows that a preview of a model or a query shows."
   :type 'natnum)
 
+(defcustom dbt-protected-targets '("prod")
+  "The targets on which an Org Babel block of dbt asks before it runs.
+While any target is protected, a block whose default target dbt-mode
+cannot read asks too."
+  :type '(repeat string))
+
+(defun dbt-project-executable ()
+  "Return the file of the dbt to run, as `executable-find' finds it.
+That is `dbt-executable', a file or a name on the variable `exec-path'.
+Signal a `user-error' when there is none, before anything starts."
+  (or (executable-find dbt-executable)
+      (user-error "No dbt to run: no executable %s" dbt-executable)))
+
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
 Saving a buffer of the project forgets the index at once; this bounds how
@@ -198,7 +211,7 @@ in any order, give the other properties."
     (seq-filter (lambda (entry) (plist-get entry :name)) (nreverse entries))))
 
 (defconst dbt-project-config-keys
-  '(("name" :name nil) ("target-path" :target-path "target")
+  '(("name" :name nil) ("profile" :profile nil) ("target-path" :target-path "target")
     ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
     ("analysis-paths" :analysis-paths ("analyses")) ("macro-paths" :macro-paths ("macros"))
@@ -374,6 +387,63 @@ edited."
                       dbt-project-skipped-directories)
               (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))
                         (list dbt-project-file "pyvenv.cfg" "conda-meta")))))))
+
+(defun dbt-project-manifest-node (file id)
+  "Return the node ID of the manifest FILE, as a hash table, or nil.
+Nil when FILE cannot be read or holds no such node.  Only the node is
+parsed, as a manifest grows to tens of MB: its id is the key of an
+object in \"nodes\" or \"sources\" only, as elsewhere, such as in
+\"child_map\", its value is an array.  The manifest is dbt's, read as it
+is."
+  (with-temp-buffer
+    (and (ignore-errors (insert-file-contents file) t)
+         (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+         (progn (backward-char)
+                (ignore-errors (json-parse-buffer :null-object nil))))))
+
+(defun dbt-project-default-target (root)
+  "Return the target that dbt runs on in ROOT when none is given, or nil.
+It is that of DBT_TARGET, else the target of the project's profile in
+the profiles.yml of DBT_PROFILES_DIR, else of ROOT, else of ~/.dbt, as
+dbt looks for them.  A target that is a call of env_var, with or
+without a default, is read as dbt reads it, from Emacs's environment,
+which dbt inherits.  Nil when they do not tell, as when the target is
+other Jinja."
+  (or (getenv "DBT_TARGET")
+      (let* ((profile (plist-get (dbt-project-config root) :profile))
+             (file (seq-find #'file-readable-p
+                             (mapcar (lambda (directory) (expand-file-name "profiles.yml" directory))
+                                     (delq nil (list (getenv "DBT_PROFILES_DIR") root "~/.dbt")))))
+             (target (and profile file
+                          (plist-get (seq-find (lambda (line)
+                                                 (and (equal (plist-get line :key) "target")
+                                                      (equal (plist-get line :path) (list profile))))
+                                               (dbt-project-yaml-scan (with-temp-buffer
+                                                                        (insert-file-contents file)
+                                                                        (buffer-string))))
+                                     :value))))
+        (cond ((not (and target (string-search "{{" target))) target)
+              ((string-match (concat "\\`{{[ \t]*env_var([ \t]*['\"]\\([^'\"]+\\)['\"][ \t]*"
+                                     "\\(?:,[ \t]*['\"]\\([^'\"]*\\)['\"][ \t]*\\)?)[ \t]*}}\\'")
+                             target)
+               (or (getenv (match-string 1 target)) (match-string 2 target)))))))
+
+(defun dbt-project-confirm-target (root target)
+  "Ask before SQL runs on TARGET in ROOT when it is protected; return its label.
+TARGET is the one given to dbt, or nil for dbt's default, which
+`dbt-project-default-target' reads.  The question comes on a target of
+`dbt-protected-targets', or on a default target that dbt-mode cannot
+read while a target is protected; a no is a `user-error'.  The label
+names the target for messages, as \"target dev\", or \"dbt's default
+target\" when dbt-mode cannot read it."
+  (let* ((target (or target (dbt-project-default-target root)))
+         (label (if target (concat "target " target) "dbt's default target")))
+    (when (and (if target (member target dbt-protected-targets) dbt-protected-targets)
+               (not (yes-or-no-p (format "Protected: %s.  Run on %s%s? "
+                                         (string-join dbt-protected-targets ", ") label
+                                         (if target "" ", which dbt-mode cannot read")))))
+      (user-error "Not run on %s" label))
+    label))
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.

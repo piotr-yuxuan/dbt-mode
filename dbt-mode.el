@@ -80,10 +80,12 @@
 (autoload 'dbt-edit-beginning-of-cte "dbt-edit")
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
 (autoload 'dbt-edit-blocks "dbt-edit")
-(declare-function dbt-cli-show "dbt-cli")
+(autoload 'dbt-compiled-show "dbt-compiled")
+(autoload 'dbt-compiled-diff "dbt-compiled" nil t)
+(autoload 'dbt-cli-show "dbt-cli")
+(autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
-(declare-function dbt-lsp-compile-file "dbt-lsp")
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
@@ -283,6 +285,25 @@ multiline construct, read again whole after a change within it.")
 
 ;;;; What point is on
 
+(defun dbt-mode-goto-cte (name)
+  "Move point to the end of the start of the CTE NAME, and return point.
+It is the first CTE NAME outside parentheses, else the first one: in
+compiled SQL, the CTEs of an inlined ephemeral model lie in the
+parentheses of its `__dbt__cte__' CTE, before the model's own.  The
+match data are those of `dbt-mode-cte-regexp'.  Return nil when there is
+no such CTE."
+  (let ((regexp (dbt-mode-cte-regexp name))
+        (case-fold-search t)
+        found first)
+    (goto-char (point-min))
+    (while (and (not found) (re-search-forward regexp nil t))
+      (if (= 0 (save-excursion (save-match-data (car (syntax-ppss (match-beginning 1))))))
+          (setq found (match-beginning 0))
+        (setq first (or first (match-beginning 0)))))
+    (when (or found first)
+      (goto-char (or found first))
+      (re-search-forward regexp nil t))))
+
 (defun dbt-mode-cte-query (&optional name)
   "Return the name of a CTE and a query of its rows, as a pair.
 The CTE is that named NAME, or else the last that starts before the end
@@ -293,7 +314,7 @@ snapshot, which the query would not close."
   (let ((case-fold-search t))
     (save-excursion
       (unless (if name
-                  (progn (goto-char (point-min)) (re-search-forward (dbt-mode-cte-regexp name) nil t))
+                  (dbt-mode-goto-cte name)
                 (end-of-line)
                 (re-search-backward (dbt-mode-cte-regexp) nil t))
         (user-error "No CTE here"))
@@ -655,18 +676,16 @@ That is its compiled SQL within the DDL that dbt ran."
     (pop-to-buffer (current-buffer))))
 
 (defun dbt-visit-compiled (&optional run)
-  "Show the SQL that the current model compiles to.
-With dbt lsp, the buffer is saved and the server compiles it.
-Otherwise, show what the last `dbt compile' or run wrote.  With RUN,
-interactively a prefix argument, show the SQL of the last run instead,
-as `dbt-visit-run' does."
+  "Show the SQL that the current model compiles to, beside the model.
+With dbt lsp, the buffer is saved and the server compiles it; otherwise
+it is what the last `dbt compile' or run wrote.  While it shows, it
+faces point and follows saves, as `dbt-compiled-follow-mode' says.  With
+RUN, interactively a prefix argument, show the SQL of the last run
+instead, as `dbt-visit-run' does."
   (interactive "P")
-  (cond (run (dbt-visit-run))
-        ((dbt-mode-server-p) (dbt-lsp-compile-file))
-        (t (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "compiled")
-                                                        (user-error "Not compiled yet: run dbt compile, or start dbt lsp")))
-             (read-only-mode 1)
-             (pop-to-buffer (current-buffer))))))
+  (if run
+      (dbt-visit-run)
+    (dbt-compiled-show)))
 
 (defun dbt-preview (&optional start end cte)
   "Show the rows of the current model, of the SQL from START to END, or a CTE's.
@@ -677,15 +696,17 @@ server runs the query, on the compiled SQL for a CTE; otherwise `dbt
 show' runs it, on the Jinja of the CTE."
   (interactive (cond (current-prefix-arg (list nil nil t))
                      ((use-region-p) (list (region-beginning) (region-end)))))
+  ;; QUERY is the name of the rows and their SQL, or nil for the file's:
+  ;; dbt lsp shows any file, dbt show a resource.
   (let ((query (cond (cte (dbt-mode-cte-query))
-                     (start (cons "query" (buffer-substring-no-properties start end))))))
-    (cond ((not (dbt-mode-server-p))
-           (require 'dbt-cli)
-           (dbt-cli-show (cdr query)
-                         (unless query (dbt-mode-resource-selector
-                                        (or (dbt-mode-current-resource) (user-error "No model here"))))))
-          (cte (dbt-lsp-preview-cte (car query)))
-          (t (dbt-lsp-show (cdr query) (car query))))))
+                     (start (cons (format "%s/query" (file-name-base (buffer-name)))
+                                  (buffer-substring-no-properties start end))))))
+    (cond (cte (funcall (if (dbt-mode-server-p) #'dbt-lsp-preview-cte #'dbt-cli-preview-cte) (car query)))
+          ((dbt-mode-server-p) (dbt-lsp-show (cdr query) (car query)))
+          (t (dbt-cli-show (or (car query)
+                               (dbt-mode-resource-selector
+                                (or (dbt-mode-current-resource) (user-error "No model here"))))
+                           (cdr query))))))
 
 (defun dbt-lineage (selector)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
@@ -744,15 +765,9 @@ write; the message says when it was written."
          (file (expand-file-name "manifest.json"
                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
          (id (dbt-project-node-id entity))
-         ;; Only the node is parsed, as a manifest grows to tens of MB.
-         ;; Its id is a key of an object in "nodes" or "sources" only:
-         ;; elsewhere, as in "child_map", its value is an array.
-         (node (with-temp-buffer
-                 (unless (ignore-errors (insert-file-contents file) t)
-                   (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
-                 (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
-                      (progn (backward-char)
-                             (ignore-errors (json-parse-buffer :null-object nil))))))
+         (node (if (file-readable-p file)
+                   (dbt-project-manifest-node file id)
+                 (user-error "No readable %s: run dbt parse first" (file-relative-name file root))))
          ;; The manifest is dbt's, read as it is: anything but a table
          ;; holding a string is no relation.
          (relation (and (hash-table-p node) (gethash "relation_name" node))))
@@ -849,6 +864,7 @@ CTE rather than by statement."
     ["Insert ref..." dbt-insert-ref]
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
+    ["Compiled SQL against a state..." dbt-compiled-diff]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     "---"

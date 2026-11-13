@@ -60,16 +60,110 @@ command, the selection only to the commands that select resources."
     (dbt-test-visit root "models/marts/orders.sql")
     (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
           (dbt-preview-limit 7))
-      (with-current-buffer (dbt-cli-show nil "orders")
-        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+      (dbt-cli-show "orders" nil)
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt show: orders*")))
         (should (equal default-directory root))
-        (should (string-match-p "^arguments: show --select orders --limit 7$" (buffer-string)))
+        (should (string-match-p "^arguments: show --quiet --output json --limit 7 --select orders$"
+                                (buffer-string)))
         (goto-char (point-min))
         (compilation-next-error 1)
         (let ((location (compilation--message->loc (get-text-property (point) 'compilation-message))))
           (should (equal (caar (compilation--loc->file-struct location)) "models/marts/orders.sql"))
           (should (equal (compilation--loc->line location) 12))
-          (should (equal (compilation--loc->col location) 19)))))))
+          (should (equal (compilation--loc->col location) 19)))
+        (kill-buffer)))))
+
+(ert-deftest dbt-cli-show-shows-the-rows-in-the-grid ()
+  "dbt show's JSON fills the grid, whatever dbt writes on stderr.
+In the grid, + runs dbt show again with twice the limit."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment))
+          (dbt-preview-limit 7))
+      (dbt-cli-show "a_cte" "select 1 as one")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: a_cte*")))
+        (should (equal (append (cadr (car tabulated-list-entries)) nil)
+                       '("show --quiet --output json --limit 7 --inline select 1 as one" "NULL")))
+        (dbt-rows-more)
+        (dbt-test-wait (lambda () (string-search "--limit 14 " (aref (cadr (car tabulated-list-entries)) 0))))
+        (kill-buffer)))))
+
+(ert-deftest dbt-cli-asks-again-for-a-cte-as-it-is-now ()
+  "g in the rows of a CTE runs its query as the model's file now writes it."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (dbt-cli-preview-cte "customers")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
+        (should (string-search "ref('stg_customers')" (aref (cadr (car tabulated-list-entries)) 0)))
+        (with-current-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root))
+          (dbt-test-goto "ref('stg_customers')")
+          (replace-match "ref('raw_customers')")
+          (save-buffer)
+          (kill-buffer))
+        (revert-buffer)
+        (dbt-test-wait (lambda () (string-search "ref('raw_customers')" (aref (cadr (car tabulated-list-entries)) 0))))
+        (kill-buffer)))))
+
+(ert-deftest dbt-cli-shows-the-rows-whatever-dbt-prints-first ()
+  "The rows read after a line that dbt prints before them; no rows empty the grid.
+dbt 2.0.9 prints \"Waiting for lease\" on stdout, even quiet, when
+another dbt holds the project."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (append '("FAKE_DBT_SUCCEED=1"
+                                         "FAKE_DBT_OUTPUT=Waiting for lease on 'dbt_packages' directory\n[{\"a\":1}]")
+                                       process-environment)))
+      (dbt-cli-show "orders" nil)
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries) '(("1"))))
+        (let ((process-environment (cons "FAKE_DBT_OUTPUT=[]" process-environment)))
+          (revert-buffer))
+        (dbt-test-wait (lambda () (null tabulated-list-entries)))
+        (kill-buffer)))))
+
+(ert-deftest dbt-cli-show-leaves-nothing-behind-without-dbt ()
+  "Without dbt, a preview says so, and leaves no buffer or process behind."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "no-dbt-here" root))
+          (buffers (buffer-list))
+          (processes (process-list)))
+      (should-error (dbt-cli-show "orders" nil) :type 'user-error)
+      (should (equal (process-list) processes))
+      (should-not (seq-difference (buffer-list) buffers))
+      ;; A quit at the question of saving the project leaves nothing either.
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+        (insert "-- unsaved\n")
+        (cl-letf (((symbol-function 'save-some-buffers) (lambda (&rest _) (signal 'quit nil))))
+          (should (eq 'quit (condition-case nil (progn (dbt-cli-show "orders" nil) 'shown) (quit 'quit)))))
+        (should (equal (process-list) processes))
+        (should-not (seq-difference (buffer-list) buffers))))))
+
+(ert-deftest dbt-cli-names-the-rows-of-a-cte-after-their-model ()
+  "The rows of a CTE show in a grid of their model's: the renamed CTE of each model has its own."
+  (dbt-test-with-project root
+    (write-region "with source as (\n    select * from {{ ref('raw_orders') }}\n),\n\nrenamed as (\n    select id as payment_id from source\n)\n\nselect * from renamed\n"
+                  nil (expand-file-name "models/staging/stg_payments.sql" root))
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (pcase-dolist (`(,model ,column) '(("stg_orders" "order_id") ("stg_payments" "payment_id")))
+        (with-current-buffer (dbt-test-visit root (format "models/staging/%s.sql" model))
+          (dbt-cli-preview-cte "renamed")
+          (with-current-buffer (dbt-test-wait (lambda () (get-buffer (format "*dbt rows: %s/renamed*" model))))
+            (should (string-search column (aref (cadr (car tabulated-list-entries)) 0)))))))))
+
+(ert-deftest dbt-cli-names-the-rows-of-a-region-after-its-file ()
+  "The rows of a region show in a grid named after its file."
+  (dbt-test-with-project root
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (dbt-preview (point-min) (+ (point-min) 10)))
+      (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/query*"))))))
 
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
@@ -117,20 +211,20 @@ The output is that of dbt 2.0.9 on a model that selects a missing column."
     (should (equal (dbt-test-compilation-messages) '(("target/run/shop/models/marts/badcol.sql" nil nil 2))))))
 
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
-  "With TERM naming a colour terminal, the output of dbt is plain and links.
+  "With TERM naming a colour terminal, dbt's JSON reads and its output links.
 Emacs started from a terminal passes its TERM on to dbt, which then
 colours its output and draws progress bars: none of them may reach the
-buffer, and the error must still link to its file."
+rows or the buffer, and the error must still link to its file."
   (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/customers.sql")
     (let ((dbt-executable (getenv "DBT_MODE_TEST_DBT"))
           (process-environment (cons "TERM=xterm-256color" process-environment)))
-      ;; dbt show writes the header of its table in bold even with no colours.
-      (with-current-buffer (dbt-cli-show "select 1 as the_answer" nil)
-        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))) 60)
-        (should (string-match-p "^│ the_answer │$" (buffer-string)))
-        (should-not (string-search "\e" (buffer-string))))
+      (dbt-cli-show "query" "select 42 as the_answer, null as nothing")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: query*")) 60)
+        (should (equal (mapcar #'car tabulated-list-format) '("the_answer" "nothing")))
+        (should (equal (append (cadr (car tabulated-list-entries)) nil) '("42" "NULL")))
+        (kill-buffer))
       (dbt-test-goto "ref('orders')")
       (replace-match "ref('nope')")
       (save-buffer)

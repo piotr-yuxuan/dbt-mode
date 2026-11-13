@@ -44,6 +44,7 @@
 (require 'dbt-lineage)
 (require 'dbt-mode)
 (require 'dbt-project)
+(require 'dbt-rows)
 (require 'lsp-mode)
 (require 'map)
 
@@ -197,11 +198,12 @@ or holds an error, a message says so."
                          :error-handler (lambda (error)
                                           (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
 
-(defun dbt-lsp--compiled (callback)
+(defun dbt-lsp-compiled (callback)
   "Save the current buffer, have the server compile it, then call CALLBACK.
 CALLBACK runs with no argument in the buffer of the compiled SQL, which
 is read-only.  The server compiles the file on disk, hence the save."
-  (save-buffer)
+  (when (buffer-modified-p)
+    (save-buffer))
   (dbt-lsp--execute
    "dbt.compileFile" (list (lsp--buffer-uri)) '(object (:file_uri stringp))
    (lambda (result)
@@ -215,71 +217,59 @@ is read-only.  The server compiles the file on disk, hence the save."
   "Show the SQL that the current model compiles to, in another window.
 The buffer is saved first, as the server compiles the file on disk."
   (interactive)
-  (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
+  (dbt-lsp-compiled (lambda () (display-buffer (current-buffer)))))
 
-(defvar-local dbt-lsp--rerun nil
-  "The function that runs the query of this buffer of results again.")
-
-(define-derived-mode dbt-lsp-results-mode tabulated-list-mode "dbt rows"
-  "Major mode of the rows that a dbt query returned."
-  (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lsp--rerun))))
-
-(defun dbt-lsp-show (&optional sql title)
+(defun dbt-lsp-show (&optional sql title limit rerun)
   "Show the rows of the current model, or of the query SQL, as TITLE.
-SQL may hold Jinja.  At most `dbt-preview-limit' rows.  TITLE defaults to
-the name of the model, or \"query\".  Without SQL, the buffer is saved
-first, as the server reads the model on disk.  Each row shows on one
-line: a newline in a value as \\n, a nested value as JSON.  JSON false
-reads as null in lsp-mode, so it shows as NULL."
+SQL may hold Jinja.  At most LIMIT rows, `dbt-preview-limit' by default.
+TITLE defaults to the name of the model, or \"query\".  Without SQL, the
+buffer is saved first, as the server reads the model on disk.  A nested
+value shows as JSON.  JSON false reads as null in lsp-mode, so it shows
+as NULL.  RERUN, a function of a limit, asks for the rows again from
+their grid; by default, the same query from the model's file."
   (interactive)
   (unless sql (save-buffer))
-  (let ((buffer (current-buffer))
-        (title (or title (if sql "query" (file-name-base buffer-file-name)))))
+  (let* ((file buffer-file-name)
+         (title (or title (if sql "query" (file-name-base file))))
+         (limit (or limit dbt-preview-limit))
+         (rerun (or rerun (lambda (limit)
+                            (with-current-buffer (find-file-noselect file)
+                              (dbt-lsp-show sql title limit))))))
     (dbt-lsp--execute
      "dbt.show" (list (if sql
-                          (list :inline sql :limit dbt-preview-limit)
-                        (list :uri (lsp--buffer-uri) :limit dbt-preview-limit)))
+                          (list :inline sql :limit limit)
+                        (list :uri (lsp--buffer-uri) :limit limit)))
      '(object (:columns (or null (array stringp))) (:data (or null (array (object)))))
      (lambda (result)
        (if (not (lsp-get result :columns))
            (message "dbt lsp: dbt.show has no rows to show for %s" title)
-         (let* ((columns (append (lsp-get result :columns) nil))
-                (rows (mapcar (lambda (row)
-                                (vconcat (mapcar (lambda (column)
-                                                   (let ((value (lsp-get row (intern (concat ":" column)))))
-                                                     (cond ((null value) "NULL")
-                                                           ((stringp value) (string-replace "\n" "\\n" value))
-                                                           (t (json-encode value)))))
-                                                 columns)))
-                              (append (lsp-get result :data) nil))))
-           (with-current-buffer (get-buffer-create (format "*dbt rows: %s*" title))
-             (dbt-lsp-results-mode)
-             (setq dbt-lsp--rerun (lambda () (with-current-buffer buffer (dbt-lsp-show sql title)))
-                   tabulated-list-format
-                   (vconcat (seq-map-indexed
-                             (lambda (column index)
-                               (list column (min 40 (apply #'max (length column)
-                                                           (mapcar (lambda (row) (length (aref row index))) rows)))
-                                     t))
-                             columns))
-                   tabulated-list-entries (seq-map-indexed (lambda (row index) (list index row)) rows))
-             (tabulated-list-init-header)
-             (tabulated-list-print)
-             (display-buffer (current-buffer))
-             (message "%d rows of %s" (length rows) title))))))))
+         (let ((columns (append (lsp-get result :columns) nil)))
+           (dbt-rows-show title columns
+                          (mapcar (lambda (row)
+                                    (mapcar (lambda (column)
+                                              (dbt-rows-cell (lsp-get row (intern (concat ":" column))) nil))
+                                            columns))
+                                  (append (lsp-get result :data) nil))
+                          limit rerun)
+           (message "%d rows of %s" (length (lsp-get result :data)) title)))))))
 
-(defun dbt-lsp-preview-cte (name)
-  "Show the rows of the CTE NAME of the current model.
+(defun dbt-lsp-preview-cte (name &optional limit)
+  "Show the rows of the CTE NAME of the current model, at most LIMIT of them.
 The CTE comes from the compiled SQL, where the Jinja that needs a model,
 such as `is_incremental', is rendered.  The buffer is saved first, as
-the server compiles the file on disk."
+the server compiles the file on disk.  Asked for again from its grid,
+the model is compiled again."
   (interactive (list (car (dbt-mode-cte-query))))
-  (let ((source (current-buffer)))
-    (dbt-lsp--compiled
+  (let ((source (current-buffer))
+        (file buffer-file-name))
+    (dbt-lsp-compiled
      (lambda ()
        (let ((query (dbt-mode-cte-query name)))
          (with-current-buffer source
-           (dbt-lsp-show (cdr query) (car query))))))))
+           (dbt-lsp-show (cdr query) (format "%s/%s" (file-name-base file) (car query)) limit
+                         (lambda (limit)
+                           (with-current-buffer (find-file-noselect file)
+                             (dbt-lsp-preview-cte name limit))))))))))
 
 (defun dbt-lsp--preview-cte (command)
   "Show the rows of the CTE that COMMAND, the command of a code lens, names.

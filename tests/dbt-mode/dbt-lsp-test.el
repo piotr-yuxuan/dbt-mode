@@ -294,6 +294,57 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
     (dbt-lsp-test-message "dbt lsp: dbt\\.show has no rows to show for orders")
     (should-not (get-buffer "*dbt rows: orders*"))))
 
+(ert-deftest dbt-lsp-asks-again-for-rows-from-the-model-s-file ()
+  "g in the rows asks the server again, once the model's buffer is gone too;
+for a CTE, the model is compiled again first."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.show" :columns ["n"] :data [(:n 1)] :error nil)
+        ("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+         :error nil))
+    (let ((compiled (expand-file-name "target/compiled/shop/models/marts/orders.sql" root)))
+      (make-directory (file-name-directory compiled) t)
+      (copy-file (expand-file-name "models/marts/orders.sql" root) compiled))
+    ;; Another buffer of the project keeps the server running.
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
+      (dbt-lsp))
+    (dbt-lsp-show)
+    (dbt-lsp-preview-cte "customers")
+    (let ((orders (current-buffer)))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
+        (let ((compiles (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                   (dbt-lsp-test-methods))))
+          (revert-buffer)
+          (dbt-test-wait (lambda () (> (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                                  (dbt-lsp-test-methods))
+                                       compiles)))))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (kill-buffer orders)
+        (let ((asked (length (dbt-lsp-test-methods))))
+          (revert-buffer)
+          (dbt-test-wait (lambda () (> (length (dbt-lsp-test-methods)) asked))))))))
+
+(ert-deftest dbt-lsp-compiles-again-on-save-while-the-compiled-sql-shows ()
+  "With the compiled SQL beside it, saving the model has the server compile it again."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+         :error nil))
+    (let ((compiled (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+          (compiles (lambda () (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                          (dbt-lsp-test-methods)))))
+      (make-directory (file-name-directory compiled) t)
+      (write-region "select 1\n" nil compiled)
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (dbt-visit-compiled)
+        (dbt-test-wait (lambda () (get-file-buffer compiled)))
+        (should dbt-compiled-follow-mode)
+        (let ((before (funcall compiles)))
+          (insert " ")
+          (save-buffer)
+          (dbt-test-wait (lambda () (> (funcall compiles) before))))))))
+
 (ert-deftest dbt-lsp-compile-file-shows-the-compiled-sql ()
   "C-c C-v shows, read-only, the file of compiled SQL that the server names."
   (dbt-lsp-test-with-server root
@@ -352,6 +403,16 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
                             (member "workspace/executeCommand dbt.compileFile"
                                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))))
 
+(ert-deftest dbt-lsp-previews-a-file-that-is-no-model ()
+  "With the server, C-c C-p shows the rows of any file it shows, such as a singular test."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show" :columns ["n"] :data [(:n "1")] :error nil))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "tests/assert_positive_amount.sql"))
+      (dbt-lsp)
+      (execute-kbd-macro (kbd "C-c C-p"))
+      (should (equal (dbt-lsp-test-rows "assert_positive_amount") '(("1")))))))
+
 (ert-deftest dbt-lsp-preview-cte-shows-the-rows-of-a-lens ()
   "The code lens of a CTE shows the rows of that CTE of the compiled SQL."
   (dbt-lsp-test-with-server root
@@ -365,7 +426,7 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
      (json-parse-string (json-encode (list :command "dbt.previewCte"
                                            :arguments (vector buffer-file-name '(:name "customers"))))
                         :null-object nil :false-object :json-false))
-    (should (equal (dbt-lsp-test-rows "customers") '(("1"))))
+    (should (equal (dbt-lsp-test-rows "orders/customers") '(("1"))))
     (should (string-match-p "select 1 as a"
                             (plist-get (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params)
                                                         :arguments)

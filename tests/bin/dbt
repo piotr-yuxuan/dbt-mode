@@ -2,13 +2,28 @@
 # SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 #
 # A stand-in for dbt.  `dbt lsp --help' succeeds, as dbt 2's does, and
-# `dbt lsp ...' runs the scripted server fake_dbt_lsp.py.  Any other
-# command prints its arguments, then an error as dbt 2 prints one, and
-# fails.
+# `dbt lsp ...' runs the scripted server fake_dbt_lsp.py.  With
+# FAKE_DBT_SUCCEED set, `dbt compile' prints JSON log lines, as with
+# --log-format json, one a CompiledNode whose SQL is its arguments, and
+# any other command prints one row of JSON, as `dbt show -q --output
+# json' does, holding its arguments and a null, or else FAKE_DBT_OUTPUT
+# when it is set; each writes a warning on stderr, and succeeds.
+# Otherwise it prints its arguments, then an error as dbt 2 prints one,
+# and fails.
 case "$1 $2" in
   "lsp --help") exit 0 ;;
   "lsp "*) exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@" ;;
 esac
+if [ -n "$FAKE_DBT_SUCCEED" ]; then
+  exec python3 -I -c 'import json, os, sys
+arguments = " ".join(sys.argv[1:])
+if sys.argv[1] == "compile":
+    print(json.dumps({"info": {"name": "MainReportVersion"}, "data": {}}))
+    print(json.dumps({"info": {"name": "CompiledNode"}, "data": {"compiled": arguments}}))
+else:
+    print(os.environ.get("FAKE_DBT_OUTPUT", json.dumps([{"arguments": arguments, "nothing": None}])))
+print("[warning] a warning, on stderr", file=sys.stderr)' "$@"
+fi
 echo "arguments: $*"
 echo "[error] [DependencyNotFound (dbt1048)]: Ref 'nope' not found in project."
 echo "  --> models/marts/orders.sql:12:19"
