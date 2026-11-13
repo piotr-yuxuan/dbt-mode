@@ -179,7 +179,8 @@ is read-only.  The server compiles the file on disk, hence the save."
   (dbt-lsp--execute
    "dbt.compileFile" (list (lsp--buffer-uri)) '(object (:file_uri stringp))
    (lambda (result)
-     (with-current-buffer (find-file-noselect (lsp--uri-to-path (lsp-get result :file_uri)))
+     ;; The file changes at each compilation: no question, as it is read again.
+     (with-current-buffer (find-file-noselect (lsp--uri-to-path (lsp-get result :file_uri)) t)
        (revert-buffer t t t)
        (read-only-mode 1)
        (funcall callback)))))

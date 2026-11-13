@@ -16,6 +16,7 @@
 ;; lsp-mode loads its own modules, such as lsp-lens, by their autoloads.
 (load "lsp-mode-autoloads" nil t)
 (require 'dbt-lsp)
+(require 'cl-lib)
 (require 'json)
 
 (defconst dbt-lsp-test-dbt (expand-file-name "bin/dbt" dbt-test-directory)
@@ -190,6 +191,26 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
       (should buffer-read-only)
       (should (equal (buffer-string) "select 1 as compiled\n"))
       (should (get-buffer-window (current-buffer) t)))))
+
+(ert-deftest dbt-lsp-compile-file-shows-what-changed-on-disk-without-asking ()
+  "Compiling again shows the compiled SQL anew, with no question in between."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))))
+    (let ((compiled (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+          (questions nil))
+      (make-directory (file-name-directory compiled) t)
+      (with-temp-file compiled (insert "select 1 as a\n"))
+      (dbt-lsp-compile-file)
+      (dbt-test-wait (lambda () (get-file-buffer compiled)))
+      (with-temp-file compiled (insert "select 2 as a\n"))
+      (set-file-times compiled (time-add nil 10))
+      ;; A question would come from the process filter, in the user's way.
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (push prompt questions) t)))
+        (dbt-lsp-compile-file)
+        (dbt-test-wait (lambda () (with-current-buffer (get-file-buffer compiled)
+                                    (equal (buffer-string) "select 2 as a\n")))))
+      (should-not questions))))
 
 (ert-deftest dbt-lsp-compiles-and-shows-the-buffer-saved ()
   "The server reads the file on disk, so the buffer is saved before it compiles or shows."
