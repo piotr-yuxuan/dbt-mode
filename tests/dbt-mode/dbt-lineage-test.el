@@ -79,7 +79,7 @@ A node is under the node through which it is nearest."
       (kill-buffer "*dbt lineage: stg_orders*"))))
 
 (ert-deftest dbt-lineage-folds-limits-and-exports-the-tree ()
-  "TAB folds a node; - and + show one level less and more; e writes the graph as dot."
+  "TAB folds a node; - and + show one level less and more, point on its node; e writes the graph as dot."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (dbt-lineage "stg_orders")
@@ -92,6 +92,7 @@ A node is under the node through which it is nearest."
       (should (save-excursion (search-forward "customers") (outline-invisible-p)))
       (execute-kbd-macro (kbd "-"))
       (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (should (looking-at "  orders  "))
       (execute-kbd-macro (kbd "+"))
       (should (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
       (let ((file (expand-file-name "lineage.dot" root)))

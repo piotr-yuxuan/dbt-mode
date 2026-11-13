@@ -119,18 +119,25 @@ Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
   "Return the depth of the deepest node of this buffer's lineage."
   (apply #'max 0 (mapcar #'cadr (append (car dbt-lineage--reach) (cdr dbt-lineage--reach)))))
 
+(defun dbt-lineage--show-depth (depth)
+  "Show the lineage to DEPTH, nil for every depth, point kept on its node.
+Point goes to the first line of that node while the tree shows it."
+  (let ((at (get-text-property (line-beginning-position) 'dbt-lineage-node)))
+    (setq dbt-lineage--depth depth)
+    (dbt-lineage--render)
+    (when-let* ((match (and at (text-property-search-forward 'dbt-lineage-node at t))))
+      (goto-char (prop-match-beginning match)))))
+
 (defun dbt-lineage-deeper ()
   "Show one level more of the lineage."
   (interactive)
-  (setq dbt-lineage--depth (and dbt-lineage--depth (< (1+ dbt-lineage--depth) (dbt-lineage--deepest))
-                                (1+ dbt-lineage--depth)))
-  (dbt-lineage--render))
+  (dbt-lineage--show-depth (and dbt-lineage--depth (< (1+ dbt-lineage--depth) (dbt-lineage--deepest))
+                                (1+ dbt-lineage--depth))))
 
 (defun dbt-lineage-shallower ()
   "Show one level less of the lineage, down to the nearest nodes."
   (interactive)
-  (setq dbt-lineage--depth (max 1 (1- (or dbt-lineage--depth (dbt-lineage--deepest)))))
-  (dbt-lineage--render))
+  (dbt-lineage--show-depth (max 1 (1- (or dbt-lineage--depth (dbt-lineage--deepest))))))
 
 (defun dbt-lineage-visit ()
   "Visit the file of the node on point's line."
