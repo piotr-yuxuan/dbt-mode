@@ -111,34 +111,216 @@ otherwise, or with an active region, this is `delete-backward-char'."
     "materialization" "block" "with")
   "The Jinja statements that open a block, which `end' and their name close.")
 
-(defun dbt-edit-blocks (&optional limit)
+(defvar-local dbt-edit--scans (list (list 0))
+  "The states that `dbt-edit-blocks' resumes its scan from, the last first.
+Each is (POSITION CLOSED . OPEN), the blocks of the tags before
+POSITION; the last is that of the buffer's start.  They hold for the
+whole buffer, never for a narrowing of it.")
+
+(defun dbt-edit--forget-scans (start &rest _)
+  "Forget the states of `dbt-edit--scans' that a change at START may alter.
+A tag before START and not closed yet may be closed by the change, up
+to `dbt-mode-jinja-max-tag-length' further on.  For
+`before-change-functions'."
+  (let ((floor (- start dbt-mode-jinja-max-tag-length)))
+    (while (and (cdr dbt-edit--scans) (>= (caar dbt-edit--scans) floor))
+      (pop dbt-edit--scans))))
+
+(defun dbt-edit-blocks (limit)
   "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
-LIMIT defaults to the end of the buffer.  CLOSED lists the closed
-blocks, OPEN those still open at LIMIT, innermost first.  A block is
-\(KEYWORD OPEN-START OPEN-END CLOSE-START CLOSE-END), the last two only
-when it is closed.  A `set' opens a block only without `=', and a tag
-in a `{# #}' comment or not closed yet counts for nothing."
+CLOSED lists the closed blocks, OPEN those still open at LIMIT,
+innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
+CLOSE-END), the last two only when it is closed.  A `set' opens a block
+only without `=', and a tag in a `{# #}' comment or not closed yet
+counts for nothing; a tag that starts before LIMIT counts whole.  The
+scan resumes from the last of `dbt-edit--scans' before LIMIT, unless the
+buffer is narrowed, and keeps the states it reaches when it resumed from
+the last of them.  The lists are those of the states: never modify
+them."
+  (add-hook 'before-change-functions #'dbt-edit--forget-scans nil t)
   (save-excursion
-    (goto-char (point-min))
-    (let (closed open)
-      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" limit t)
+    (let* ((scans (if (buffer-narrowed-p) (list (list 0)) dbt-edit--scans))
+           (scans (member (seq-find (lambda (state) (<= (car state) limit)) scans) scans))
+           ;; Resumed from an earlier state, the scan reaches no further
+           ;; than the states kept.
+           (kept (eq scans dbt-edit--scans))
+           (closed (cadar scans))
+           (open (cddar scans)))
+      (goto-char (caar scans))
+      ;; After a tag that ends past LIMIT, no search may bound behind point.
+      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
         ;; dbt-mode-jinja-bounds searches: read the match before it.
         (let* ((start (match-beginning 0))
                (closing (match-beginning 1))
                (keyword (match-string-no-properties 2))
-               (end (and (not (nth 4 (syntax-ppss start))) (cdr (dbt-mode-jinja-bounds (match-end 0)))))
-               (text (and end (buffer-substring-no-properties start end))))
-          (cond ((null end))
-                (closing
-                 (when-let* ((block (assoc keyword open)))
-                   (setq open (delq block open))
-                   (push (append block (list start end)) closed)))
-                ;; A `set' with `=' assigns a value, and opens no block.
-                ((member keyword (if (string-search "=" text) (remove "set" dbt-edit-block-keywords)
-                                   dbt-edit-block-keywords))
-                 (push (list keyword start end) open)))
-          (goto-char (or end (match-end 0)))))
+               (end (and (not (nth 4 (save-excursion (syntax-ppss start))))
+                         (cdr (dbt-mode-jinja-bounds (match-end 0))))))
+          (when end
+            (cond (closing
+                   (when-let* ((block (assoc keyword open)))
+                     ;; Not delq: the states kept share this list.
+                     (setq open (remove block open))
+                     (push (append block (list start end)) closed)))
+                  ;; A `set' with `=' assigns a value, and opens no block.
+                  ((member keyword (if (string-search "=" (buffer-substring-no-properties start end))
+                                       (remove "set" dbt-edit-block-keywords)
+                                     dbt-edit-block-keywords))
+                   (push (list keyword start end) open)))
+            (goto-char end))
+          (push (cons (point) (cons closed open)) scans)))
+      (when kept
+        (setq dbt-edit--scans scans))
       (cons closed open))))
+
+(defcustom dbt-indent-offset 4
+  "The columns by which a parenthesis or a Jinja block indents what it holds."
+  :type 'natnum
+  :group 'dbt)
+
+(defconst dbt-edit-clause-regexp
+  (concat "\\(?:"
+          (regexp-opt '("select" "from" "where" "group" "having" "qualify" "order" "limit" "offset" "union"
+                        "intersect" "except" "minus" "with" "window" "join" "lateral")
+                      'symbols)
+          ;; left(x, 3) is a column: a join's word starts a clause only
+          ;; with join after it.
+          "\\|\\_<\\(?:left\\|right\\|full\\|inner\\|cross\\|natural\\)\\_>[^(\n]*\\_<join\\_>"
+          ;; A window's partition and frame, at the level of its order by.
+          "\\|\\_<partition[ \t]+by\\_>"
+          "\\|\\_<\\(?:rows\\|range\\|groups\\)[ \t]+\\(?:between\\|unbounded\\|current\\|[0-9]\\)\\)")
+  "The keywords that start a clause of SQL, on a line of their own level.")
+
+(defconst dbt-edit--closer-regexp
+  "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
+  "What a line starts with when it closes the construct that holds it.")
+
+(defconst dbt-edit--base-regexp
+  (let ((leads (concat "\\(?:,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp "\\)"))
+        ;; A tag of one line or more, 4,000 characters at most, as the
+        ;; default of `dbt-mode-jinja-max-tag-length', or one not closed.
+        (tag "\\(?:{%\\(?:[^%]\\|%+[^%}]\\)\\{0,4000\\}%+}\\|{%\\)"))
+    (concat "\\(?:" leads
+            ;; A tag, past tags, comments and blank lines, 50 at most,
+            ;; before one, a closer or the end: {% if is_incremental() %}
+            ;; then where.
+            "\\|" tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
+            "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
+  "What a line starts with when it stays at the base of its construct.
+A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
+
+(defun dbt-edit--opener (position blocks)
+  "Return the start of the parenthesis or Jinja block open at POSITION, or 0.
+It is the one that opened last.  BLOCKS are Jinja blocks, closed or
+open, as `dbt-edit-blocks' gives them for a position after POSITION."
+  (let ((opener (or (nth 1 (save-excursion (syntax-ppss position))) 0)))
+    (dolist (block blocks opener)
+      (when (and (<= (nth 2 block) position (or (nth 3 block) position)) (> (nth 1 block) opener))
+        (setq opener (nth 1 block))))))
+
+(defun dbt-edit-indentation (blocks)
+  "Return the column that the current line indents to, given BLOCKS.
+BLOCKS are Jinja blocks, closed or open, as `dbt-edit-blocks' gives them
+for a position after the line's start.
+The nearest construct open at the line's start, a parenthesis or a Jinja
+block, indents it by `dbt-indent-offset' from the line that opened it.
+A line that starts by closing it, with `)', `]', `}' or a tag such as
+`{% endif %}' or `{% else %}', is at that line's column.  At that base,
+a line that starts with a clause keyword, such as select or from, or
+with a CTE, NAME as (, stays at the base, and so does a Jinja statement
+tag that leads to one of them, to a closer or to the end of the buffer,
+past 50 tags, comments and blank lines at most; any other line is one
+step in from the nearest line above at its level that starts a clause:
+the columns of a select, the conditions of a where, a tag among them.
+In an else or elif branch, that line is in the branch, else the line is
+one step in from its block."
+  (save-excursion
+    (back-to-indentation)
+    (let* ((opener (dbt-edit--opener (line-beginning-position) blocks))
+           ;; At the top level, as if a line one step out had opened it.
+           (column (if (= opener 0)
+                       (- dbt-indent-offset)
+                     (save-excursion (goto-char opener) (current-indentation))))
+           found)
+      (cond ((looking-at-p dbt-edit--closer-regexp) (max 0 column))
+            ((looking-at-p dbt-edit--base-regexp) (+ column dbt-indent-offset))
+            (t
+             ;; Up the clause lines of its level, past what a construct
+             ;; closed since then holds, and past lines in a string or a
+             ;; comment, up to an else or elif of its block.
+             (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
+               (beginning-of-line)
+               (while (and (not found)
+                           (re-search-backward (concat "^[ \t]*\\(?:{%-?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
+                                                       dbt-edit-clause-regexp "\\)")
+                                               bound t))
+                 (let ((other (dbt-edit--opener (point) blocks)))
+                   (cond ((> other opener) (goto-char other))
+                         ((nth 8 (syntax-ppss (point))))
+                         ((looking-at-p "[ \t]*{%-?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
+                         (t (setq found (current-indentation)))))))
+             (+ (or found column) dbt-indent-offset))))))
+
+(defun dbt-edit--indent (blocks)
+  "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
+A line that starts in a string or a comment keeps its indentation.  A
+line that starts a comment, with `--', `/*' or `{#', indents as the line
+of code after it, unless that code is on its own line or closes."
+  (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
+    (indent-line-to
+     (save-excursion
+       (back-to-indentation)
+       (when (looking-at-p "--\\|/\\*\\|{#")
+         (let ((start (point))
+               (end (line-end-position)))
+           (forward-comment (buffer-size))
+           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
+             (goto-char start))))
+       (dbt-edit-indentation blocks)))))
+
+(defun dbt-edit-indent-line ()
+  "Indent the current line as `dbt-edit-indentation' says.
+A line that starts in a string or a comment keeps its indentation, and
+one that starts a comment indents as the code after it.  Point keeps its
+place in the text, or goes to the indentation from within it.  For
+`indent-line-function'."
+  (let* ((blocks (dbt-edit-blocks (line-beginning-position)))
+         (blocks (append (car blocks) (cdr blocks))))
+    (if (<= (current-column) (current-indentation))
+        (dbt-edit--indent blocks)
+      (save-excursion (dbt-edit--indent blocks)))))
+
+(defun dbt-edit-indent-region (start end)
+  "Indent the lines from START to END that hold text.
+They indent as `dbt-edit-indent-line' indents them.  The Jinja blocks
+are read once, as markers, which follow the changes of indentation.
+For `indent-region-function'."
+  (let ((end (copy-marker end))
+        blocks)
+    (save-excursion
+      (unwind-protect
+          (progn
+            (dolist (block (let ((scan (dbt-edit-blocks end))) (append (car scan) (cdr scan))))
+              (push (cons (car block) (mapcar #'copy-marker (cdr block))) blocks))
+            (goto-char start)
+            (while (< (point) end)
+              (unless (looking-at-p "[ \t]*$")
+                (dbt-edit--indent blocks))
+              (forward-line 1)))
+        (dolist (block blocks)
+          (mapc (lambda (marker) (set-marker marker nil)) (cdr block)))
+        (set-marker end nil)))))
+
+(defun dbt-edit-electric-indent-p (char)
+  "Return non-nil when CHAR, just typed, decides the indentation of its line.
+For `electric-indent-functions': a `)', `]' or `}' that starts the
+line's text, and each letter of the first word of a `{%' tag that
+starts it, as `end...', `else' and `elif' move it."
+  (let ((end (point)))
+    (save-excursion
+      (back-to-indentation)
+      (cond ((memq char '(?\) ?\] ?\})) (= (1+ (point)) end))
+            ((or (eq char ?_) (<= ?a char ?z))
+             (and (looking-at "{%-?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
 
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.
@@ -157,7 +339,7 @@ On a blank line, the tag is indented as its opening tag."
          (opening (lambda (block) (and (<= (nth 1 block) position) (< position (nth 2 block)))))
          (block (or (seq-find (lambda (block) (or (funcall opening block)
                                                   (and (<= (nth 3 block) position) (< position (nth 4 block)))))
-                              (car (dbt-edit-blocks)))
+                              (car (dbt-edit-blocks (point-max))))
                     (user-error "Not on a tag of a closed Jinja block"))))
     (goto-char (if (funcall opening block) (nth 3 block) (nth 1 block)))))
 
@@ -214,7 +396,7 @@ takes them.  For `expreg-functions'; nil in any other mode."
                         (and (<= (nth 1 block) position (nth 4 block))
                              `((dbt-block ,(nth 1 block) . ,(nth 4 block))
                                (dbt-block-contents ,(nth 2 block) . ,(nth 3 block)))))
-                      (car (dbt-edit-blocks)))))))
+                      (car (dbt-edit-blocks (point-max))))))))
 
 (provide 'dbt-edit)
 ;;; dbt-edit.el ends here

@@ -41,6 +41,14 @@ Writing and moving:
   `dbt-edit-pair-jinja` turns all of it off;
 - `C-c /` closes the innermost open Jinja block, `{% endif %}` and the like,
   and `C-c %` moves between a block's opening and closing tags;
+- `TAB` and `C-M-\` indent by what holds a line: a parenthesis or a Jinja
+  block puts its contents one step, `dbt-indent-offset`, in from its line,
+  and `)`, `{% endif %}` or `{% else %}` back at that line, as soon as they
+  are typed; clauses sit at the level, the lines of a clause one step in,
+  as in dbt Labs' style guide; a Jinja tag sits at the level of what it
+  leads to, a clause or a column; a comment line sits as the code after
+  it; a line that starts in a string or a comment stays put, and dbt-mode
+  indents with spaces;
 - CTEs are the defuns of a model: `C-M-a`, `C-M-e`, `C-M-h` and `C-x n d`
   work on them; with [expreg](https://elpa.gnu.org/packages/expreg.html),
   `expreg-expand` also selects the Jinja tag and its contents, the block and
@@ -234,6 +242,7 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
 | `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; a request on a source that it lists goes to it |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
+| `dbt-indent-offset`            | `4`     | The columns by which a parenthesis or a Jinja block indents     |
 | `dbt-protected-targets`        | `("prod")` | The targets on which an Org block, the data diff and the dashboard's freshness ask first; an unread default asks too |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
 | `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
@@ -270,9 +279,12 @@ of the package already has.
 
 ## Limitations
 
-- Indentation is that of `sql-mode`, which has none of its own; the
-  [sql-indent](https://elpa.gnu.org/packages/sql-indent.html) package works
-  with dbt-mode.
+- Indentation knows parentheses, Jinja blocks and the clauses of SQL, not
+  the whole grammar: a `case`, its `when`s and its `end` sit at one column,
+  one step in from their clause.  A Jinja tag typed at the end of the
+  buffer, before what it leads to, sits at the clauses' level until
+  `C-M-\` places it.  A new line inside a block comment starts at the
+  first column.
 - The server gives the YAML files nothing in dbt 2.0.9; dbt-mode's own
   navigation and completion work there.
 - Without a server, previewing a CTE runs its Jinja as an inline query, with

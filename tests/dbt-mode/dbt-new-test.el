@@ -37,7 +37,8 @@
       (should (= 1 (how-many "stg_raw__raw_orders"))))))
 
 (ert-deftest dbt-new-writes-models-and-macros ()
-  "A model and an incremental model leave point in their ref; a macro is named."
+  "A model and an incremental model leave point in their ref; a macro is named.
+Each is written as dbt-mode indents it: C-x h C-M-\\ leaves it as it is."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (dbt-new-model (expand-file-name "models/marts/report.sql" root))
@@ -45,6 +46,10 @@
     (dbt-new-incremental-model (expand-file-name "models/marts/events.sql" root))
     (should (string-match-p "materialized='incremental'\\(?:.\\|\n\\)*{% if is_incremental() %}"
                             (dbt-test-file-text root "models/marts/events.sql")))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (execute-kbd-macro (kbd "C-x h C-M-\\"))
+      (should-not (buffer-modified-p)))
     (dbt-new-model (expand-file-name "models/marts/bare" root))
     (should (equal (file-relative-name buffer-file-name root) "models/marts/bare.sql"))
     (should-error (dbt-new-model (expand-file-name "models/marts/py_model.py" root)) :type 'user-error)
@@ -53,6 +58,10 @@
     (dbt-new-macro "dollars")
     (should (equal (file-relative-name buffer-file-name root) "macros/dollars.sql"))
     (should (string-prefix-p "{% macro dollars(" (buffer-string)))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (execute-kbd-macro (kbd "C-x h C-M-\\"))
+      (should-not (buffer-modified-p)))
     (should-error (dbt-new-macro "two words") :type 'user-error)
     (dbt-project-forget root)
     (should (dbt-project-entities root '(macro) "dollars"))))

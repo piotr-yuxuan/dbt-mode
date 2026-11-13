@@ -241,5 +241,278 @@ Each region is (NAME . (BEG . END)), as expreg reads them."
     (fundamental-mode)
     (should-not (dbt-edit-expreg-regions))))
 
+(defun dbt-test-indented (text)
+  "Return TEXT as C-x h C-M-\\ indents it in dbt-mode."
+  (dbt-test-with-window text
+    (dbt-test-keys "C-x h C-M-\\")
+    (buffer-string)))
+
+(ert-deftest dbt-edit-indents-ctes-clauses-and-what-they-hold ()
+  "A CTE's body is one step in from its line, its ) back there; a clause's lines one step in from it.
+A line that a closed parenthesis follows is one step in from the clause
+above it, and dbt-mode indents with spaces."
+  (should (equal (dbt-test-indented
+                  (concat "with orders as (\nselect * from x\n),\nfinal as (\nselect\nid,\ncoalesce(\na,\nb\n) as c,\n"
+                          "name\nfrom orders\nwhere a = 1\nand b = 2\n)\nselect * from final\n"))
+                 (concat "with orders as (\n    select * from x\n),\nfinal as (\n    select\n        id,\n"
+                         "        coalesce(\n            a,\n            b\n        ) as c,\n        name\n"
+                         "    from orders\n    where a = 1\n        and b = 2\n)\nselect * from final\n"))))
+
+(ert-deftest dbt-edit-indents-the-jinja-blocks-of-a-model ()
+  "A Jinja tag among a clause's lines is at their level, one before a clause at the clauses'; its block one step in.
+Its end and else are at its column, as dbt Labs' style guide writes
+Jinja."
+  (should (equal (dbt-test-indented
+                  (concat "select\nid,\n{% if x %}\nname,\n{% else %}\nother,\n{% endif %}\nlast\nfrom t\n"
+                          "{% if is_incremental() %}\n-- new rows only\nwhere a > 1\n{% endif %}\n"))
+                 (concat "select\n    id,\n    {% if x %}\n        name,\n    {% else %}\n        other,\n"
+                         "    {% endif %}\n    last\nfrom t\n{% if is_incremental() %}\n    -- new rows only\n"
+                         "    where a > 1\n{% endif %}\n")))
+  (should (equal (dbt-test-indented "{% macro cents_to_dollars(col) %}\n({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n")
+                 "{% macro cents_to_dollars(col) %}\n    ({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n"))
+  (should (equal (dbt-test-indented "{{\nconfig(\nmaterialized='table'\n)\n}}\n")
+                 "{{\n    config(\n        materialized='table'\n    )\n}}\n")))
+
+(ert-deftest dbt-edit-indents-a-line-with-tab ()
+  "TAB indents the line it is on; point keeps its place in the text, or goes to the indentation."
+  (dbt-test-with-window "select\n    id,\n{% if x %}\n    name,\n        {% endif %}"
+    (back-to-indentation)
+    (dbt-test-keys "TAB")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{% if x %}\n    name,\n-!-{% endif %}"))
+    (forward-line -1)
+    (end-of-line)
+    (insert "  ")
+    (dbt-test-keys "TAB")
+    (should (string-suffix-p "    name,  -!-\n{% endif %}" (dbt-test-around-point)))))
+
+(ert-deftest dbt-edit-leaves-strings-and-comments-as-they-are ()
+  "A line that starts within a string or a comment keeps its indentation, and starts no clause."
+  (let ((text "select\n    'a\n  long text' as t,\n    /* a\n      comment */\n    id\nfrom x\n"))
+    (should (equal (dbt-test-indented text) text)))
+  (let ((text "with x as (\n    select\n        /* note\nfrom the old table\n*/\n        a,\n        b\n    from t\n)\n"))
+    (should (equal (dbt-test-indented text) text))))
+
+(ert-deftest dbt-edit-indents-the-fixture-as-it-is-written ()
+  "The models of the fixture that follow dbt Labs' style keep their indentation.
+orders.sql does not indent the body of its block; dbt-mode does."
+  (dolist (file '("models/staging/stg_orders.sql" "models/staging/stg_customers.sql" "models/marts/customers.sql"))
+    (let ((text (dbt-test-file-text dbt-test-fixture file)))
+      (should (equal (dbt-test-indented text) text))))
+  (let ((text (dbt-test-file-text dbt-test-fixture "models/marts/orders.sql")))
+    (should (equal (dbt-test-indented text)
+                   (string-replace "\n    where orders" "\n        where orders" text)))))
+
+(ert-deftest dbt-edit-indents-a-large-model-at-once ()
+  "C-x h C-M-\\ indents a model of 2,000 lines, with a Jinja block in each CTE, in under 2 s."
+  (let ((text (with-temp-buffer
+                (insert "with ")
+                (dotimes (cte 40)
+                  (insert (format "%scte_%d as (\nselect\n" (if (> cte 0) ",\n" "") cte))
+                  (dotimes (column 40)
+                    (insert (format "col_%d,\n" column)))
+                  (insert "{% if is_incremental() %}\nupdated_at,\n{% endif %}\nid\nfrom {{ ref('x') }}\n)"))
+                (insert "\nselect * from cte_39\n")
+                (buffer-string))))
+    (dbt-test-with-window text
+      (let ((start (float-time)))
+        (dbt-test-keys "C-x h C-M-\\")
+        (should (< (- (float-time) start) 2.0)))
+      (goto-char (point-min))
+      (should (search-forward "\n        col_39,\n        {% if is_incremental() %}\n            updated_at,\n" nil t)))))
+
+(ert-deftest dbt-edit-indents-a-wide-select-at-once ()
+  "C-x h C-M-\\ indents a select of 1,000 columns, all in one clause, in under 2 s.
+Each column's line is placed by the select it belongs to, however far
+above."
+  (let ((text (with-temp-buffer
+                (insert "with renamed as (\nselect\n")
+                (dotimes (column 1000)
+                  (insert (format "col_%d as column_%d,\n" column column)))
+                (insert "id\nfrom source\n)\nselect * from renamed\n")
+                (buffer-string))))
+    (dbt-test-with-window text
+      (let ((start (float-time)))
+        (dbt-test-keys "C-x h C-M-\\")
+        (should (< (- (float-time) start) 2.0)))
+      (goto-char (point-min))
+      (should (search-forward "\n        col_999 as column_999,\n        id\n    from source\n)\n" nil t)))))
+
+(ert-deftest dbt-edit-indents-within-a-tag-of-several-lines ()
+  "TAB, RET and C-M-\\ indent the lines of a `{% %}' tag of several lines as those of its parenthesis or clause."
+  (dbt-test-with-window "{%- set payment_methods = [\n'credit_card',\n'coupon',\n] -%}\nselect 1\n"
+    (electric-indent-local-mode 1)
+    (dbt-test-goto "'coupon'")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (dbt-test-goto "] -%}")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0))
+    (dbt-test-goto "'coupon',")
+    (end-of-line)
+    (dbt-test-keys "RET")
+    (should (= (current-column) 4))
+    ;; A region that ends within the tag.
+    (goto-char (point-min))
+    (dbt-test-keys "C-SPC")
+    (dbt-test-goto "'coupon'")
+    (dbt-test-keys "C-M-\\")
+    (should (equal (buffer-substring-no-properties (point-min) (point))
+                   "{%- set payment_methods = [\n    'credit_card',\n    ")))
+  (should (equal (dbt-test-indented "{% macro generate_alias_name(\ncustom_alias_name=none,\nnode=none\n) -%}\nselect 1\n{%- endmacro %}\n")
+                 "{% macro generate_alias_name(\n    custom_alias_name=none,\n    node=none\n) -%}\n    select 1\n{%- endmacro %}\n"))
+  (dbt-test-with-window "select *\nfrom t\nwhere a = 1\n{% if target.name == 'prod'\nand var('full_refresh', false) %}\n"
+    (dbt-test-goto "and var")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4)))
+  ;; Of several lines, a tag sits by what it leads to, as on one line.
+  (should (equal (dbt-test-indented "select *\nfrom events\n{% if is_incremental()\nand not var('full') %}\nwhere updated_at > 1\n{% endif %}\n")
+                 "select *\nfrom events\n{% if is_incremental()\n    and not var('full') %}\n    where updated_at > 1\n{% endif %}\n")))
+
+(ert-deftest dbt-edit-indents-a-comment-as-the-code-after-it ()
+  "A line that starts a comment indents as the code after it: before a clause, between CTEs, before the final select.
+Its text is left as it is."
+  (let ((text (concat "with orders as (\n    select * from x\n    -- only the paid ones\n    where status = 'paid'\n),\n\n"
+                      "-- logical CTEs\n{# the final CTE #}\nfinal as (\n    select * from orders\n)\n\n"
+                      "-- simple select statement\nselect * from final\n")))
+    (should (equal (dbt-test-indented text) text))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text)))
+  ;; Before a closer or at the end, a comment is one of the lines above.
+  (let ((text "with a as (\n    select\n        id\n        -- more to come\n)\nselect\n    id\n    -- last\n"))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
+(ert-deftest dbt-edit-indents-an-else-branch-by-itself ()
+  "A line in an else branch is one step in from it, whatever the if branch holds."
+  (let ((text (concat "select *\nfrom events\n{% if is_incremental() %}\n    where updated_at > (select max(updated_at) from {{ this }})\n"
+                      "{% else %}\n    -- a full refresh reads everything\n    {{ some_filter() }}\n{% endif %}\n")))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
+(ert-deftest dbt-edit-indents-a-window-frame-with-its-order-by ()
+  "A window's partition and frame are at the level of its order by; a column named range is a column."
+  (let ((text (concat "select\n    sum(amount) over (\n        partition by customer_id,\n            region\n        order by order_date\n"
+                      "        rows between unbounded preceding and current row\n    ) as running_total,\n    range\n"
+                      "from payments\n")))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
+(ert-deftest dbt-edit-keeps-left-and-right-among-columns ()
+  "Columns that call left() or right() are columns, one step in from select; a join with left or natural is a clause."
+  (let ((text (concat "select\n    id,\n    left(name, 3) as initials,\n    RIGHT (code, 2) as suffix,\n    name\n"
+                      "from a\nleft outer join b on a.id = b.id\nnatural left join c\n")))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
+(ert-deftest dbt-edit-reindents-a-closer-as-it-is-typed ()
+  "Typing `{% endif' or `)' at the start of a line moves it to its opener's column at once."
+  (dbt-test-with-window "select\n    id,\n{% if x %}\n    name,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% endif")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{% if x %}\n    name,\n{% endif-!- %}")))
+  (dbt-test-with-window "with a as (\n    select 1\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "),")
+    (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-")))
+  (dbt-test-with-window "{% if x %}\n    select 1\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% else")
+    (should (equal (dbt-test-around-point) "{% if x %}\n    select 1\n{% else-!- %}")))
+  (dbt-test-with-window "{% set xs = [\n    1,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "]")
+    (should (equal (dbt-test-around-point) "{% set xs = [\n    1,\n]-!-")))
+  ;; At the end of the buffer, a tag leads to what is typed next: a clause.
+  (dbt-test-with-window "select *\nfrom t\n"
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% if is_incremental() %}")
+    (should (equal (dbt-test-around-point) "select *\nfrom t\n{% if is_incremental() %}-!-"))))
+
+(ert-deftest dbt-edit-keeps-the-states-of-its-scan ()
+  "The Jinja blocks read from the states kept are those of a scan from the start; a scan near the start keeps the states further on."
+  (let ((fresh (lambda (limit) (let ((dbt-edit--scans (list (list 0)))) (dbt-edit-blocks limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% if a %}\n{% for b in c %}\nselect\n{% endif %}\nx\n")
+      (dbt-edit-blocks (point-max))
+      (let ((limit (progn (goto-char (point-min)) (search-forward "select") (point))))
+        (should (equal (dbt-edit-blocks limit) (funcall fresh limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (dotimes (n 50)
+        (insert (format "{%% macro m_%d() %%}\nselect %d\n{%% endmacro %%}\n" n n)))
+      (dbt-edit-blocks (point-max))
+      (let ((reached (caar dbt-edit--scans)))
+        (should (> reached (/ (point-max) 2)))
+        (dbt-edit-blocks 100)
+        (should (= (caar dbt-edit--scans) reached))
+        (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))))
+    ;; A narrowing hides the {# that comments a tag out: its scan is not kept.
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{# a\n{% if x %}\n#}\n{% for y in z %}\nselect\n")
+      (dbt-edit-blocks (point-max))
+      (narrow-to-region (progn (goto-char (point-min)) (forward-line 1) (point)) (point-max))
+      (dbt-edit-blocks (point-max))
+      (widen)
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max)))))))
+
+(ert-deftest dbt-edit-indents-a-tag-before-a-long-run-of-lines ()
+  "A tag looks past 50 tags, comments and blank lines at most for what it leads to; TAB on it never fails.
+Beyond them, or before a tag that stays open, it is one of the lines
+above."
+  (let ((text (concat "select *\nfrom t\n{% if x %}\n" (apply #'concat (make-list 10 "    -- note\n"))
+                      "    where a\n{% endif %}\n")))
+    (should (equal (dbt-test-indented text) text)))
+  (dbt-test-with-window (concat "select *\nfrom t\n{% if x %}\n" (make-string 100000 ?\n) "where a\n{% endif %}\n")
+    (dbt-test-goto "{% if x")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4)))
+  (dbt-test-with-window (concat "select *\nfrom t\n{% if x\n" (apply #'concat (make-list 20000 "and y = 1\n")))
+    (dbt-test-goto "{% if x")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))))
+
+(ert-deftest dbt-edit-indents-by-its-offset-a-region-alone ()
+  "C-M-\\ indents the lines of its region alone, by `dbt-indent-offset'; a stray ) is at the first column."
+  (let ((dbt-indent-offset 2))
+    (should (equal (dbt-test-indented "with a as (\nselect\nid\nfrom t\n)\nselect * from a\n)\n")
+                   "with a as (\n  select\n    id\n  from t\n)\nselect * from a\n)\n")))
+  (dbt-test-with-window "  select\nid,\nname\n  from t\n"
+    (dbt-test-goto "id,")
+    (dbt-test-keys "C-SPC")
+    (dbt-test-goto "  from")
+    (dbt-test-keys "C-M-\\")
+    (should (equal (buffer-string) "  select\n      id,\n      name\n  from t\n"))))
+
+(ert-deftest dbt-edit-indents-the-buffer-as-it-is-now ()
+  "TAB reads the Jinja blocks of the text as it is after an edit above it; in a narrowing, the blocks are its own.
+TAB indents in the whole buffer, as Emacs widens it; C-c / reads the
+narrowing alone."
+  (dbt-test-with-window "{% if x %}\nselect\n{% set a = 1 %}\nfrom t\nwhere a\n"
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (goto-char (point-min))
+    (dbt-test-keys "C-k C-k")
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0)))
+  ;; A tag not closed yet opens no block, until its end is typed.
+  (dbt-test-with-window "{% if x\nselect a\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (dbt-test-goto "if x" 4)
+    (dbt-test-type " %}")
+    (goto-char (point-max))
+    (dbt-test-keys "C-c /")
+    (should (equal (buffer-string) "{% if x %}\nselect a\n{% endif %}")))
+  (dbt-test-with-window "{% macro m() %}\nselect\nid\nfrom t\n{% endmacro %}\n"
+    (dbt-test-goto "from t")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (narrow-to-region (progn (dbt-test-goto "select") (point)) (progn (dbt-test-goto "{% endmacro") (point)))
+    (dbt-test-goto "from t")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (goto-char (point-max))
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (widen)
+    (should (equal (buffer-string) "{% macro m() %}\nselect\nid\n    from t\n{% endmacro %}\n"))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here

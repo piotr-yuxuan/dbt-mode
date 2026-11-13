@@ -168,7 +168,7 @@ FILE gets `.sql' when it has no extension."
   (interactive (list (dbt-new--model-file "New incremental model: ")))
   (dbt-new--write-file (dbt-new--model-path file)
                        "{{\n    config(\n        materialized='incremental',\n        unique_key='id'\n    )\n}}\n\nselect *\nfrom {{ ref('"
-                       "') }}\n\n{% if is_incremental() %}\nwhere updated_at > (select max(updated_at) from {{ this }})\n{% endif %}\n"))
+                       "') }}\n\n{% if is_incremental() %}\n    where updated_at > (select max(updated_at) from {{ this }})\n{% endif %}\n"))
 
 (defun dbt-new-macro (name)
   "Write the macro NAME in its own file of the project's first macro path."
