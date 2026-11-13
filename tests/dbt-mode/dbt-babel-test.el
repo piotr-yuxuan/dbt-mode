@@ -103,6 +103,14 @@ leaves no file behind."
       (should (equal (dbt-test-babel root "" "select 1")
                      '(("a\\vert{}b" "nl") hline ("x\\vert{}y" "one\\ntwo")))))))
 
+(ert-deftest dbt-babel-refuses-parameters-that-dbt-cannot-take ()
+  "A :var that is a table or a list, and a :compile other than yes or no, are refused.
+A :target that Org reads as a number reaches dbt as its text."
+  (dbt-test-with-project root
+    (should-error (dbt-test-babel root ":var t='((1 2) (3 4))" "select 1") :type 'user-error)
+    (should-error (dbt-test-babel root ":compile maybe" "select 1") :type 'user-error)
+    (should (string-match-p "--target 42\\'" (car (nth 2 (dbt-test-babel root ":target 42" "select 1")))))))
+
 (ert-deftest dbt-babel-shows-what-dbt-says-when-it-fails ()
   "A block that dbt refuses shows dbt's errors in Babel's error buffer."
   (dbt-test-with-project root
