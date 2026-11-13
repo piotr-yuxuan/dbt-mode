@@ -441,7 +441,16 @@ Its text is left as it is."
         (should (> reached (/ (point-max) 2)))
         (dbt-edit-blocks 100)
         (should (= (caar dbt-edit--scans) reached))
-        (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))))))
+        (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))))
+    ;; A narrowing hides the {# that comments a tag out: its scan is not kept.
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{# a\n{% if x %}\n#}\n{% for y in z %}\nselect\n")
+      (dbt-edit-blocks (point-max))
+      (narrow-to-region (progn (goto-char (point-min)) (forward-line 1) (point)) (point-max))
+      (dbt-edit-blocks (point-max))
+      (widen)
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max)))))))
 
 (ert-deftest dbt-edit-indents-a-tag-before-a-long-run-of-lines ()
   "A tag looks past 50 tags, comments and blank lines at most for what it leads to; TAB on it never fails.
