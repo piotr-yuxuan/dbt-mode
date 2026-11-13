@@ -84,8 +84,10 @@ notifications."
                                      :value)))
     (goto-char (point-max))
     (insert "\n{{ ref('stg_")
-    (let ((completion (lsp-completion-at-point)))
-      (should (member "stg_customers" (all-completions "stg_" (nth 2 completion)))))
+    ;; The server answers from the text it was last sent; as when a user
+    ;; types, a completion asked for before it caught up comes back empty.
+    (dbt-test-wait (lambda ()
+                     (member "stg_customers" (all-completions "stg_" (nth 2 (lsp-completion-at-point))))))
     (should-not (lsp-feature? "textDocument/formatting"))
     (should-not (lsp-feature? "textDocument/codeAction"))
     (should-not (with-current-buffer "*Warnings*"
