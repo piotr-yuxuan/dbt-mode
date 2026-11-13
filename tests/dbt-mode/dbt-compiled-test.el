@@ -44,6 +44,18 @@ Outside a CTE, the line at the same share of the buffer."
                                    (goto-char (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
                                                 (dbt-compiled-position compiled)))
                                    (buffer-substring (point) (line-end-position))))))
+      ;; A parenthesis open after point's line leaves point in its CTE.
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (dbt-test-goto "    from orders\n")
+        (insert "    coalesce(\n")
+        (dbt-test-goto "orders.customer_id")
+        (should (string-prefix-p "        orders.customer_id"
+                                 (with-current-buffer compiled
+                                   (save-excursion
+                                     (goto-char (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+                                                  (dbt-compiled-position compiled)))
+                                     (buffer-substring (point) (line-end-position))))))
+        (revert-buffer t t))
       ;; The final select is in no CTE: the line at the same share.
       (dbt-test-goto "select * from final")
       (let ((share (/ (float (1- (line-number-at-pos))) (count-lines (point-min) (point-max))))
@@ -113,11 +125,16 @@ point moves the compiled SQL along; once its window goes, so does the mode."
       (dbt-test-visit root "models/marts/orders.sql")
       (let ((diff-switches "-u")
             (messages (with-current-buffer (messages-buffer) (point-max-marker))))
+        (set-file-times (expand-file-name "manifest.json" state) (encode-time '(0 4 3 2 1 2026 nil nil t)))
         (dbt-compiled-diff state)
         (dbt-test-wait (lambda () (with-current-buffer (messages-buffer)
                                     (save-excursion
                                       (goto-char messages)
-                                      (re-search-forward "Compiled SQL of orders in .*prod-state/?, from a manifest written at [0-9-]+ [0-9:]+$" nil t))))))
+                                      (re-search-forward
+                                       (concat "Compiled SQL of orders in .*prod-state/?, from a manifest written at "
+                                               (regexp-quote (format-time-string "%F %R" (encode-time '(0 4 3 2 1 2026 nil nil t))))
+                                               "$")
+                                       nil t))))))
       (with-current-buffer (dbt-test-wait (lambda () (and (get-buffer "*Diff*")
                                                           (not (get-buffer-process "*Diff*"))
                                                           (get-buffer "*Diff*"))))

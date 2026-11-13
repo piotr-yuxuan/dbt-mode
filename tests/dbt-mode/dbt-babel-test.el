@@ -93,6 +93,7 @@ leaves no file behind."
         (let ((dbt-protected-targets nil))
           (setq asked nil)
           (should (dbt-test-babel root ":target prod" "select 1"))
+          (should (dbt-test-babel root "" "select 1"))
           (should-not asked))))))
 
 (ert-deftest dbt-babel-writes-each-cell-on-one-line ()

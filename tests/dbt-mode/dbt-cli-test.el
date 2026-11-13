@@ -134,7 +134,14 @@ another dbt holds the project."
           (processes (process-list)))
       (should-error (dbt-cli-show "orders" nil) :type 'user-error)
       (should (equal (process-list) processes))
-      (should-not (seq-difference (buffer-list) buffers)))))
+      (should-not (seq-difference (buffer-list) buffers))
+      ;; A quit at the question of saving the project leaves nothing either.
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+        (insert "-- unsaved\n")
+        (cl-letf (((symbol-function 'save-some-buffers) (lambda (&rest _) (signal 'quit nil))))
+          (should (eq 'quit (condition-case nil (progn (dbt-cli-show "orders" nil) 'shown) (quit 'quit)))))
+        (should (equal (process-list) processes))
+        (should-not (seq-difference (buffer-list) buffers))))))
 
 (ert-deftest dbt-cli-names-the-rows-of-a-cte-after-their-model ()
   "The rows of a CTE show in a grid of their model's: the renamed CTE of each model has its own."

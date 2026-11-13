@@ -196,6 +196,19 @@ letter makes it matter."
     (dbt-rows-show "test" '("n" "note") '(("1" "x") ("2" "y")) 5 #'ignore)
     (should (equal (dbt-rows-test-shown) '(("1" "x") ("2" "y"))))))
 
+(ert-deftest dbt-rows-prints-each-row-once-for-its-columns ()
+  "A sort prints no row again: each is printed once for the columns as they are."
+  (let ((printed 0)
+        (print-entry (symbol-function 'tabulated-list-print-entry)))
+    (cl-letf (((symbol-function 'tabulated-list-print-entry)
+               (lambda (&rest arguments) (setq printed (1+ printed)) (apply print-entry arguments))))
+      (dbt-rows-test-with-grid dbt-rows-test-rows
+        (should (= printed (length dbt-rows-test-rows)))
+        (goto-char (point-min))
+        (execute-kbd-macro (kbd "S"))
+        (execute-kbd-macro (kbd "S"))
+        (should (= printed (length dbt-rows-test-rows)))))))
+
 (ert-deftest dbt-rows-sizes-and-prints-columns-as-they-show ()
   "A column is as wide as its text shows, wide characters included; widening it prints its rows again."
   (dbt-rows-test-with-grid '(("日本語" "1" "x"))
