@@ -115,7 +115,6 @@ query."
                         (setq default-directory root)
                         (dbt-compilation-mode)
                         (display-buffer (current-buffer))))
-                     ((not (car rows)) (message "dbt show: no rows for %s" name))
                      (t (dbt-rows-show name (car rows) (cdr rows) limit
                                        (or rerun (lambda (limit)
                                                    (let ((default-directory root))

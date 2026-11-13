@@ -145,5 +145,23 @@ The mode line says when the rows reached the limit."
       (should (equal (with-current-buffer (messages-buffer) (buffer-substring messages (point-max)))
                      "note: line 1\nline 2\nnote: NULL\n")))))
 
+(ert-deftest dbt-rows-reads-what-dbt-show-prints-around-its-rows ()
+  "Lines before the rows, a column name twice, and text beyond ASCII read as dbt means them.
+dbt prints \"Waiting for lease\" before its JSON when another dbt holds
+the project; a join may give two columns of one name, the second named
+as dbt lsp names it; a nested value keeps its characters, null included,
+whoever read the JSON."
+  (should (equal (dbt-rows-read-json "Waiting for lease on 'dbt_packages' directory\n[{\"a\":1}]\n")
+                 '(("a") ("1"))))
+  (should (equal (dbt-rows-read-json "[{\"id\":3,\"id\":1,\"name\":\"Ada\"},{\"id\":4,\"id\":2,\"name\":\"Alan\"}]")
+                 '(("id" "id_1" "name") ("3" "1" "Ada") ("4" "2" "Alan"))))
+  (should (equal (dbt-rows-read-json "[{\"o\":{\"name\":\"Zoë\",\"n\":null}}]")
+                 '(("o") ("{\"name\":\"Zoë\",\"n\":null}"))))
+  (let ((value (make-hash-table :test #'equal)))
+    (puthash "name" "Zoë" value)
+    (puthash "n" nil value)
+    (should (equal (dbt-rows-cell value nil) "{\"name\":\"Zoë\",\"n\":null}"))
+    (should-not (dbt-rows-cell nil nil))))
+
 (provide 'dbt-rows-test)
 ;;; dbt-rows-test.el ends here

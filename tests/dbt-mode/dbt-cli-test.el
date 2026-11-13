@@ -107,6 +107,24 @@ In the grid, + runs dbt show again with twice the limit."
         (dbt-test-wait (lambda () (string-search "ref('raw_customers')" (aref (cadr (car tabulated-list-entries)) 0))))
         (kill-buffer)))))
 
+(ert-deftest dbt-cli-shows-the-rows-whatever-dbt-prints-first ()
+  "The rows read after a line that dbt prints before them; no rows empty the grid.
+dbt 2.0.9 prints \"Waiting for lease\" on stdout, even quiet, when
+another dbt holds the project."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (append '("FAKE_DBT_SUCCEED=1"
+                                         "FAKE_DBT_OUTPUT=Waiting for lease on 'dbt_packages' directory\n[{\"a\":1}]")
+                                       process-environment)))
+      (dbt-cli-show "orders" nil)
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries) '(("1"))))
+        (let ((process-environment (cons "FAKE_DBT_OUTPUT=[]" process-environment)))
+          (revert-buffer))
+        (dbt-test-wait (lambda () (null tabulated-list-entries)))
+        (kill-buffer)))))
+
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
 Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and

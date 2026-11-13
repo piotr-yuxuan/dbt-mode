@@ -61,24 +61,42 @@ unless COLUMN is nil.")
                                     (if (< (length dbt-rows--entries) dbt-rows--limit) "" ", limit reached")))
     (tabulated-list-print t)))
 
+(defun dbt-rows-cell (value null)
+  "Return the text of a cell holding the JSON VALUE, or nil for null.
+A string is its own text; any other value is its JSON.  NULL is what
+JSON null reads as in VALUE: :null for `json-parse-string', nil for
+lsp-mode."
+  (cond ((eq value null) nil)
+        ((stringp value) value)
+        ;; json-serialize gives UTF-8 bytes.
+        (t (decode-coding-string (json-serialize value :null-object null) 'utf-8))))
+
 (defun dbt-rows-read-json (json)
   "Return the rows of JSON, as `dbt show --output json' prints them.
 JSON is an array of objects, one per row, whose keys are the columns,
-in order.  The rows are (COLUMNS . ROWS), as `dbt-rows-show' takes them:
-a value that is not a string is its JSON.  An array of no row has no
-columns either: (nil).  Return nil when JSON is not such an array."
+in order; the lines before it, such as dbt's \"Waiting for lease\", are
+skipped.  The rows are (COLUMNS . ROWS), as `dbt-rows-show' takes them,
+each cell as `dbt-rows-cell' reads it.  A key that repeats, as the
+columns of a join may, is a column of its own, renamed as dbt lsp
+renames it: the second id is id_1.  An array of no row has no columns
+either: (nil).  Return nil when JSON is not such an array."
   ;; json.el, which lsp-mode loads, redefines some errors of
   ;; `json-parse-string' as errors of json-error only.
-  (let ((rows (ignore-error json-error (json-parse-string json :object-type 'alist))))
+  (let ((rows (ignore-error json-error
+                (json-parse-string (substring json (or (string-match "^\\[" json) 0)) :object-type 'alist))))
     (when (and (vectorp rows) (seq-every-p #'listp rows))
       (let ((columns (and (not (seq-empty-p rows)) (mapcar #'car (aref rows 0)))))
-        (cons (mapcar #'symbol-name columns)
+        (cons (seq-map-indexed (lambda (column index)
+                                 (let ((before (seq-count (lambda (other) (eq other column)) (seq-take columns index))))
+                                   (if (zerop before) (symbol-name column) (format "%s_%d" column before))))
+                               columns)
               (mapcar (lambda (row)
+                        ;; Each pair is read once, in order: the next is
+                        ;; first, unless a row has its keys in another order.
                         (mapcar (lambda (column)
-                                  (let ((value (alist-get column row :null)))
-                                    (cond ((eq value :null) nil)
-                                          ((stringp value) value)
-                                          (t (json-serialize value)))))
+                                  (let ((pair (assq column row)))
+                                    (setq row (if (eq pair (car row)) (cdr row) (delq pair row)))
+                                    (dbt-rows-cell (if pair (cdr pair) :null) :null)))
                                 columns))
                       rows))))))
 

@@ -247,8 +247,7 @@ their grid; by default, the same query from the model's file."
            (dbt-rows-show title columns
                           (mapcar (lambda (row)
                                     (mapcar (lambda (column)
-                                              (let ((value (lsp-get row (intern (concat ":" column)))))
-                                                (if (or (null value) (stringp value)) value (json-encode value))))
+                                              (dbt-rows-cell (lsp-get row (intern (concat ":" column))) nil))
                                             columns))
                                   (append (lsp-get result :data) nil))
                           limit rerun)
