@@ -536,12 +536,18 @@ Otherwise, show what the last `dbt compile' or `dbt run' wrote."
       (dbt-lsp-compile-file)
     (let* ((root (dbt-mode--root))
            (resource (or (dbt-mode-current-resource) (user-error "No model here")))
-           (package (assoc (plist-get resource :package) (dbt-project-packages root)))
+           ;; dbt writes the SQL of a file under the directory of its
+           ;; package, at its path from the root of the project.
            (file (expand-file-name
-                  (file-relative-name (plist-get resource :file) (nth 1 package))
-                  (expand-file-name (concat "compiled/" (car package))
-                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))))
-      (unless (file-exists-p file)
+                  (file-relative-name (plist-get resource :file) root)
+                  (expand-file-name (concat "compiled/" (plist-get resource :package))
+                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
+           ;; dbt 2 writes that of a snapshot in a directory of that path,
+           ;; named after the snapshot.
+           (file (if (file-directory-p file)
+                     (expand-file-name (concat (plist-get resource :name) ".sql") file)
+                   file)))
+      (unless (file-regular-p file)
         (user-error "Not compiled yet: run dbt compile, or start dbt lsp"))
       (with-current-buffer (find-file-noselect file)
         (read-only-mode 1)

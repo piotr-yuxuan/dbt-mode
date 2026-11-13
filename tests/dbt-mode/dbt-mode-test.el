@@ -451,6 +451,27 @@
       (with-current-buffer (get-file-buffer compiled)
         (should buffer-read-only)))))
 
+(ert-deftest dbt-mode-visits-the-compiled-sql-of-snapshots-and-packages ()
+  "C-c C-v finds where dbt 2 compiles a snapshot, and a package's model."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as one" nil (expand-file-name "dbt_packages/shop_utils/models/util_one.sql" root))
+    (with-temp-file (expand-file-name "snapshots/orders_snapshot.sql" root)
+      (insert "{% snapshot snap_orders %}\nselect * from {{ ref('stg_orders') }}\n{% endsnapshot %}\n"))
+    ;; Where dbt 2.0.9 wrote them.
+    (dolist (case '(("snapshots/orders_snapshot.sql"
+                     . "target/compiled/shop/snapshots/orders_snapshot.sql/snap_orders.sql")
+                    ("dbt_packages/shop_utils/models/util_one.sql"
+                     . "target/compiled/shop_utils/dbt_packages/shop_utils/models/util_one.sql")))
+      (let ((compiled (expand-file-name (cdr case) root)))
+        (make-directory (file-name-directory compiled) t)
+        (write-region "select 1" nil compiled)
+        (dbt-test-visit root (car case))
+        (dbt-visit-compiled)
+        (should (get-file-buffer compiled))
+        (with-current-buffer (get-file-buffer compiled)
+          (should buffer-read-only))))))
+
 (ert-deftest dbt-mode-visits-the-properties-of-a-model ()
   "C-c C-y goes to the YAML entry of the model, and back to it by M-."
   (dbt-test-with-project root
