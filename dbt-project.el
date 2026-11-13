@@ -20,12 +20,13 @@
 ;; An entity of the index is a plist:
 ;;
 ;;   (:kind KIND :name NAME :package PACKAGE :file FILE :line LINE
-;;    :source SOURCE :section SECTION)
+;;    :source SOURCE :section SECTION :version VERSION)
 ;;
 ;; KIND is one of `model', `seed', `snapshot', `analysis', `macro', `test'
 ;; (a generic test), `doc', `source', `table' (a table of the source
 ;; SOURCE), `exposure' and `properties' (an entry of the YAML section
-;; SECTION, such as "models").  LINE counts from 1.  A snapshot written
+;; SECTION, such as "models").  LINE counts from 1.  VERSION is that of
+;; a version of a model, whose NAME is the model's.  A snapshot written
 ;; in YAML has :relation, the text of its relation.
 ;;
 ;; `dbt-project-graph' reads the `ref' and `source' calls of every model,
@@ -154,24 +155,27 @@ gives the properties of a resource that a file defines.")
   "The sections whose entries describe a model, a seed, a snapshot or an analysis.")
 
 (defconst dbt-project-yaml-lists
-  '((("tables" "sources") "tables" :source))
+  '((("tables" "sources") "tables" :source)
+    (("versions" "models") "versions" :name))
   "The lists within an entry whose items are entries too.
 Each is (PATH SECTION PROPERTY): PATH names the keys that hold the list,
 innermost first, SECTION is that of its entries, and PROPERTY keeps the
 name of the entry that holds the list.")
 
 (defconst dbt-project-yaml-properties
-  '(("name" . :name) ("relation" . :relation))
+  '(("name" . :name) ("relation" . :relation) ("latest_version" . :latest-version)
+    ("v" . :version) ("defined_in" . :defined-in))
   "Alist from the keys of an entry that the index keeps to their property.")
 
 (defun dbt-project-yaml-entries (text)
   "Return the entries of TEXT, the contents of a dbt properties file.
 Each entry is a plist (:section SECTION :line LINE :name NAME ...): an
 item of a top-level section of `dbt-project-yaml-sections', or of a list
-of `dbt-project-yaml-lists', such as a table of the source SOURCE, with
-SECTION \"tables\".  LINE is that of its name, from 1.  The keys of
-`dbt-project-yaml-properties' at the first level of the item, in any
-order, give the other properties."
+of `dbt-project-yaml-lists': a table of the source SOURCE, with SECTION
+\"tables\", or a version of the model NAME, with SECTION \"versions\".
+LINE, from 1, is that of its name, or of its item for a version.  The
+keys of `dbt-project-yaml-properties' at the first level of the item,
+in any order, give the other properties."
   (let (open entries)
     ;; OPEN maps the path of each list whose items are entries to the
     ;; entry being read there.
@@ -244,14 +248,18 @@ The first group matches the name.")
 QUALIFIER is `required' when the call gives a package or a source before
 the name, `optional' when it may, and nil when it does not.  Without
 TYPING, the regexp matches a complete call: group 1 the name, group 2
-the qualifier.  With TYPING, it matches a call being typed, up to the
+the qualifier, and for a `ref', group 3 the version that its argument v
+or version gives.  With TYPING, it matches a call being typed, up to the
 point where `looking-back' tries it: group 1 the part of the name typed,
 possibly empty, group 2 the qualifier."
   (concat "\\_<" (symbol-name kind) "[ \t\n]*([ \t\n]*['\"]"
           (pcase qualifier
             ('required "\\(?2:[^'\"\n]+\\)['\"][ \t\n]*,[ \t\n]*['\"]")
             ('optional "\\(?:\\(?2:[^'\"\n]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\)?"))
-          (if typing "\\(?1:[A-Za-z0-9_]*\\)" "\\(?1:[^'\"\n]+\\)['\"]")))
+          (if typing "\\(?1:[A-Za-z0-9_]*\\)" "\\(?1:[^'\"\n]+\\)['\"]")
+          (and (eq kind 'ref) (not typing)
+               (concat "\\(?:[ \t\n]*,[ \t\n]*\\(?:v\\|version\\)[ \t\n]*=[ \t\n]*['\"]?"
+                       "\\(?3:[^'\")\n \t,]+\\)\\)?"))))
 
 (defconst dbt-project-call-regexps
   `((ref . ,(dbt-project-call-regexp 'ref 'optional))
@@ -259,7 +267,8 @@ possibly empty, group 2 the qualifier."
     (doc . ,(dbt-project-call-regexp 'doc 'optional)))
   "Alist from the kind of a call of dbt's Jinja to the regexp of a complete call.
 Group 1 matches the name that the call gives; group 2 the package of a
-`ref' or a `doc', when it is given, or the source of a `source'.")
+`ref' or a `doc', when it is given, or the source of a `source'; group
+3 the version that a `ref' gives.")
 
 ;;;; The index
 
@@ -360,13 +369,15 @@ the lock files .#NAME of the buffers being edited."
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.
-Each is a target plist (:kind KIND :qualifier QUALIFIER :name NAME), as
-`dbt-project-resolve' reads it; the calls of `ref' come first."
+Each is a target plist (:kind KIND :qualifier QUALIFIER :name NAME
+:version VERSION), as `dbt-project-resolve' reads it; the calls of `ref'
+come first."
   (let (calls)
     (dolist (kind '(ref source))
       (goto-char (point-min))
       (while (re-search-forward (alist-get kind dbt-project-call-regexps) nil t)
-        (push (list :kind kind :qualifier (match-string-no-properties 2) :name (match-string-no-properties 1))
+        (push (list :kind kind :qualifier (match-string-no-properties 2) :name (match-string-no-properties 1)
+                    :version (match-string-no-properties 3))
               calls)))
     (nreverse calls)))
 
@@ -413,19 +424,38 @@ cannot be read holds nothing."
 
 (defun dbt-project-index (root)
   "Return the entities that the project at ROOT and its packages define.
-A file that cannot be read defines what its place tells only."
+A file that cannot be read defines what its place tells only.  The file
+of a version of a model, NAME_vVERSION or the file its defined_in
+names, is the model NAME with :version VERSION; another model has a nil
+:version."
   (dbt-project-cached
    root 'index
    (lambda (root)
-     (let (entities)
-       (pcase-dolist (`(,package ,directory ,config) (dbt-project-packages root))
-         (dolist (file (dbt-project-source-files directory))
-           (let ((kind (dbt-project-file-kind file directory config)))
-             (dolist (entity (append (and kind (list (list :kind kind :name (file-name-base file) :line 1)))
-                                     (unless (string-suffix-p ".csv" file)
-                                       (plist-get (dbt-project-file-contents file) :entities))))
-               (push (append entity (list :package package :file file)) entities)))))
-       (nreverse entities)))))
+     (let ((files (mapcan (pcase-lambda (`(,package ,directory ,config))
+                            (mapcar (lambda (file) (list file package directory config))
+                                    (dbt-project-source-files directory)))
+                          (dbt-project-packages root)))
+           (versions (make-hash-table :test #'equal))
+           entities)
+       ;; VERSIONS maps the package and the base name of the file of a
+       ;; version to its entry.
+       (pcase-dolist (`(,file ,package) files)
+         (unless (string-suffix-p ".csv" file)
+           (dolist (entity (plist-get (dbt-project-file-contents file) :entities))
+             (let ((entity (append entity (list :package package :file file))))
+               (push entity entities)
+               (when (plist-get entity :version)
+                 (puthash (list package (or (plist-get entity :defined-in)
+                                            (format "%s_v%s" (plist-get entity :name) (plist-get entity :version))))
+                          entity versions))))))
+       (nconc
+        (mapcan (pcase-lambda (`(,file ,package ,directory ,config))
+                  (when-let* ((kind (dbt-project-file-kind file directory config)))
+                    (let ((version (and (eq kind 'model) (gethash (list package (file-name-base file)) versions))))
+                      (list (list :kind kind :name (or (plist-get version :name) (file-name-base file))
+                                  :version (plist-get version :version) :line 1 :package package :file file)))))
+                files)
+        (nreverse entities))))))
 
 (defvar dbt-project--names (make-hash-table :test #'eq :weakness 'key)
   "Each index, to a table from a name to its entities in the order of the index.")
@@ -448,47 +478,58 @@ is looked up in a table, built once for each index."
 
 (defun dbt-project-file-entity (root file)
   "Return the model, seed, snapshot or analysis that FILE of ROOT defines.
-FILE need not exist yet, nor the index know it: a model, a seed or an
-analysis is told by its place alone.  A snapshot is the first of a Jinja
-block that FILE defines, by the index: a YAML file defines no resource
-of its own."
+It is the first that the index has of FILE, a snapshot of a Jinja block
+included: a YAML file defines no resource of its own.  FILE need not
+exist yet, nor the index know it: a model, a seed or an analysis is told
+by its place alone."
   (let* ((file (expand-file-name file))
          (package (seq-find (lambda (package) (string-prefix-p (nth 1 package) file))
                             (reverse (dbt-project-packages root))))
          (kind (dbt-project-file-kind file (nth 1 package) (nth 2 package))))
-    (if kind
-        (list :kind kind :name (file-name-base file) :package (car package) :file file :line 1)
-      (seq-find (lambda (entity)
-                  (and (eq (plist-get entity :kind) 'snapshot) (equal (plist-get entity :file) file)
-                       (not (plist-get entity :relation))))
-                (dbt-project-index root)))))
+    (or (seq-find (lambda (entity)
+                    (and (equal (plist-get entity :file) file)
+                         (memq (plist-get entity :kind) '(model seed snapshot analysis))
+                         (not (plist-get entity :relation))))
+                  (dbt-project-index root))
+        (and kind (list :kind kind :name (file-name-base file) :package (car package) :file file :line 1)))))
 
-(defun dbt-project-resolve-ref (root package name &optional caller)
-  "Return what `ref' with PACKAGE and NAME means in ROOT, best first.
+(defun dbt-project-resolve-ref (root package name &optional caller version)
+  "Return what `ref' with PACKAGE, NAME and VERSION means in ROOT, best first.
 PACKAGE is nil for a call with one argument.  The candidates are models,
 seeds and snapshots named NAME: those of PACKAGE when it is given;
 otherwise those of CALLER, the package of the calling file, then those
-of the project, then the others."
-  (let ((project (dbt-project-name root)))
+of the project, then the others.  Of a model with versions, the
+candidate is that of VERSION, or else its latest_version, or else its
+highest version."
+  (let* ((project (dbt-project-name root))
+         (candidates (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
+                                 (dbt-project-entities root '(model seed snapshot) name)))
+         (wanted (or version
+                     (seq-some (lambda (entry) (plist-get entry :latest-version))
+                               (dbt-project-entities root '(properties) name package))
+                     (car (sort (delq nil (mapcar (lambda (entity) (plist-get entity :version)) candidates))
+                                (lambda (one other) (string-version-lessp other one)))))))
     (seq-sort-by (lambda (entity)
                    (let ((owner (plist-get entity :package)))
                      (cond ((equal owner (or package caller)) 0)
                            ((equal owner project) 1)
                            (t 2))))
                  #'<
-                 (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
-                             (dbt-project-entities root '(model seed snapshot) name)))))
+                 (seq-filter (lambda (entity)
+                               (or (null (plist-get entity :version)) (equal wanted (plist-get entity :version))))
+                             candidates))))
 
 (defun dbt-project-resolve (root target &optional caller)
   "Return the entities of ROOT that define TARGET, best first.
-TARGET is a plist (:kind KIND :qualifier QUALIFIER :name NAME).  KIND is
-`ref', `source', `doc' or `macro'.  QUALIFIER is the package of a `ref',
-a `doc' or a macro, or the source of a table, and nil for a source
-itself.  CALLER is the package of the calling file, for a `ref'."
+TARGET is a plist (:kind KIND :qualifier QUALIFIER :name NAME :version
+VERSION).  KIND is `ref', `source', `doc' or `macro'.  QUALIFIER is the
+package of a `ref', a `doc' or a macro, or the source of a table, and
+nil for a source itself.  VERSION is that of a `ref', nil for the
+latest.  CALLER is the package of the calling file, for a `ref'."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
-      ('ref (dbt-project-resolve-ref root qualifier name caller))
+      ('ref (dbt-project-resolve-ref root qualifier name caller (plist-get target :version)))
       ('source (if qualifier
                    (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
                                (dbt-project-entities root '(table) name))
@@ -499,11 +540,13 @@ itself.  CALLER is the package of the calling file, for a `ref'."
 ;;;; The lineage that needs no server
 
 (defun dbt-project-node-id (entity)
-  "Return the unique identifier of ENTITY, in dbt's form."
+  "Return the unique identifier of ENTITY, in dbt's form.
+That of a version of a model ends with .vVERSION."
   (if (eq (plist-get entity :kind) 'table)
       (format "source.%s.%s.%s" (plist-get entity :package)
               (plist-get entity :source) (plist-get entity :name))
-    (format "%s.%s.%s" (plist-get entity :kind) (plist-get entity :package) (plist-get entity :name))))
+    (format "%s.%s.%s%s" (plist-get entity :kind) (plist-get entity :package) (plist-get entity :name)
+            (if (plist-get entity :version) (format ".v%s" (plist-get entity :version)) ""))))
 
 (defun dbt-project-graph (root)
   "Return the nodes of ROOT and its packages, each with what it depends on."

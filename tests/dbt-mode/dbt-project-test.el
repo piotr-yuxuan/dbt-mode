@@ -99,6 +99,15 @@
     (should (equal (funcall typed (dbt-project-call-regexp 'source nil t) "source('ra") '("ra" nil)))
     (should (equal (alist-get 'source dbt-project-call-regexps) (dbt-project-call-regexp 'source 'required)))))
 
+(ert-deftest dbt-project-call-regexp-reads-the-version-of-a-ref ()
+  "A complete ref gives in group 3 the version that v= or version= names."
+  (let ((match (lambda (text)
+                 (and (string-match (dbt-project-call-regexp 'ref 'optional) text)
+                      (list (match-string 1 text) (match-string 2 text) (match-string 3 text))))))
+    (should (equal (funcall match "{{ ref('dim_customers', v=1) }}") '("dim_customers" nil "1")))
+    (should (equal (funcall match "ref('shop', 'dim_customers', version = '2')") '("dim_customers" "shop" "2")))
+    (should (equal (funcall match "ref('dim_customers')") '("dim_customers" nil nil)))))
+
 (ert-deftest dbt-project-yaml-entries-keep-the-relation-of-a-snapshot ()
   "A snapshot written in YAML keeps its relation, before or after its name."
   (should (equal (dbt-project-yaml-entries
@@ -112,6 +121,24 @@
                                "\n"))
                  '((:section "snapshots" :line 2 :name "first" :relation "ref('stg_customers')")
                    (:section "snapshots" :line 7 :relation "source('raw', 'raw_orders')" :name "second")))))
+
+(ert-deftest dbt-project-yaml-entries-keep-the-versions-of-a-model ()
+  "Each version of a model is an entry named after the model."
+  (should (equal (dbt-project-yaml-entries
+                  (string-join '("models:"
+                                 "  - name: dim_customers"
+                                 "    latest_version: 2"
+                                 "    versions:"
+                                 "      - v: 1"
+                                 "      - v: 2"
+                                 "        defined_in: dim_customers_current"
+                                 "        columns:"
+                                 "          - name: id")
+                               "\n"))
+                 '((:section "models" :line 2 :name "dim_customers" :latest-version "2")
+                   (:section "versions" :line 5 :name "dim_customers" :version "1")
+                   (:section "versions" :line 6 :name "dim_customers" :version "2"
+                             :defined-in "dim_customers_current")))))
 
 (ert-deftest dbt-project-config-reads-paths ()
   "dbt_project.yml gives the name and paths, in either list form; dbt's defaults otherwise."
@@ -290,6 +317,34 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "model.shop.from_snap") '("snapshot.shop.customers_snapshot")))
       (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
     (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
+
+(ert-deftest dbt-project-index-names-versioned-models-after-the-model ()
+  "A version's file is the model with that version; a ref without one means the latest."
+  (dbt-test-with-project root
+    (dolist (file '("dim_customers_v1" "dim_customers_v2" "dim_customers_current" "fct_v1" "fct_v10"))
+      (write-region "select 1" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
+    (write-region (concat "models:\n  - name: dim_customers\n    latest_version: 2\n    versions:\n"
+                          "      - v: 1\n      - v: 2\n      - v: 3\n        defined_in: dim_customers_current\n"
+                          "  - name: fct\n    versions:\n      - v: 1\n      - v: 10\n")
+                  nil (expand-file-name "models/marts/_dim.yml" root))
+    (write-region "select * from {{ ref('dim_customers') }} join {{ ref('dim_customers', v=1) }} join {{ ref('fct') }}"
+                  nil (expand-file-name "models/marts/uses_dim.sql" root))
+    (let ((file (lambda (target)
+                  (file-relative-name (plist-get (car (dbt-project-resolve root target)) :file) root))))
+      (should (equal (funcall file '(:kind ref :name "dim_customers")) "models/marts/dim_customers_v2.sql"))
+      (should (equal (funcall file '(:kind ref :name "dim_customers" :version "1"))
+                     "models/marts/dim_customers_v1.sql"))
+      (should (equal (funcall file '(:kind ref :name "dim_customers" :version "3"))
+                     "models/marts/dim_customers_current.sql"))
+      (should (equal (funcall file '(:kind ref :name "fct")) "models/marts/fct_v10.sql"))
+      (should (equal (funcall file '(:kind ref :name "orders" :version "1")) "models/marts/orders.sql")))
+    (should-not (dbt-project-entities root '(model) "dim_customers_v1"))
+    (should (equal (plist-get (seq-find (lambda (node) (equal (plist-get node :id) "model.shop.uses_dim"))
+                                        (dbt-project-graph root))
+                              :parents)
+                   '("model.shop.dim_customers.v2" "model.shop.dim_customers.v1" "model.shop.fct.v10")))
+    (let ((entity (dbt-project-file-entity root (expand-file-name "models/marts/dim_customers_v1.sql" root))))
+      (should (equal (list (plist-get entity :name) (plist-get entity :version)) '("dim_customers" "1"))))))
 
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
