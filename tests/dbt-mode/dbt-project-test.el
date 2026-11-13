@@ -23,21 +23,22 @@
     (should (equal (car (read-from-string (buffer-string))) '(50 (dbt-preview-limit custom-variable))))))
 
 (ert-deftest dbt-project-yaml-line-reads-keys ()
-  "A key's column follows the dash of a list item; quotes and comments go."
+  "A key's column follows the dash of a list item; quotes and comments go from its value, but for its raw value."
   (should (equal (dbt-project-yaml-line "  - name: \"events\"  # a comment")
-                 '(:column 4 :key "name" :item t :value "events")))
-  (should (equal (dbt-project-yaml-line "version: 2") '(:column 0 :key "version" :item nil :value "2")))
-  (should (equal (dbt-project-yaml-line "    tables:") '(:column 4 :key "tables" :item nil :value nil)))
-  (should (equal (dbt-project-yaml-line "- models  # sql models") '(:column 2 :key nil :item t :value "models")))
+                 '(:column 4 :key "name" :item t :value "events" :raw "\"events\"")))
+  (should (equal (dbt-project-yaml-line "version: 2") '(:column 0 :key "version" :item nil :value "2" :raw "2")))
+  (should (equal (dbt-project-yaml-line "    tables:") '(:column 4 :key "tables" :item nil :value nil :raw "")))
+  (should (equal (dbt-project-yaml-line "- models  # sql models")
+                 '(:column 2 :key nil :item t :value "models" :raw "models")))
   (should-not (dbt-project-yaml-line "# models:"))
   (should-not (dbt-project-yaml-line "   ")))
 
 (ert-deftest dbt-project-yaml-line-reads-the-name-of-a-flow-mapping ()
   "An item written as a flow mapping gives its name, wherever it stands."
   (should (equal (dbt-project-yaml-line "      - {name: accounts}")
-                 '(:column 8 :key "name" :item t :value "accounts")))
+                 '(:column 8 :key "name" :item t :value "accounts" :raw "accounts")))
   (should (equal (dbt-project-yaml-line "      - {identifier: tbl_contacts, name: 'contacts'}")
-                 '(:column 8 :key "name" :item t :value "contacts"))))
+                 '(:column 8 :key "name" :item t :value "contacts" :raw "'contacts'"))))
 
 (ert-deftest dbt-project-yaml-entries-keep-sections-and-tables ()
   "Entries are the items of a section and the tables of a source, with lines."
@@ -450,9 +451,10 @@ A file rewritten with its size, time and mode kept still gives what it held."
 
 (ert-deftest dbt-project-resolve-reads-the-flag-that-puts-the-project-first ()
   "With require_ref_searches_node_package_before_root false in the project, an unqualified ref or source resolves there first.
-True, or absent, the caller's package comes first; a doc resolves in the
-project first whatever the flag, and a package's own flags count for
-nothing."
+False is YAML's boolean, in any of its spellings, unquoted.  True, a
+quoted string, or no flag, the caller's package comes first; a doc
+resolves in the project first whatever the flag, and a package's own
+flags count for nothing."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (write-region "select 1" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
@@ -465,7 +467,12 @@ nothing."
                       (mapcar (lambda (entity) (plist-get entity :package))
                               (dbt-project-resolve root target "shop_utils")))))
       (dolist (case '(("" "shop_utils") ("flags:\n  require_ref_searches_node_package_before_root: true\n" "shop_utils")
-                      ("flags:\n  require_ref_searches_node_package_before_root: false\n" "shop")))
+                      ("flags:\n  require_ref_searches_node_package_before_root: false\n" "shop")
+                      ("flags:\n  require_ref_searches_node_package_before_root: False\n" "shop")
+                      ("flags:\n  require_ref_searches_node_package_before_root: FALSE  # root first\n" "shop")
+                      ;; Quoted, a string, which dbt 2.0.9 ignores.
+                      ("flags:\n  require_ref_searches_node_package_before_root: 'false'\n" "shop_utils")
+                      ("flags:\n  require_ref_searches_node_package_before_root: \"false\"\n" "shop_utils")))
         (with-temp-file project-file
           (insert (dbt-test-file-text dbt-test-fixture "dbt_project.yml") (car case)))
         (dbt-project-forget root)

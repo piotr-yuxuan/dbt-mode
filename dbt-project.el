@@ -123,18 +123,22 @@ integration_tests of a package, is a project of its own."
   "Return the key or the list item of the YAML LINE as a plist, or nil.
 The plist has :column, the column of the key or the value, which follows
 the \"- \" of a list item, :key, nil for an item that is a scalar,
-:item, non-nil when the line starts a list item, and :value, unquoted
-and nil when empty.  A comment after the value is dropped.  Of an item
+:item, non-nil when the line starts a list item, :value, unquoted and
+nil when empty, and :raw, the value as written, empty when there is
+none.  A comment after the value is dropped.  Of an item
 written as a flow mapping, such as \"- {name: x}\", the key is its `name'.
 A blank line or a comment gives nil."
   (when (seq-find (lambda (regexp) (string-match regexp line))
                   '("\\`\\(?1: *\\(?4:- +\\)\\){\\(?:[^}]*,\\)? *\\(?2:name\\): *\\(?3:[^,}]*?\\) *[,}]"
                     "\\`\\(?1: *\\(?4:- +\\)?\\)\\(?2:[A-Za-z_][A-Za-z0-9_-]*\\): *\\(?3:.*?\\) *\\(?:#.*\\)?\\'"
                     "\\`\\(?1: *\\(?4:- +\\)\\)\\(?3:.*?\\) *\\(?:#.*\\)?\\'"))
-    (list :column (match-end 1)
-          :key (match-string 2 line)
-          :item (and (match-beginning 4) t)
-          :value (dbt-project-yaml-unquote (match-string 3 line)))))
+    (let ((raw (match-string 3 line)))
+      (list :column (match-end 1)
+            :key (match-string 2 line)
+            :item (and (match-beginning 4) t)
+            ;; Unquoting matches again: read the rest first.
+            :value (dbt-project-yaml-unquote raw)
+            :raw raw))))
 
 (defun dbt-project-yaml-scan (text)
   "Return the keys and list items of TEXT, a YAML document, in order.
@@ -220,9 +224,17 @@ in any order, give the other properties."
     ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests"))
     ("require_ref_searches_node_package_before_root" :package-first "true" "flags"))
   "The keys of dbt_project.yml that the configuration keeps.
-Each is (KEY PROPERTY DEFAULT . PATH): DEFAULT is dbt's, and a list for
-a list of paths; PATH, the keys that hold KEY, innermost first, is nil
-for a key at the top.")
+Each is (KEY PROPERTY DEFAULT . PATH): DEFAULT is dbt's, a list for a
+list of paths, and \"true\" or \"false\" for a boolean, which reads as
+`dbt-project-yaml-booleans' says; PATH, the keys that hold KEY,
+innermost first, is nil for a key at the top.")
+
+(defconst dbt-project-yaml-booleans
+  '(("true" . "true") ("True" . "true") ("TRUE" . "true")
+    ("false" . "false") ("False" . "false") ("FALSE" . "false"))
+  "The booleans of YAML that dbt reads, written unquoted, to their value.
+Any other value of a boolean, a quoted \"false\" included, is a string,
+which dbt 2.0.9 ignores for its default.")
 
 (defun dbt-project-target (root)
   "Return the directory where dbt writes the artifacts of the project at ROOT."
@@ -240,16 +252,18 @@ below it."
                                         (buffer-string)))))
     (mapcan
      (pcase-lambda (`(,key ,property ,default . ,path))
-       (let ((value (plist-get (seq-find (lambda (line)
-                                           (and (equal (plist-get line :path) path) (equal (plist-get line :key) key)))
-                                         lines)
-                               :value))
-             (items (delq nil (mapcar (lambda (line)
+       (let* ((line (seq-find (lambda (line)
+                                (and (equal (plist-get line :path) path) (equal (plist-get line :key) key)))
+                              lines))
+              (value (plist-get line :value))
+              (items (delq nil (mapcar (lambda (line)
                                         (and (plist-get line :item) (equal (plist-get line :path) (cons key path))
                                              (plist-get line :value)))
                                       lines))))
          (list property
-               (cond ((not (consp default)) (or value default))
+               (cond ((member default '("true" "false"))
+                      (alist-get (plist-get line :raw) dbt-project-yaml-booleans default nil #'equal))
+                     ((not (consp default)) (or value default))
                      ((and value (string-match "\\`\\[\\(.*\\)\\]\\'" value))
                       (mapcar #'dbt-project-yaml-unquote (split-string (match-string 1 value) "," t "[ \t]+")))
                      (t (or items default))))))
