@@ -64,6 +64,19 @@
     (dbt-test-goto "from x")
     (should-not (nth 4 (syntax-ppss)))))
 
+(ert-deftest dbt-mode-reads-jinja-after-what-starts-no-comment ()
+  "After /- or -*, a Jinja comment or tag holding an apostrophe is read as one.
+Jinja's rules see that /- and -* start no comment."
+  (dolist (text '("select revenue/-1 as neg, {# it's old #} b\nfrom t\nselect 2 as z\n"
+                  "select revenue/-1 as neg, {{ log(\"it's\") }} b\nfrom t\nselect 2 as z\n"
+                  "select 1 as a -*\n{# it's old #}\nfrom t\nselect 2 as z\n"))
+    (with-temp-buffer
+      (insert text)
+      (dbt-mode)
+      (dolist (word '("from t" "2 as z"))
+        (dbt-test-goto word)
+        (should-not (nth 8 (syntax-ppss)))))))
+
 (ert-deftest dbt-mode-reads-a-long-jinja-comment-in-pieces ()
   "A comment that the chunks of syntax and font lock cut is still a comment."
   (with-temp-buffer
