@@ -109,11 +109,13 @@ They are the packages that dbt installs, opened read-only."
 ;;;###autoload
 (defun dbt-lsp-add-project-folder ()
   "Make the root of the current dbt project a folder of the lsp session.
-Unless the session has it already, or blocks it.  lsp-mode then runs
+Unless the session has it already, or blocks it, or `dbt-executable'
+runs no server, as the session keeps its folders.  lsp-mode then runs
 the server on the project, not on an enclosing folder of the session or
 on the repository it guesses: `lsp-auto-guess-root' is turned off in
 the buffer, as lsp-mode would guess before it looks at the folders."
   (when-let* ((root (and buffer-file-name (dbt-project-root)))
+              ((dbt-lsp-server-p))
               (folder (lsp-f-canonical root))
               (session (lsp-session)))
     (unless (seq-some (lambda (blocked) (lsp-f-ancestor-of? blocked folder))

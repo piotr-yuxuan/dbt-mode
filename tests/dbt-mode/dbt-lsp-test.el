@@ -129,6 +129,20 @@ The buffer is killed, so that the next preview makes a new one."
         (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
                        (expand-file-name "other" root)))))))
 
+(ert-deftest dbt-lsp-adds-a-folder-only-for-a-server ()
+  "The root of the project becomes a folder of the lsp session only if dbt runs a server.
+The session persists its folders, so it would keep one it cannot use."
+  (dbt-test-with-project root
+    (let ((lsp--session nil)
+          (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory))))
+      (dbt-test-visit root "models/marts/orders.sql")
+      (let ((dbt-executable (expand-file-name "no-dbt" root)))
+        (dbt-lsp-add-project-folder))
+      (should-not (lsp-session-folders (lsp-session)))
+      (let ((dbt-executable dbt-lsp-test-dbt))
+        (dbt-lsp-add-project-folder))
+      (should (equal (lsp-session-folders (lsp-session)) (list (lsp-f-canonical root)))))))
+
 (ert-deftest dbt-lsp-hides-formatting-from-lsp-mode ()
   "lsp-mode does not format by itself, as the server formats the file on disk.
 Its one code action, which fixes and formats, is hidden too."
