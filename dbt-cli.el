@@ -161,12 +161,20 @@ for again from its grid, the query is taken again from the model's file."
 (defvar-local dbt-cli--format-process nil
   "The `dbt format' of this buffer while it runs, which a save waits for.")
 
+(defconst dbt-cli-format-deadline 30
+  "The seconds that a save waits for the `dbt format' of its buffer.")
+
 (defun dbt-cli--await-format ()
   "Wait until the `dbt format' of the current buffer ends.
 For `before-save-hook': dbt writes the file once it ends, and would
-otherwise write over a later save."
-  (while (process-live-p dbt-cli--format-process)
-    (accept-process-output dbt-cli--format-process 0.05)))
+otherwise write over a later save.  After `dbt-cli-format-deadline'
+seconds, dbt is stopped instead."
+  (let ((deadline (+ (float-time) dbt-cli-format-deadline)))
+    (while (and (process-live-p dbt-cli--format-process) (< (float-time) deadline))
+      (accept-process-output dbt-cli--format-process 0.05))
+    (when (process-live-p dbt-cli--format-process)
+      (message "dbt format ran over %s seconds: stopped" dbt-cli-format-deadline)
+      (delete-process dbt-cli--format-process))))
 
 (defun dbt-cli-format (buffer)
   "Have `dbt format' format the saved file of BUFFER, then read BUFFER again.

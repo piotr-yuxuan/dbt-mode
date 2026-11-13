@@ -545,6 +545,27 @@ as it is."
         (should (string-prefix-p "-- formatted\n-- other\n" (dbt-test-file-text root "models/marts/customers.sql")))))))
 
 
+(ert-deftest dbt-cli-stops-a-format-that-runs-too-long ()
+  "A save waits for a running dbt format `dbt-cli-format-deadline' seconds at most, then stops it; the save stands."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=30") process-environment))
+            (dbt-cli-format-deadline 0.5)
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (goto-char (point-min))
+        (insert "-- typed\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (should-not (seq-some (lambda (process) (and (string-prefix-p "dbt format" (process-name process))
+                                                     (process-live-p process)))
+                              (process-list)))
+        (dbt-test-message-since start "dbt format ran over 0\\.5 seconds: stopped")
+        (should-not (buffer-modified-p))
+        (should (string-prefix-p "-- typed\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
+
+
 (ert-deftest dbt-cli-formats-each-save-after-the-one-before ()
   "A save waits for the format that runs: an older format never writes over a newer save.
 C-c C-q with the mode on formats once."
