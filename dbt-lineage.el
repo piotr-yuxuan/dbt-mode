@@ -75,11 +75,11 @@ excluded."
                                ("Name" 32 t) ("File" 0 t)])
   (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lineage--refresh))))
 
-(defun dbt-lineage-show (root name nodes description &optional refresh)
+(defun dbt-lineage-show (root name nodes description refresh)
   "Show the lineage of the resource NAME of ROOT among NODES.
 DESCRIPTION says where NODES come from, for the header.  REFRESH is a
-function of no argument that shows the lineage again; it defaults to
-showing NODES again."
+function of no argument that asks for the lineage again, from where the
+nodes came."
   (let ((focus (or (seq-find (lambda (node) (and (equal (plist-get node :name) name)
                                                  (memq (plist-get node :type) '(model seed snapshot))))
                              nodes)
@@ -89,7 +89,7 @@ showing NODES again."
       (puthash (plist-get node :id) node by-id))
     (with-current-buffer (get-buffer-create (format "*dbt lineage: %s*" name))
       (dbt-lineage-mode)
-      (setq dbt-lineage--refresh (or refresh (lambda () (dbt-lineage-show root name nodes description)))
+      (setq dbt-lineage--refresh refresh
             tabulated-list-entries
             (mapcan (lambda (direction)
                       (mapcar (pcase-lambda (`(,id . ,depth))
