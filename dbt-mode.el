@@ -655,6 +655,27 @@ its upstream and downstream: +MODEL+."
     (kill-new command)
     (message "Copied %s" command)))
 
+(defun dbt-visit-tests ()
+  "Show the tests of the current model.
+They are the YAML entries that name it, where its data tests and unit
+tests sit, and the singular tests of the project's test paths that read
+it."
+  (interactive)
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (directories (mapcar (lambda (path) (file-name-as-directory (expand-file-name path root)))
+                              (plist-get (dbt-project-config root) :test-paths)))
+         (items (seq-filter
+                 (lambda (item)
+                   (let ((file (xref-location-group (xref-item-location item))))
+                     (or (string-match-p "\\.ya?ml\\'" file)
+                         (seq-some (lambda (directory) (string-prefix-p directory file)) directories))))
+                 (xref-backend-references
+                  'dbt (dbt-mode-identifier (dbt-mode-entity-target resource (plist-get resource :package)))))))
+    (unless items
+      (user-error "No test reads %s" (plist-get resource :name)))
+    (xref-show-xrefs (lambda () items) nil)))
+
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
 For `after-save-hook', so that the index sees what was just saved."
@@ -672,6 +693,7 @@ For `after-save-hook', so that the index sees what was just saved."
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
   "C-c C-e" #'dbt-insert-ref
+  "C-c C-t" #'dbt-visit-tests
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
   "C-c C-n" #'dbt-new
@@ -688,6 +710,7 @@ For `after-save-hook', so that the index sees what was just saved."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    ["Tests of this model" dbt-visit-tests]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     "---"

@@ -565,5 +565,17 @@
     (dbt-copy-build-command t)
     (should (equal (current-kill 0) "dbt build -s +orders+"))))
 
+(ert-deftest dbt-mode-lists-the-tests-of-a-model ()
+  "The tests of a model are its YAML entries and the singular tests that read it."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let* (shown
+           (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
+      (dbt-visit-tests)
+      (should (equal (sort (mapcar #'car (dbt-test-xref-files shown root)) #'string<)
+                     '("models/staging/_staging.yml" "tests/assert_positive_amount.sql"))))
+    (dbt-test-visit root "models/marts/customers.sql")
+    (should-error (dbt-visit-tests) :type 'user-error)))
+
 (provide 'dbt-mode-test)
 ;;; dbt-mode-test.el ends here
