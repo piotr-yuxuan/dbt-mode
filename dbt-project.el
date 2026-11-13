@@ -141,6 +141,16 @@ above whose column is lower, up to the last line at column 0."
     "semantic_models" "metrics" "saved_queries")
   "The top-level YAML sections whose entries the index keeps.")
 
+(defconst dbt-project-section-kinds
+  '(("models" . model) ("seeds" . seed) ("snapshots" . snapshot) ("analyses" . analysis)
+    ("macros" . macro) ("sources" . source) ("tables" . table) ("exposures" . exposure))
+  "Alist from a section of a properties file to the kind its entries name.
+An entry of a source, a table or an exposure defines it; another entry
+gives the properties of a resource that a file defines.")
+
+(defconst dbt-project-resource-sections '("models" "seeds" "snapshots" "analyses")
+  "The sections whose entries describe a model, a seed, a snapshot or an analysis.")
+
 (defun dbt-project-yaml-entries (text)
   "Return the entries of TEXT, the contents of a dbt properties file.
 Each entry is a plist (:section SECTION :name NAME :line LINE :source
@@ -356,12 +366,10 @@ A file that cannot be read defines what its place tells only."
                            entities)))
                  (when (string-prefix-p "y" extension)
                    (dolist (entry (dbt-project-yaml-entries (buffer-string)))
-                     (push (append (list :kind (alist-get (plist-get entry :section)
-                                                          '(("sources" . source) ("tables" . table)
-                                                            ("exposures" . exposure))
-                                                          'properties nil #'equal))
-                                   entry head)
-                           entities))))))))
+                     (let ((kind (alist-get (plist-get entry :section) dbt-project-section-kinds nil nil #'equal)))
+                       (push (append (list :kind (if (memq kind '(source table exposure)) kind 'properties))
+                                     entry head)
+                             entities)))))))))
        (nreverse entities)))))
 
 (defvar dbt-project--names (make-hash-table :test #'eq :weakness 'key)
