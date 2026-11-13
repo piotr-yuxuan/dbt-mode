@@ -404,6 +404,14 @@ dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
 
 ;;;; The client
 
+(defun dbt-lsp--compiling (workspace compiling)
+  "Say in the mode line of WORKSPACE's buffers whether its server is COMPILING."
+  (dolist (buffer (lsp--workspace-buffers workspace))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq dbt-mode-compiling compiling))))
+  (force-mode-line-update t))
+
 (lsp-register-client
  (make-lsp-client
   :new-connection (lsp-stdio-connection #'dbt-lsp--command #'dbt-lsp-server-p)
@@ -417,12 +425,15 @@ dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   ;; `dbt-lsp--hide-formatting' hid, and log an error at each save.
   :after-open-fn (lambda () (setq-local lsp-format-buffer-on-save nil
                                         lsp-fix-all-on-save nil))
-  ;; The server tells of its compilations with notifications of its own;
-  ;; lsp-mode already shows their progress, from $/progress.
-  :notification-handlers (lsp-ht ("dbt/lspCompileStart" #'ignore)
-                                  ("dbt/lspCompileComplete" #'ignore)
-                                  ("dbt/lspBackgroundCompileStart" #'ignore)
-                                  ("dbt/lspBackgroundCompileComplete" #'ignore)
+  ;; The server tells of its compilations with notifications of its own,
+  ;; which the mode line shows; lsp-mode shows their progress, from
+  ;; $/progress.
+  :notification-handlers (lsp-ht ("dbt/lspCompileStart" (lambda (workspace _) (dbt-lsp--compiling workspace t)))
+                                  ("dbt/lspCompileComplete" (lambda (workspace _) (dbt-lsp--compiling workspace nil)))
+                                  ("dbt/lspBackgroundCompileStart"
+                                   (lambda (workspace _) (dbt-lsp--compiling workspace t)))
+                                  ("dbt/lspBackgroundCompileComplete"
+                                   (lambda (workspace _) (dbt-lsp--compiling workspace nil)))
                                   ("dbt/renameModel" #'ignore))
   :action-handlers (lsp-ht ("dbt.previewCte" #'dbt-lsp--preview-cte))))
 

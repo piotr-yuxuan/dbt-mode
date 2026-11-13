@@ -590,6 +590,33 @@ In a YAML file, it is the resource whose entry holds point."
   (concat (plist-get resource :name)
           (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
 
+(defvar-local dbt-mode--status nil
+  "What the mode line says of the buffer: the target, the materialization.")
+
+(defvar-local dbt-mode-compiling nil
+  "Non-nil while dbt lsp compiles the project of the buffer, as it notifies.")
+
+(defun dbt-mode--update-status ()
+  "Set what the mode line says: the target that dbt runs on, the materialization.
+The materialization is that of the model's config() call, else that of
+its node in the manifest of the user's runs.  For `after-save-hook',
+and once the buffer is shown."
+  (when-let* ((root (dbt-project-root)))
+    (let* ((resource (dbt-mode-current-resource))
+           (manifest (expand-file-name "manifest.json"
+                                       (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
+           (config (and resource
+                        (gethash "config" (or (dbt-project-manifest-node manifest (dbt-project-node-id resource))
+                                              (make-hash-table)))))
+           (materialization (or (save-excursion
+                                  (goto-char (point-min))
+                                  (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
+                                       (match-string-no-properties 1)))
+                                (and (hash-table-p config) (gethash "materialized" config)))))
+      (setq dbt-mode--status
+            (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
+                         " ")))))
+
 (defun dbt-mode-selection-at-point ()
   "Return dbt's selector of what point is on, else of the current resource.
 On a `ref', it is the model, seed or snapshot that it names, as NAME or
@@ -925,6 +952,13 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
+  ;; The target, the materialization and the compilation, after the name.
+  (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))
+  (add-hook 'after-save-hook #'dbt-mode--update-status nil 'local)
+  (let ((buffer (current-buffer)))
+    (run-with-idle-timer 0 nil (lambda ()
+                                 (when (buffer-live-p buffer)
+                                   (with-current-buffer buffer (dbt-mode--update-status))))))
   (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))
     (add-hook 'post-self-insert-hook function nil 'local))
   (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte

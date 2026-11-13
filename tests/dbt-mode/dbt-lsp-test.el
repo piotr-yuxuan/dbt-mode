@@ -221,6 +221,17 @@ Its one code action, which fixes and formats, is hidden too."
       (should-not (string-match-p "Unknown notification"
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
+(ert-deftest dbt-lsp-says-in-the-mode-line-when-the-server-compiles ()
+  "While the server compiles, as it notifies, the mode line says so."
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileStart"]))
+    (dbt-test-wait (lambda () dbt-mode-compiling))
+    ;; In batch, `format-mode-line' formats nothing: what it would show,
+    ;; kept within the spinner that lsp-mode adds around it.
+    (should (string-search "(dbt-mode-compiling \" compiling\")" (format "%S" mode-line-process))))
+  (dbt-lsp-test-with-server root nil
+    (lsp-request "textDocument/hover" (lsp--text-document-position-params))
+    (should-not dbt-mode-compiling)))
+
 (ert-deftest dbt-lsp-turns-off-lsp-mode-s-formatting-on-save ()
   "Set for other languages, lsp-mode's formatting and fixes on save log no error here."
   (let ((lsp-format-buffer-on-save t)

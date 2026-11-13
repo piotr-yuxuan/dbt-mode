@@ -694,6 +694,26 @@ nor a node whose id it begins."
     (dbt-copy-relation)
     (should (equal (current-kill 0) "raw.main.raw_orders"))))
 
+(ert-deftest dbt-mode-shows-the-target-and-the-materialization ()
+  "The mode line says the target dbt runs on and the model's materialization.
+It is that of the config() call, else that of the manifest; DBT_TARGET
+names the target.  In batch, `format-mode-line' formats nothing at all,
+so the test reads what `mode-line-process' shows."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "target" root))
+    (write-region "{\"nodes\": {\"model.shop.stg_orders\": {\"config\": {\"materialized\": \"view\"}}}}"
+                  nil (expand-file-name "target/manifest.json" root))
+    (dbt-test-visit root "models/marts/orders.sql")
+    (set-buffer-modified-p t)
+    (save-buffer)
+    (should (member '(dbt-mode--status (" " dbt-mode--status)) mode-line-process))
+    (should (equal dbt-mode--status "dev table"))
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let ((process-environment (cons "DBT_TARGET=prod" process-environment)))
+      (set-buffer-modified-p t)
+      (save-buffer))
+    (should (equal dbt-mode--status "prod view"))))
+
 (ert-deftest dbt-mode-copies-the-build-command ()
   "The build command selects the model, or with a prefix its family.
 On a ref or a source, it selects what they name."

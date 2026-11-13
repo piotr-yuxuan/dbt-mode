@@ -6,7 +6,8 @@ It answers `initialize` with capabilities like those of dbt lsp 2.0.9,
 formatting and code actions included, and every other request from a JSON
 file of answers, whose keys are a method, or "workspace/executeCommand
 COMMAND" for a command: a request without an answer there gets null.  After
-`initialized`, it sends the notifications of its own that dbt lsp sends.
+`initialized`, it sends the notifications of its own that dbt lsp sends, or
+those that the key "$notifications" of the answers lists.
 
 Environment:
 - DBT_MODE_FAKE_ANSWERS: the file of answers, optional;
@@ -109,7 +110,7 @@ def main() -> None:
             if "id" in message and method is not None:
                 write_message({"id": message["id"], "result": answer(message, answers)})
             if method == "initialized":
-                for notification in NOTIFICATIONS:
+                for notification in answers.get("$notifications", NOTIFICATIONS):
                     write_message({"method": notification, "params": {}})
 
 
