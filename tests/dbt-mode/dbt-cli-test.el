@@ -525,6 +525,17 @@ C-c C-q with the mode on formats once."
         (dbt-test-formatted)
         (should (string-prefix-p "-- formatted\n-- third\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
 
+(ert-deftest dbt-format-buffer-refuses-a-buffer-without-a-file ()
+  "C-c C-q in a buffer that visits no file, as an Org source buffer, says so."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (dbt-mode)
+      (insert "select 1")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
+                     (format "%s visits no file for dbt to format" (buffer-name))))
+      (should (equal (buffer-string) "select 1")))))
+
 (ert-deftest dbt-cli-format-leaves-nothing-behind-without-dbt ()
   "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind."
   (dbt-test-with-project root

@@ -944,11 +944,13 @@ A buffer saved meanwhile, as by a timer, is formatted as usual.")
 
 (defun dbt-format-buffer ()
   "Save the buffer, then format it.
-With dbt lsp, the server formats it, as `dbt-lsp-format-buffer' does,
-and leaves it modified.  Otherwise `dbt format' formats the saved file,
-and the buffer shows the result once dbt ends, unless it was modified
-meanwhile."
+With dbt lsp, the server formats it as it answers, as
+`dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
+format' formats the saved file, and the buffer shows the result once
+dbt ends, unless it was modified meanwhile."
   (interactive)
+  (unless buffer-file-name
+    (user-error "%s visits no file for dbt to format" (buffer-name)))
   (let ((dbt-mode--formatting (current-buffer)))
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
