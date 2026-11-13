@@ -648,16 +648,20 @@ stands."
       (insert "-- edited\n")
       (execute-kbd-macro (kbd "C-c C-q"))
       (should (string-prefix-p "-- edited\n" (dbt-test-file-text root "models/marts/orders.sql")))
-      (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+      ;; The server answers while Emacs goes on.
+      (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
       (dbt-format-on-save-mode 1)
       (execute-kbd-macro (kbd "C-x C-s"))
+      (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- formatted\n-- edited\n"
+                                                 (dbt-test-file-text root "models/marts/orders.sql"))))
       (should-not (buffer-modified-p))
-      (should (string-prefix-p "-- formatted\n-- formatted\n-- edited\n"
-                               (dbt-test-file-text root "models/marts/orders.sql")))
       ;; C-c C-q formats once, its save included.
       (goto-char (point-min))
       (insert "-- again\n")
       (execute-kbd-macro (kbd "C-c C-q"))
+      (dbt-test-wait (lambda () (not (string-prefix-p "-- again\n" (buffer-string)))))
+      ;; A second format would come within this time.
+      (accept-process-output nil 0.3)
       (should (string-prefix-p "-- formatted\n-- again\n" (buffer-string)))))
   (dbt-lsp-test-with-server root '(("textDocument/formatting" . "not edits"))
     (save-window-excursion
@@ -679,7 +683,7 @@ stands."
     (insert "-- unsaved\n")
     (dbt-lsp-format-buffer)
     (should (string-prefix-p "-- unsaved\n" (dbt-test-file-text root "models/marts/orders.sql")))
-    (should (string-prefix-p "-- formatted\n-- unsaved\n" (buffer-string)))
+    (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- unsaved\n" (buffer-string))))
     (should (member "textDocument/didSave"
                     (member "textDocument/didChange" (dbt-lsp-test-methods))))
     (should (member "textDocument/formatting"
@@ -717,8 +721,8 @@ stands."
     (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (let ((text (buffer-string)))
-      (should (string-match-p "\\`dbt lsp: textDocument/formatting answered what dbt-mode cannot read"
-                              (error-message-string (should-error (dbt-lsp-format-buffer)))))
+      (dbt-lsp-format-buffer)
+      (dbt-lsp-test-message "dbt could not format orders\\.sql: dbt lsp: textDocument/formatting answered what dbt-mode cannot read")
       (should (equal (buffer-string) text)))
     (should-not (get-buffer "*dbt rows: orders*"))
     (should-not (get-buffer "*dbt lineage: orders*"))))

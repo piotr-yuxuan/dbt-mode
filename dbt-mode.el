@@ -963,9 +963,12 @@ message: the save stands."
       (condition-case err
           (if (not (dbt-mode-server-p))
               (dbt-cli-format (current-buffer))
-            (dbt-lsp-format-buffer)
-            (when (buffer-modified-p)
-              (save-buffer)))
+            ;; The server answers later: the save that follows its edits
+            ;; formats nothing again.
+            (dbt-lsp-format-buffer (lambda ()
+                                     (when (buffer-modified-p)
+                                       (let ((dbt-mode--formatting t))
+                                         (save-buffer))))))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 
 (define-minor-mode dbt-format-on-save-mode

@@ -185,8 +185,16 @@ The rows of a model come from its buffer, unsaved changes included."
         (dbt-lsp)
         (erase-buffer)
         (insert "-- unsaved\n" unformatted)
-        ;; The server formats nothing until it has compiled the project.
-        (dbt-test-wait (lambda () (dbt-lsp-format-buffer) (buffer-modified-p)) 60)
+        ;; The server formats nothing until it has compiled the project:
+        ;; ask again, every two seconds, until its edits modify the
+        ;; buffer that the first request saved.
+        (let ((asked 0))
+          (dbt-test-wait (lambda ()
+                           (or (and (> asked 0) (buffer-modified-p))
+                               (when (> (- (float-time) asked) 2)
+                                 (setq asked (float-time))
+                                 (ignore (dbt-lsp-format-buffer)))))
+                         60))
         (should (equal (dbt-test-file-text root "models/staging/stg_customers.sql") (concat "-- unsaved\n" unformatted)))
         (should (equal (buffer-string) (concat "-- unsaved\n" formatted)))
         (erase-buffer)

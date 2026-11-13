@@ -389,28 +389,42 @@ of a model is not renamed, as the server would edit nothing."
         (message "Renamed to %s; save the buffers it edited with C-x s; %d uses still name %s, which dbt lsp leaves"
                  name (length uses) old)))))
 
-(defun dbt-lsp-format-buffer ()
-  "Save the buffer, and format it with the server."
+(defun dbt-lsp-format-buffer (&optional then)
+  "Save the buffer, then have the server format it.
+The server formats the file on disk, whose text is the buffer's once
+saved: its edits apply when it answers, while the buffer's text is
+still that, and leave the buffer modified.  THEN, when non-nil, is a
+function of no argument that runs in the buffer once they did.  An
+answer that dbt-mode cannot read is a message."
   (interactive)
   (save-buffer)
-  (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
-    ;; Without its requirement, lsp-mode sends the method that
-    ;; `dbt-lsp--hide-formatting' hid, here only.
-    (let* ((lsp-method-requirements (assoc-delete-all "textDocument/formatting"
-                                                      (copy-alist lsp-method-requirements)))
-           (edits (lsp-request "textDocument/formatting"
-                               (list :textDocument (lsp--text-document-identifier)
-                                     :options (list :tabSize tab-width
-                                                    :insertSpaces (if indent-tabs-mode :json-false t))))))
-      ;; lsp-mode gives the array of edits as a list.
-      (unless (and (listp edits)
-                   (dbt-lsp--conforms-p
-                    (vconcat edits)
-                    '(array (object (:range (object (:start (object (:line natnump) (:character natnump)))
-                                                    (:end (object (:line natnump) (:character natnump)))))
-                                    (:newText stringp)))))
-        (error "%s" (dbt-lsp--unreadable "textDocument/formatting" edits)))
-      (lsp--apply-text-edits edits 'format))))
+  (let ((buffer (current-buffer))
+        (tick (buffer-chars-modified-tick)))
+    (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
+      ;; Without its requirement, lsp-mode sends the method that
+      ;; `dbt-lsp--hide-formatting' hid, here only.
+      (let ((lsp-method-requirements (assoc-delete-all "textDocument/formatting"
+                                                       (copy-alist lsp-method-requirements))))
+        (lsp-request-async
+         "textDocument/formatting"
+         (list :textDocument (lsp--text-document-identifier)
+               :options (list :tabSize tab-width :insertSpaces (if indent-tabs-mode :json-false t)))
+         (lambda (edits)
+           ;; lsp-mode gives the array of edits as a list.
+           (cond ((not (and (listp edits)
+                            (dbt-lsp--conforms-p
+                             (vconcat edits)
+                             '(array (object (:range (object (:start (object (:line natnump) (:character natnump)))
+                                                             (:end (object (:line natnump) (:character natnump)))))
+                                             (:newText stringp))))))
+                  (message "dbt could not format %s: %s" (buffer-name buffer)
+                           (dbt-lsp--unreadable "textDocument/formatting" edits)))
+                 ((and (buffer-live-p buffer) (= tick (buffer-chars-modified-tick buffer)))
+                  (with-current-buffer buffer
+                    (lsp--apply-text-edits edits 'format)
+                    (when then
+                      (funcall then))))))
+         :mode 'detached)))))
 
 (defun dbt-lsp-fix-all ()
   "Save the buffer, then fix its lint issues and format it with the server.
