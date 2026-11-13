@@ -153,6 +153,40 @@ for again from its grid, the query is taken again from the model's file."
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))
 
+(defun dbt-cli-format (buffer)
+  "Have `dbt format' format the file of BUFFER, then read BUFFER again.
+dbt formats the saved file.  Once it ends, BUFFER is read again when the
+file changed and BUFFER was not modified meanwhile; a message says so
+when it was.  When dbt fails, its error is the message."
+  (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
+         (default-directory root)
+         (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
+         ;; Before the buffer of its output exists, which a refusal would leave.
+         (executable (dbt-project-executable))
+         (output (generate-new-buffer " *dbt format*"))
+         (tick (buffer-chars-modified-tick buffer)))
+    (make-process
+     :name "dbt format" :buffer output :noquery t :connection-type 'pipe
+     :command (list executable "format" (file-relative-name (buffer-file-name buffer) root))
+     :sentinel
+     (lambda (process _event)
+       (unless (process-live-p process)
+         (unwind-protect
+             (cond ((/= 0 (process-exit-status process))
+                    (message "dbt could not format %s: %s" (buffer-name buffer)
+                             (with-current-buffer output
+                               (goto-char (point-min))
+                               (if (re-search-forward "^\\[error\\] \\(.*\\)" nil t)
+                                   (match-string 1)
+                                 (format "exit status %d" (process-exit-status process))))))
+                   ((and (buffer-live-p buffer) (not (verify-visited-file-modtime buffer)))
+                    (if (= tick (buffer-chars-modified-tick buffer))
+                        (with-current-buffer buffer
+                          (revert-buffer t t t))
+                      (message "dbt formatted %s on disk, but not its buffer, modified meanwhile"
+                               (buffer-name buffer)))))
+           (kill-buffer output)))))))
+
 (defun dbt-cli-arguments (arguments &optional changed)
   "Return the command-line arguments that the transient ARGUMENTS mean.
 The switches --upstream and --downstream are `dbt-dispatch''s own: they

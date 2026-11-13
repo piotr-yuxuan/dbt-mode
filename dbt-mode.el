@@ -84,6 +84,7 @@
 (autoload 'dbt-compiled-diff "dbt-compiled" nil t)
 (autoload 'dbt-cli-show "dbt-cli")
 (autoload 'dbt-cli-preview-cte "dbt-cli")
+(autoload 'dbt-cli-format "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
 (declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
@@ -904,6 +905,18 @@ listed: their `model' key is not a call."
       (user-error "No test reads %s" (plist-get resource :name)))
     (xref-show-xrefs (lambda () items) nil)))
 
+(defun dbt-format-buffer ()
+  "Save the buffer, then format it.
+With dbt lsp, the server formats it, as `dbt-lsp-format-buffer' does,
+and leaves it modified.  Otherwise `dbt format' formats the saved file,
+and the buffer shows the result once dbt ends, unless it was modified
+meanwhile."
+  (interactive)
+  (if (dbt-mode-server-p)
+      (dbt-lsp-format-buffer)
+    (save-buffer)
+    (dbt-cli-format (current-buffer))))
+
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
 For `after-save-hook', so that the index sees what was just saved."
@@ -927,6 +940,7 @@ CTE rather than by statement."
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
   "C-c C-a" #'dbt-new
+  "C-c C-q" #'dbt-format-buffer
   "C-c /" #'dbt-close-block
   "C-c %" #'dbt-jump-to-matching-tag
   ;; `sql-mode' remaps them to its statement motions.
@@ -955,7 +969,7 @@ CTE rather than by statement."
     ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
-    ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
+    ["Format buffer" dbt-format-buffer]
     ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 

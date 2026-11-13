@@ -385,5 +385,64 @@ A buffer outside the project is left alone."
             (with-current-buffer other (set-buffer-modified-p nil) (kill-buffer)))
         (delete-file outside)))))
 
+(defun dbt-test-formatted ()
+  "Wait until no `dbt format' runs, its sentinel included."
+  (dbt-test-wait (lambda () (not (seq-some (lambda (process) (string-prefix-p "dbt format" (process-name process)))
+                                           (process-list))))))
+
+(defun dbt-test-message-since (start regexp)
+  "Wait until a message after the position START of *Messages* matches REGEXP."
+  (dbt-test-wait (lambda ()
+                   (with-current-buffer (messages-buffer)
+                     (save-excursion
+                       (goto-char start)
+                       (re-search-forward regexp nil t))))))
+
+(ert-deftest dbt-cli-formats-the-saved-file ()
+  "Without a server, C-c C-q saves, then the buffer shows what dbt format made of the file.
+A buffer modified while dbt runs is left alone, with a message, and a
+failure of dbt is a message, the buffer as saved."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+        (let ((process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+          (goto-char (point-min))
+          (insert "-- edited\n")
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
+          (should-not (buffer-modified-p))
+          (let ((start (with-current-buffer (messages-buffer) (point-max))))
+            (execute-kbd-macro (kbd "C-c C-q"))
+            (insert "-- typed meanwhile\n")
+            (dbt-test-message-since start "dbt formatted orders\\.sql on disk, but not its buffer"))
+          (dbt-test-formatted)
+          (should (buffer-modified-p))
+          (should (string-prefix-p "-- formatted\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql")))
+          (should-not (string-match-p "-- formatted\n-- formatted\n" (buffer-string))))
+        (revert-buffer t t)
+        (let ((start (with-current-buffer (messages-buffer) (point-max))))
+          (insert "-- edited again\n")
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-message-since start "dbt could not format orders\\.sql: \\[DependencyNotFound (dbt1048)\\]")
+          (dbt-test-formatted)
+          (should-not (buffer-modified-p))
+          (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql"))))))))
+
+(ert-deftest dbt-cli-format-leaves-nothing-behind-without-dbt ()
+  "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "no-dbt-here" root))
+            (buffers (buffer-list))
+            (processes (process-list)))
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+        (should-not (buffer-modified-p))
+        (should (equal (process-list) processes))
+        (should-not (seq-difference (buffer-list) buffers))))))
+
 (provide 'dbt-cli-test)
 ;;; dbt-cli-test.el ends here
