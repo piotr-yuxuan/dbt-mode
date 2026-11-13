@@ -184,7 +184,8 @@ Jinja's rules see that /- and -* start no comment."
     (should (eq (dbt-test-face "config(") 'font-lock-builtin-face))))
 
 (ert-deftest dbt-mode-jinja-bounds-find-the-tag-around-point ()
-  "Point inside a tag gets its bounds; outside, or in an open tag, none or no end."
+  "Point inside a tag gets its bounds; outside, or in an open tag, none or no end.
+A tag inside the string of a tag is part of that string."
   (with-temp-buffer
     (dbt-mode)
     (insert "select {{ ref('a') }} from t {% if x")
@@ -193,7 +194,12 @@ Jinja's rules see that /- and -* start no comment."
     (dbt-test-goto "from")
     (should-not (dbt-mode-jinja-bounds))
     (goto-char (point-max))
-    (should (equal (dbt-mode-jinja-bounds) (cons 30 nil)))))
+    (should (equal (dbt-mode-jinja-bounds) (cons 30 nil))))
+  (with-temp-buffer
+    (dbt-mode)
+    (insert "{{ f(\"a {{ b }} c\", x) }}")
+    (dbt-test-goto "x)")
+    (should (equal (dbt-mode-jinja-bounds) (cons 1 26)))))
 
 (ert-deftest dbt-mode-reads-the-strings-of-a-tag ()
   "A quote of the other kind, or escaped, in a Jinja string ends nothing."
