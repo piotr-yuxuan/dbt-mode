@@ -449,6 +449,14 @@ narrowing alone."
     (dbt-test-goto "where")
     (dbt-test-keys "TAB")
     (should (= (current-indentation) 0)))
+  ;; A tag not closed yet opens no block, until its end is typed.
+  (dbt-test-with-window "{% if x\nselect a\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (dbt-test-goto "if x" 4)
+    (dbt-test-type " %}")
+    (goto-char (point-max))
+    (dbt-test-keys "C-c /")
+    (should (equal (buffer-string) "{% if x %}\nselect a\n{% endif %}")))
   (dbt-test-with-window "{% macro m() %}\nselect\nid\nfrom t\n{% endmacro %}\n"
     (dbt-test-goto "from t")
     (dbt-test-keys "TAB")
