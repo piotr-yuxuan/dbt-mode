@@ -529,7 +529,7 @@ or not a language server runs."
 
 (defun dbt-visit-compiled ()
   "Show the SQL that the current model compiles to.
-With dbt lsp, the server compiles it, unsaved changes included.
+With dbt lsp, the buffer is saved and the server compiles it.
 Otherwise, show what the last `dbt compile' or `dbt run' wrote."
   (interactive)
   (if (dbt-mode-server-p)
