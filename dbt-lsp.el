@@ -59,15 +59,30 @@
   :group 'dbt)
 
 (defvar dbt-lsp--servers (make-hash-table :test #'equal)
-  "From the file name of a dbt executable to whether it runs `dbt lsp'.")
+  "From the file name of a dbt executable to whether it runs `dbt lsp'.
+The value is `yes' or `no'.")
+
+(defvar dbt-lsp--probe-seconds 10
+  "The seconds that dbt has to say whether it runs `dbt lsp'.")
 
 (defun dbt-lsp-server-p ()
   "Return non-nil when `dbt-executable' runs a language server.
 Only dbt 2.0 or later does; dbt Core 1.x has no `dbt lsp'.  The answer
-is kept for each executable."
+is kept for each executable, whichever it is.  A dbt that does not
+answer within `dbt-lsp--probe-seconds' runs none."
   (when-let* ((executable (executable-find dbt-executable)))
-    (with-memoization (gethash executable dbt-lsp--servers)
-      (eq 0 (ignore-errors (call-process executable nil nil nil "lsp" "--help"))))))
+    (eq 'yes
+        (with-memoization (gethash executable dbt-lsp--servers)
+          (let ((process (ignore-errors
+                           (make-process :name "dbt lsp --help" :command (list executable "lsp" "--help")
+                                         :connection-type 'pipe :noquery t)))
+                (deadline (+ (float-time) dbt-lsp--probe-seconds)))
+            (while (and (process-live-p process) (< (float-time) deadline))
+              (accept-process-output process 0.1))
+            (prog1 (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                       'yes
+                     'no)
+              (when process (delete-process process))))))))
 
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.

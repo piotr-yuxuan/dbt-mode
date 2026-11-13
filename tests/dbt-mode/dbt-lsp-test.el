@@ -129,6 +129,37 @@ The buffer is killed, so that the next preview makes a new one."
         (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
                        (expand-file-name "other" root)))))))
 
+(defmacro dbt-lsp-test-with-dbt (dbt script &rest body)
+  "Run BODY with DBT bound to a fresh executable that runs the shell SCRIPT.
+SCRIPT runs with the variable LOG naming the file calls in its directory."
+  (declare (indent 2) (debug (symbolp form body)))
+  `(let* ((,dbt (expand-file-name "dbt" (make-temp-file "dbt-lsp-probe" t))))
+     (unwind-protect
+         (progn
+           (with-temp-file ,dbt
+             (insert "#!/bin/sh\nLOG=" (shell-quote-argument (expand-file-name "calls" (file-name-directory ,dbt)))
+                     "\n" ,script "\n"))
+           (set-file-modes ,dbt #o755)
+           ,@body)
+       (delete-directory (file-name-directory ,dbt) t))))
+
+(ert-deftest dbt-lsp-asks-dbt-once-whether-it-runs-a-server ()
+  "dbt is asked once whether it has `dbt lsp', even when it has not."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exit 2"
+    (let ((dbt-executable dbt))
+      (should-not (dbt-lsp-server-p))
+      (should-not (dbt-lsp-server-p)))
+    (should (equal (dbt-lsp-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
+
+(ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
+  "A dbt that does not say in time whether it has `dbt lsp' runs no server."
+  (dbt-lsp-test-with-dbt dbt "exec sleep 20"
+    (let ((dbt-executable dbt)
+          (dbt-lsp--probe-seconds 1)
+          (start (float-time)))
+      (should-not (dbt-lsp-server-p))
+      (should (< (- (float-time) start) 5)))))
+
 (ert-deftest dbt-lsp-adds-a-folder-only-for-a-server ()
   "The root of the project becomes a folder of the lsp session only if dbt runs a server.
 The session persists its folders, so it would keep one it cannot use."
