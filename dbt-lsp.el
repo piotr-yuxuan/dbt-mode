@@ -41,7 +41,6 @@
 
 ;;; Code:
 
-(require 'dbt-cli)
 (require 'dbt-lineage)
 (require 'dbt-mode)
 (require 'dbt-project)

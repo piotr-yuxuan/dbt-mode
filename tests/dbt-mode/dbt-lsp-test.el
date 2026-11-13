@@ -105,6 +105,16 @@ The buffer is killed, so that the next preview makes a new one."
     (insert-file-contents (expand-file-name file root))
     (buffer-string)))
 
+(ert-deftest dbt-lsp-loads-without-the-commands-of-dbt ()
+  "The client of dbt lsp takes the preview limit from the project model.
+So it does not load dbt-cli, with transient and compile."
+  (with-temp-buffer
+    (should (eq 0 (call-process (expand-file-name invocation-name invocation-directory) nil t nil
+                                "-Q" "--batch" "-L" (file-name-directory (locate-library "dbt-lsp"))
+                                "--eval" "(load \"lsp-mode-autoloads\" nil t)" "-l" "dbt-lsp"
+                                "--eval" "(princ (list (featurep 'dbt-cli) dbt-preview-limit))")))
+    (should (equal (buffer-string) "(nil 50)"))))
+
 (ert-deftest dbt-lsp-runs-the-server-on-the-project ()
   "The server runs on the root of the project, with the options of dbt-lsp."
   (let ((dbt-lsp-enable-linter t)
