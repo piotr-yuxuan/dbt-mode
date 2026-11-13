@@ -356,14 +356,24 @@ A file that cannot be read defines what its place tells only."
                            entities))))))))
        (nreverse entities)))))
 
+(defvar dbt-project--names (make-hash-table :test #'eq :weakness 'key)
+  "Each index, to a table from a name to its entities in the order of the index.")
+
 (defun dbt-project-entities (root kinds &optional name package)
-  "Return the entities of ROOT whose kind is one of KINDS.
-Keep only those named NAME, and of PACKAGE, when they are given."
-  (seq-filter (lambda (entity)
-                (and (memq (plist-get entity :kind) kinds)
-                     (or (null name) (equal name (plist-get entity :name)))
-                     (or (null package) (equal package (plist-get entity :package)))))
-              (dbt-project-index root)))
+  "Return the entities of ROOT whose kind is one of KINDS, in index order.
+Keep only those named NAME, and of PACKAGE, when they are given.  A name
+is looked up in a table, built once for each index."
+  (let* ((index (dbt-project-index root))
+         (names (and name
+                     (with-memoization (gethash index dbt-project--names)
+                       (let ((table (make-hash-table :test #'equal)))
+                         (dolist (entity (reverse index))
+                           (push entity (gethash (plist-get entity :name) table)))
+                         table)))))
+    (seq-filter (lambda (entity)
+                  (and (memq (plist-get entity :kind) kinds)
+                       (or (null package) (equal package (plist-get entity :package)))))
+                (if name (gethash name names) index))))
 
 (defun dbt-project-file-entity (root file)
   "Return the model, seed, snapshot or analysis that FILE of ROOT defines.

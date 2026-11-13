@@ -266,5 +266,24 @@ A package whose dbt_project.yml cannot be read is named after its directory."
       (should (equal (funcall parents "model.shop.from_source") '("source.shop.raw.raw_orders")))
       (should (equal (funcall parents "seed.shop.raw_orders") nil)))))
 
+(ert-deftest dbt-project-graph-grows-with-the-calls ()
+  "The graph costs about the same per call however large the project.
+Eight times the models, each with three calls, take about eight times
+as long, not sixty-four."
+  (let ((seconds
+         (mapcar
+          (lambda (models)
+            (dbt-test-with-project root
+              (dotimes (n models)
+                (write-region (format "select * from {{ ref('m%d') }}, {{ ref('m%d') }}, {{ source('raw', 'raw_orders') }}"
+                                      (/ n 2) (/ n 3))
+                              nil (expand-file-name (format "models/m%d.sql" n) root) nil 'silent))
+              (dbt-project-index root)
+              (let ((start (float-time)))
+                (dbt-project-graph root)
+                (- (float-time) start))))
+          '(400 3200))))
+    (should (< (nth 1 seconds) (+ 0.1 (* 16 (nth 0 seconds)))))))
+
 (provide 'dbt-project-test)
 ;;; dbt-project-test.el ends here
