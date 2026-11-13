@@ -291,7 +291,8 @@ after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
             (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 3)
                            (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))
             (goto-char (point-max))
-            (insert "\n{{ source('raw', 'raw_orders') }}")
+            (insert "\n{{ source('raw', 'raw_orders') }}\n{{ source('raw', 'raw_customers') }}")
+            (save-buffer)
             (dbt-test-goto "raw_orders')")
             (should (eq (xref-find-backend) 'dbt))
             (let* (shown
@@ -306,8 +307,17 @@ after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
                 (execute-kbd-macro (kbd "M-."))
                 (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
                                        shown)
-                               '("models/staging/_sources.yml")))))
-            (should (member "textDocument/references" (dbt-lsp-test-methods)))
+                               '("models/staging/_sources.yml")))
+                ;; A source typed at the prompt is not the one at point: dbt-mode's.
+                (setq shown nil)
+                (xref-find-references "source:raw/raw_customers")
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/marts/orders.sql")))
+                ;; A ref stays dbt-mode's.
+                (dbt-test-goto "ref('stg_orders')" 6)
+                (execute-kbd-macro (kbd "M-?"))))
+            (should (= 1 (seq-count (lambda (method) (equal method "textDocument/references")) (dbt-lsp-test-methods))))
             (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))
           (dbt-lsp-test-with-server root
               `(("$experimental" . (:dbtLspPlus (:version 1 :definition ["source"])))
