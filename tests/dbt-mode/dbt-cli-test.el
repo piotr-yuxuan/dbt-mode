@@ -67,24 +67,43 @@ command, the selection only to the commands that select resources, and
      ,@body))
 
 (ert-deftest dbt-cli-selects-what-changed-on-the-branch ()
-  "Changed on the branch selects the models changed since main, new ones included.
-A YAML file or a macro that changed selects nothing of its own."
+  "Changed on the branch selects by path each file that dbt reads and that changed since the merge base.
+A YAML file counts, as dbt selects what it describes; a new file counts;
+a file that git would quote counts as it is; a commit on main after the
+branch does not."
   (dbt-test-with-project root
     (dbt-test-with-git root
       (dolist (arguments '(("init" "-q" "-b" "main") ("add" "-A") ("commit" "-q" "-m" "Start")
                            ("switch" "-q" "-c" "feature")))
         (apply #'call-process "git" nil nil nil arguments))
       (write-region "select 1 as id\n" nil (expand-file-name "models/marts/orders.sql" root))
-      (write-region "select 2 as id\n" nil (expand-file-name "models/marts/fresh.sql" root))
-      (write-region "-- touched\n" nil (expand-file-name "macros/cents_to_dollars.sql" root) 'append)
-      (should (equal (sort (dbt-cli-changed-selection root) #'string<) '("fresh" "orders")))
+      (write-region "select 2 as id\n" nil (expand-file-name "models/marts/café.sql" root))
+      (write-region "# touched\n" nil (expand-file-name "models/staging/_staging.yml" root) 'append)
+      (write-region "notes\n" nil (expand-file-name "notes.txt" root))
+      (dolist (arguments '(("add" "-A") ("commit" "-q" "-m" "Feature") ("switch" "-q" "main")))
+        (apply #'call-process "git" nil nil nil arguments))
+      (write-region "-- on main\n" nil (expand-file-name "models/marts/customers.sql" root) 'append)
+      (dolist (arguments '(("commit" "-q" "-am" "Main moves on") ("switch" "-q" "feature")))
+        (apply #'call-process "git" nil nil nil arguments))
+      (should (equal (sort (dbt-cli-changed-selection root) #'string<)
+                     '("path:models/marts/café.sql" "path:models/marts/orders.sql" "path:models/staging/_staging.yml")))
       (dbt-test-visit root "models/marts/customers.sql")
       (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
             (transient-values '((dbt-dispatch "--select=customers" "--changed" "--downstream"))))
         (with-current-buffer (dbt-cli-dispatch "build")
           (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
-          (should (string-match-p "^arguments: build --select \\(orders\\+ fresh\\+\\|fresh\\+ orders\\+\\)$"
-                                  (buffer-string))))))))
+          (goto-char (point-min))
+          (should (re-search-forward "^arguments: build --select \\(.*\\)$" nil t))
+          (should (equal (sort (split-string (match-string 1) " ") #'string<)
+                         '("path:models/marts/café.sql+" "path:models/marts/orders.sql+"
+                           "path:models/staging/_staging.yml+"))))))))
+
+(ert-deftest dbt-cli-says-what-git-says-of-the-changes ()
+  "Outside a git repository, Changed on the branch says what git says."
+  (dbt-test-with-project root
+    (dbt-test-with-git root
+      (should (string-match-p "not a git repository"
+                              (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error)))))))
 
 (ert-deftest dbt-cli-runs-the-last-command-again ()
   "Again runs the project's last dbt command, with its arguments."

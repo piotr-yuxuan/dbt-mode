@@ -171,22 +171,30 @@ those of --select."
                     arguments))))
 
 (defun dbt-cli-changed-selection (root)
-  "Return the selectors of the resources of ROOT that changed on the branch.
-They are the models, seeds and snapshots whose files git sees changed
-since the merge base with the default branch, origin/HEAD or else main:
-committed, uncommitted and untracked ones."
+  "Return the selectors of what changed in ROOT on the branch.
+They are path:FILE for each file of the project that dbt reads, SQL,
+Python, YAML or CSV, that git sees changed since the merge base with the
+default branch, origin/HEAD or else main: committed, uncommitted and
+untracked ones.  dbt 2.0.9 selects by path what a file defines, and what
+a YAML file describes and tests; a macro, by path, selects nothing.
+git's own errors are the message."
   (let* ((default-directory root)
-         (branch (or (ignore-errors (car (process-lines "git" "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main"))
-         (base (or (ignore-errors (car (process-lines "git" "merge-base" "HEAD" branch)))
-                   (user-error "No merge base with %s to compare with" branch)))
+         (coding-system-for-read 'utf-8)
+         (git (lambda (&rest arguments)
+                (with-temp-buffer
+                  (unless (eql 0 (apply #'process-file "git" nil t nil "-c" "core.quotepath=off" arguments))
+                    (user-error "Git %s failed: %s" (car arguments) (string-trim (buffer-string))))
+                  (split-string (buffer-string) "[\0\n]" t))))
+         (branch (or (ignore-errors (car (funcall git "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main"))
+         (base (car (funcall git "merge-base" "HEAD" branch)))
          (selectors (delete-dups
-                     (delq nil (mapcar (lambda (file)
-                                         (let ((entity (and (file-exists-p file) (dbt-project-file-entity root file))))
-                                           (and (memq (plist-get entity :kind) '(model seed snapshot))
-                                                (dbt-mode-resource-selector entity))))
-                                       (append (process-lines "git" "diff" "--name-only" "--relative" base)
-                                               (process-lines "git" "ls-files" "--others" "--exclude-standard")))))))
-    (or selectors (user-error "No model changed since %s" branch))))
+                     (mapcar (lambda (file) (concat "path:" file))
+                             (seq-filter (lambda (file)
+                                           (and (string-match-p "\\.\\(?:sql\\|py\\|ya?ml\\|csv\\)\\'" file)
+                                                (file-exists-p file)))
+                                         (append (funcall git "diff" "--name-only" "-z" "--relative" base "--")
+                                                 (funcall git "ls-files" "-z" "--others" "--exclude-standard")))))))
+    (or selectors (user-error "Nothing that dbt reads changed since %s" branch))))
 
 (defun dbt-cli-dispatch (command)
   "Run the dbt COMMAND with those arguments of `dbt-dispatch' that it takes.
