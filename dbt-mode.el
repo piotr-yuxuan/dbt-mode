@@ -190,11 +190,17 @@ makes no tag, so that it does not swallow the next tag's closer."
 
 (defconst dbt-mode--syntax-propertize
   (syntax-propertize-rules
-   ("\\({\\)#\\(?:.\\|\n\\)*?#\\(}\\)"
-    (0 (ignore (put-text-property (match-beginning 0) (match-end 0) 'syntax-multiline t)))
-    (1 "!")
-    (2 "!")))
-  "Make each Jinja comment `{# #}' a comment, as generic comment fences.")
+   ("\\({\\)#"
+    (1 (unless (nth 8 (save-excursion (syntax-ppss (match-beginning 1))))
+         (string-to-syntax "!"))))
+   ("#\\(}\\)"
+    (1 (when (eq (nth 7 (save-excursion (syntax-ppss (match-beginning 1)))) 'syntax-table)
+         (string-to-syntax "!")))))
+  "Make each Jinja comment `{# #}' a comment, as generic comment fences.
+Each fence is decided alone, from the state before it: `{#' opens a
+comment outside a string or a comment, and `#}' closes the comment that
+a fence opened.  So the comment is one whatever the chunks that
+`syntax-propertize' reads, and when its closer is typed after.")
 
 ;;;; What point is on
 
@@ -582,7 +588,6 @@ commentary of dbt-mode.el for the rest.
 
 \\{dbt-mode-map}"
   (setq-local syntax-propertize-function dbt-mode--syntax-propertize)
-  (add-hook 'syntax-propertize-extend-region-functions #'syntax-propertize-multiline 'append 'local)
   (add-hook 'font-lock-extend-region-functions #'dbt-mode--extend-region 'append 'local)
   (setq-local imenu-generic-expression dbt-mode-imenu-generic-expression
               imenu-case-fold-search t)

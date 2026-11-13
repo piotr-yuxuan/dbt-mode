@@ -43,6 +43,58 @@
     (dbt-test-goto " t\n")
     (should-not (nth 8 (syntax-ppss)))))
 
+(ert-deftest dbt-mode-reads-a-long-jinja-comment-in-pieces ()
+  "A comment that the chunks of syntax and font lock cut is still a comment."
+  (with-temp-buffer
+    (insert "select\n    id\n")
+    (dotimes (i 45) (insert (format "    , c%02d as col_%02d\n" i i)))
+    (insert "{# dropped in v2:\n")
+    (dotimes (i 50) (insert (format "    , old_%02d as legacy_%02d\n" i i)))
+    (insert "#}\nfrom {{ ref('orders') }}\n")
+    (dbt-mode)
+    (font-lock-set-defaults)
+    ;; The first screen alone, then the rest, as when the file opens.
+    (syntax-ppss 200)
+    (font-lock-fontify-region (point-min) 1501)
+    (font-lock-fontify-region 1501 (point-max))
+    (dolist (text '("old_10" "legacy_45"))
+      (dbt-test-goto text)
+      (should (nth 4 (syntax-ppss)))
+      (should (eq (get-text-property (point) 'face) 'font-lock-comment-face)))
+    (dbt-test-goto "from {{")
+    (should-not (nth 8 (syntax-ppss)))))
+
+(ert-deftest dbt-mode-reads-a-jinja-comment-closed-later ()
+  "Typing #} after a {# on an earlier line makes the lines between a comment."
+  (with-temp-buffer
+    (insert "select a,\n  b,\n  c\nfrom t\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (dbt-test-goto "  b,")
+    (insert "{# ")
+    (font-lock-ensure)
+    (dbt-test-goto "  c" 3)
+    (insert " #}")
+    (font-lock-ensure)
+    (dbt-test-goto "b,")
+    (should (nth 4 (syntax-ppss)))
+    (should (eq (get-text-property (point) 'face) 'font-lock-comment-face))
+    (dbt-test-goto "from")
+    (should-not (nth 4 (syntax-ppss))))
+  (with-temp-buffer
+    (insert "{# select a,\n  b #}\nselect c from t\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (dbt-test-goto " #}")
+    (delete-char 3)
+    (font-lock-ensure)
+    (dbt-test-goto " from t" 7)
+    (insert " #}")
+    (font-lock-ensure)
+    (dbt-test-goto "select c")
+    (should (nth 4 (syntax-ppss)))
+    (should (eq (get-text-property (point) 'face) 'font-lock-comment-face))))
+
 (defun dbt-test-face (text &optional offset)
   "Return the face at the first occurrence of TEXT, OFFSET characters on."
   (dbt-test-goto text offset)
