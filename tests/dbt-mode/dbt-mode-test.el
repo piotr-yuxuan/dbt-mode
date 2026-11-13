@@ -570,14 +570,23 @@ nor a node whose id it begins."
     (should (equal (current-kill 0) "dbt build -s +orders+"))))
 
 (ert-deftest dbt-mode-lists-the-tests-of-a-model ()
-  "The tests of a model are its YAML entries and the singular tests that read it."
+  "The tests of a model are its YAML entries, the data tests that name it and
+the singular tests that read it; an exposure or another model's unit test
+that reads it are none of its tests."
   (dbt-test-with-project root
+    (write-region (concat "exposures:\n  - name: board\n    depends_on:\n      - ref('stg_orders')\n"
+                          "models:\n  - name: orders\n    columns:\n      - name: order_id\n        data_tests:\n"
+                          "          - relationships:\n              to: ref('stg_orders')\n              field: order_id\n"
+                          "unit_tests:\n  - name: test_orders\n    model: orders\n    given:\n"
+                          "      - input: ref('stg_orders')\n")
+                  nil (expand-file-name "models/marts/_marts.yml" root))
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (let* (shown
            (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
       (dbt-visit-tests)
-      (should (equal (sort (mapcar #'car (dbt-test-xref-files shown root)) #'string<)
-                     '("models/staging/_staging.yml" "tests/assert_positive_amount.sql"))))
+      (should (equal (sort (dbt-test-xref-files shown root) (lambda (a b) (string< (format "%S" a) (format "%S" b))))
+                     '(("models/marts/_marts.yml" . 11) ("models/staging/_staging.yml" . 4)
+                       ("tests/assert_positive_amount.sql" . 1)))))
     (dbt-test-visit root "models/marts/customers.sql")
     (should-error (dbt-visit-tests) :type 'user-error)))
 

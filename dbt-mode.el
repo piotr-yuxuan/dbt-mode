@@ -675,19 +675,33 @@ its upstream and downstream: +MODEL+."
 
 (defun dbt-visit-tests ()
   "Show the tests of the current model.
-They are the YAML entries that name it, where its data tests and unit
-tests sit, and the singular tests of the project's test paths that read
-it."
+They are its YAML entries, where its data tests sit, the data tests
+elsewhere that name it, such as a relationships test, and the singular
+tests of the project's test paths that read it.  Its unit tests are not
+listed: their `model' key is not a call."
   (interactive)
   (let* ((root (dbt-mode--root))
          (resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (directories (mapcar (lambda (path) (file-name-as-directory (expand-file-name path root)))
                               (plist-get (dbt-project-config root) :test-paths)))
+         (scans (make-hash-table :test #'equal))
          (items (seq-filter
                  (lambda (item)
-                   (let ((file (xref-location-group (xref-item-location item))))
-                     (or (string-match-p "\\.ya?ml\\'" file)
-                         (seq-some (lambda (directory) (string-prefix-p directory file)) directories))))
+                   (let* ((location (xref-item-location item))
+                          (file (xref-location-group location)))
+                     (if (string-match-p "\\.ya?ml\\'" file)
+                         ;; The keys that hold the line tell what it is.
+                         (let ((path (plist-get (seq-find (lambda (line)
+                                                            (= (plist-get line :line) (xref-location-line location)))
+                                                          (with-memoization (gethash file scans)
+                                                            (dbt-project-yaml-scan
+                                                             (with-temp-buffer
+                                                               (insert-file-contents file)
+                                                               (buffer-string)))))
+                                                :path)))
+                           (or (seq-intersection path '("data_tests" "tests"))
+                               (and (equal (length path) 1) (member (car path) dbt-project-resource-sections))))
+                       (seq-some (lambda (directory) (string-prefix-p directory file)) directories))))
                  (xref-backend-references
                   'dbt (dbt-mode-identifier (dbt-mode-entity-target resource (plist-get resource :package)))))))
     (unless items
