@@ -21,8 +21,7 @@
 (require 'transient)
 
 (defconst dbt-cli-selecting-commands
-  '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint" "clone"
-    "freshness")
+  '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint")
   "The commands of dbt that take a selection and the options of `dbt-dispatch'.")
 
 (defconst dbt-cli-error-regexp-alist
