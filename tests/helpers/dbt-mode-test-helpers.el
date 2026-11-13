@@ -52,5 +52,23 @@ Fail the test after SECONDS, 30 by default, while processes run."
       (accept-process-output nil 0.1))
     (or value (ert-fail (list "Timed out waiting for" predicate)))))
 
+(defun dbt-test-lineage-rows ()
+  "Return the rows of the lineage tree of the current buffer, in its order.
+Each is (DIRECTION DEPTH TYPE NAME FILE), strings, DEPTH that of its
+indentation, FILE empty when the node has none."
+  (save-excursion
+    (goto-char (point-min))
+    (let (direction rows)
+      (while (not (eobp))
+        (let ((text (string-trim (buffer-substring-no-properties (point) (line-end-position)))))
+          (if (not (get-text-property (point) 'dbt-lineage-node))
+              (setq direction text)
+            (let ((parts (split-string text "  ")))
+              (push (list direction (number-to-string (/ (current-indentation) 2))
+                          (nth 1 parts) (nth 0 parts) (or (nth 2 parts) ""))
+                    rows))))
+        (forward-line 1))
+      (nreverse rows))))
+
 (provide 'dbt-mode-test-helpers)
 ;;; dbt-mode-test-helpers.el ends here

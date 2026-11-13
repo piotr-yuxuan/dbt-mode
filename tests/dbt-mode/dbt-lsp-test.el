@@ -466,7 +466,7 @@ A node of a package that dbt-mode does not know has no file."
          :error nil))
     (dbt-lsp-lineage "stg_orders" "model.shop.stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
-      (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+      (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
                        ("downstream" "1" "model" "util" "dbt_packages/shop_utils/models/util.sql")
                        ("downstream" "2" "model" "internal" "")))))

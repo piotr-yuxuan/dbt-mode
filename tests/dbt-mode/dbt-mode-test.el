@@ -569,11 +569,11 @@ dbt compiles a local package in the copy it installs."
     (with-current-buffer "*dbt lineage: orders*"
       (unwind-protect
           (dolist (name '("order_report" "order_audit"))
-            (should-not (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+            (should-not (member name (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
             (write-region "select * from {{ ref('orders') }}" nil
                           (expand-file-name (format "models/marts/%s.sql" name) root))
             (revert-buffer)
-            (should (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries))))
+            (should (member name (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)))))
         (kill-buffer)))))
 
 (ert-deftest dbt-mode-inserts-refs ()
@@ -640,16 +640,16 @@ A name alone is the latest version, as for `ref'."
     (dbt-lineage "dim.v1")
     (with-current-buffer "*dbt lineage: dim.v1*"
       (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
-                      (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+                      (dbt-test-lineage-rows)))
       (kill-buffer))
     (dbt-lineage "stg_orders")
     (with-current-buffer "*dbt lineage: stg_orders*"
-      (should (member "dim.v1" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
-      (should (member "dim.v2" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (should (member "dim.v1" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (should (member "dim.v2" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
       (kill-buffer))
     (dbt-lineage "dim")
     (with-current-buffer "*dbt lineage: dim.v2*"
-      (should-not (assoc "downstream" (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (should-not (assoc "downstream" (dbt-test-lineage-rows)))
       (kill-buffer))
     (goto-char (point-max))
     (insert "\n")

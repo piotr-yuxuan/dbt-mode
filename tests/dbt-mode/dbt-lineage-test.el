@@ -20,12 +20,12 @@
     (:id "e" :name "e" :type model :parents ("e" "d")))
   "A diamond with a shortcut, and a node that depends on itself.")
 
-(ert-deftest dbt-lineage-depths-are-shortest-paths ()
-  "Each node comes once, at the length of its shortest path."
-  (should (equal (dbt-lineage-depths dbt-test-diamond "d" 'upstream) '(("b" . 1) ("c" . 1) ("a" . 2))))
-  (should (equal (dbt-lineage-depths dbt-test-diamond "a" 'downstream)
-                 '(("b" . 1) ("c" . 1) ("d" . 2) ("e" . 3))))
-  (should (equal (dbt-lineage-depths dbt-test-diamond "e" 'downstream) nil)))
+(ert-deftest dbt-lineage-reach-is-a-tree-of-shortest-paths ()
+  "Each node comes once, at the length of its shortest path, under its nearest parent."
+  (should (equal (dbt-lineage-reach dbt-test-diamond "d" 'upstream) '(("b" 1 "d") ("c" 1 "d") ("a" 2 "b"))))
+  (should (equal (dbt-lineage-reach dbt-test-diamond "a" 'downstream)
+                 '(("b" 1 "a") ("c" 1 "a") ("d" 2 "b") ("e" 3 "d"))))
+  (should (equal (dbt-lineage-reach dbt-test-diamond "e" 'downstream) nil)))
 
 (ert-deftest dbt-lineage-shows-thousands-of-nodes-at-once ()
   "The lineage of a project of 4,000 models shows at once, not in seconds.
@@ -43,7 +43,7 @@ downstream of all of them."
     (should (< (- (float-time) start) 1.5))
     (dolist (name '("m0" "m3999"))
       (with-current-buffer (format "*dbt lineage: %s*" name)
-        (should (= (length tabulated-list-entries) 3999))
+        (should (= (length (dbt-test-lineage-rows)) 3999))
         (kill-buffer)))))
 
 (ert-deftest dbt-lineage-reads-the-project-again-on-g-only ()
@@ -59,21 +59,47 @@ downstream of all of them."
         (kill-buffer)))))
 
 (ert-deftest dbt-lineage-shows-the-project-lineage ()
-  "C-c C-g without a server lists upstream and downstream rows."
+  "C-c C-g without a server shows the upstream and downstream trees.
+A node is under the node through which it is nearest."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (dbt-lineage "stg_orders")
     (with-current-buffer "*dbt lineage: stg_orders*"
-      (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+      (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
                        ("downstream" "1" "analysis" "order_counts" "analyses/order_counts.sql")
                        ("downstream" "1" "model" "orders" "models/marts/orders.sql")
-                       ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql")
-                       ("downstream" "2" "model" "customers" "models/marts/customers.sql"))))
+                       ("downstream" "2" "model" "customers" "models/marts/customers.sql")
+                       ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql"))))
       (goto-char (point-min))
+      (forward-line 1)
       (dbt-lineage-visit)
       (should (equal (file-relative-name buffer-file-name root) "seeds/raw_orders.csv"))
       (kill-buffer "*dbt lineage: stg_orders*"))))
+
+(ert-deftest dbt-lineage-folds-limits-and-exports-the-tree ()
+  "TAB folds a node; - and + show one level less and more; e writes the graph as dot."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (dbt-lineage "stg_orders")
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: stg_orders*")
+      (goto-char (point-min))
+      (search-forward "  orders  ")
+      (beginning-of-line)
+      (execute-kbd-macro (kbd "TAB"))
+      (should (save-excursion (search-forward "customers") (outline-invisible-p)))
+      (execute-kbd-macro (kbd "-"))
+      (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (execute-kbd-macro (kbd "+"))
+      (should (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (let ((file (expand-file-name "lineage.dot" root)))
+        (dbt-lineage-export file)
+        (let ((dot (with-temp-buffer (insert-file-contents file) (buffer-string))))
+          (dolist (edge '("\"raw_orders\" -> \"stg_orders\";" "\"stg_orders\" -> \"orders\";"
+                          "\"orders\" -> \"customers\";"))
+            (should (string-search edge dot)))))
+      (kill-buffer))))
 
 (provide 'dbt-lineage-test)
 ;;; dbt-lineage-test.el ends here

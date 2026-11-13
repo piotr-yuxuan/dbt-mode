@@ -148,7 +148,7 @@ The rows of a model come from its buffer, unsaved changes included."
   (dbt-test-with-server root
     (dbt-lineage "stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
-      (let ((rows (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (let ((rows (dbt-test-lineage-rows)))
         (should (member '("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv") rows))
         (should (member '("downstream" "1" "model" "orders" "models/marts/orders.sql") rows))
         (should (member '("downstream" "2" "model" "customers" "models/marts/customers.sql") rows))))))
