@@ -31,6 +31,15 @@
           (kill-buffer))
       (delete-file file))))
 
+(ert-deftest dbt-mode-leaves-the-target-path-alone ()
+  "What dbt writes under the configured target-path opens in sql-mode."
+  (dbt-test-with-project root
+    (write-region "target-path: build\n" nil (expand-file-name "dbt_project.yml" root) 'append)
+    (dolist (case '(("build/compiled/x.sql" . sql-mode) ("target/x.sql" . dbt-mode)))
+      (make-directory (file-name-directory (expand-file-name (car case) root)) t)
+      (write-region "select 1" nil (expand-file-name (car case) root))
+      (should (eq (with-current-buffer (dbt-test-visit root (car case)) major-mode) (cdr case))))))
+
 (ert-deftest dbt-mode-reads-jinja-comments-as-comments ()
   "An apostrophe in {# #} starts no string, and the comment ends at #}."
   (with-temp-buffer

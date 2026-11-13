@@ -29,7 +29,8 @@
 ;; project.  It is `sql-mode' that also reads Jinja: `{# #}' comments are
 ;; comments, and the tags `{{ }}' and `{% %}' show their keywords, dbt's
 ;; functions and the macros they call.  A `.sql' file below a
-;; dbt_project.yml opens in it, unless it lies in target or logs.
+;; dbt_project.yml opens in it, unless it lies under the target-path of
+;; the project, target by default.
 ;;
 ;; Without any dbt executable, it reads the project itself (see
 ;; dbt-project.el) for:
@@ -682,12 +683,15 @@ For `yaml-mode-hook' and `yaml-ts-mode-hook'."
 ;;;###autoload
 (defun dbt-mode-file-p ()
   "Return non-nil when the buffer visits the SQL of a dbt project.
-That is a `.sql' file below a dbt_project.yml, but not in target or
-logs, where dbt writes plain SQL.  For `magic-mode-alist'."
-  (and buffer-file-name
-       (string-match-p "\\.sql\\'" buffer-file-name)
-       (when-let* ((root (locate-dominating-file buffer-file-name "dbt_project.yml")))
-         (not (string-match-p "\\`\\(?:target\\|logs\\)/" (file-relative-name buffer-file-name root))))))
+That is a `.sql' file of the project that `dbt-project-root' finds, but
+not under its target-path, where dbt writes plain SQL.  For
+`magic-mode-alist'."
+  (when-let* ((file buffer-file-name)
+              ((string-match-p "\\.sql\\'" file))
+              (root (dbt-project-root file)))
+    (not (string-prefix-p (file-name-as-directory
+                           (expand-file-name (plist-get (dbt-project-config root) :target-path) root))
+                          (expand-file-name file)))))
 
 ;;;###autoload
 (add-to-list 'magic-mode-alist '(dbt-mode-file-p . dbt-mode))
