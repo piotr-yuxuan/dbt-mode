@@ -145,32 +145,59 @@ for again from its grid, the query is taken again from the model's file."
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))
 
-(defun dbt-cli-arguments (arguments)
+(defun dbt-cli-arguments (arguments &optional changed)
   "Return the command-line arguments that the transient ARGUMENTS mean.
 The switches --upstream and --downstream are `dbt-dispatch''s own: they
-add a `+' before or after the selection."
+add a `+' before or after each selector.  So is --changed: the selectors
+are then CHANGED, those of `dbt-cli-changed-selection', rather than
+those of --select."
   (let* ((upstream (member "--upstream" arguments))
-         (downstream (member "--downstream" arguments)))
-    (mapcan (lambda (argument)
-              (cond ((member argument '("--upstream" "--downstream")) nil)
-                    ((string-match "\\`--select=\\(.*\\)\\'" argument)
-                     (list "--select" (concat (if upstream "+" "") (match-string 1 argument)
-                                              (if downstream "+" ""))))
-                    ((string-match "\\`\\(--[a-z-]+\\)=\\(.*\\)\\'" argument)
-                     (list (match-string 1 argument) (match-string 2 argument)))
-                    (t (list argument))))
-            arguments)))
+         (downstream (member "--downstream" arguments))
+         (wrap (lambda (selector) (concat (if upstream "+" "") selector (if downstream "+" "")))))
+    (append (and (member "--changed" arguments)
+                 (cons "--select" (mapcar wrap changed)))
+            (mapcan (lambda (argument)
+                      (cond ((member argument '("--upstream" "--downstream" "--changed")) nil)
+                            ((string-match "\\`--select=\\(.*\\)\\'" argument)
+                             (and (not (member "--changed" arguments))
+                                  (list "--select" (funcall wrap (match-string 1 argument)))))
+                            ((string-match "\\`\\(--[a-z-]+\\)=\\(.*\\)\\'" argument)
+                             (list (match-string 1 argument) (match-string 2 argument)))
+                            (t (list argument))))
+                    arguments))))
+
+(defun dbt-cli-changed-selection (root)
+  "Return the selectors of the resources of ROOT that changed on the branch.
+They are the models, seeds and snapshots whose files git sees changed
+since the merge base with the default branch, origin/HEAD or else main:
+committed, uncommitted and untracked ones."
+  (let* ((default-directory root)
+         (branch (or (ignore-errors (car (process-lines "git" "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main"))
+         (base (or (ignore-errors (car (process-lines "git" "merge-base" "HEAD" branch)))
+                   (user-error "No merge base with %s to compare with" branch)))
+         (selectors (delete-dups
+                     (delq nil (mapcar (lambda (file)
+                                         (let ((entity (and (file-exists-p file) (dbt-project-file-entity root file))))
+                                           (and (memq (plist-get entity :kind) '(model seed snapshot))
+                                                (dbt-mode-resource-selector entity))))
+                                       (append (process-lines "git" "diff" "--name-only" "--relative" base)
+                                               (process-lines "git" "ls-files" "--others" "--exclude-standard")))))))
+    (or selectors (user-error "No model changed since %s" branch))))
 
 (defun dbt-cli-dispatch (command)
   "Run the dbt COMMAND with those arguments of `dbt-dispatch' that it takes.
-See `dbt-cli-option-commands'."
-  (dbt-cli-run command
-               (dbt-cli-arguments
-                (seq-filter (lambda (argument)
-                              (let ((commands (assoc (car (split-string argument "="))
-                                                     dbt-cli-option-commands)))
-                                (or (not commands) (member command (cdr commands)))))
-                            (transient-args 'dbt-dispatch)))))
+See `dbt-cli-option-commands'.  With --changed, git tells the selection,
+as `dbt-cli-changed-selection' does, for a command that selects."
+  (let ((arguments (seq-filter (lambda (argument)
+                                 (let ((commands (assoc (car (split-string argument "="))
+                                                        `(("--changed" . ,dbt-cli-selecting-commands)
+                                                          ,@dbt-cli-option-commands))))
+                                   (or (not commands) (member command (cdr commands)))))
+                               (transient-args 'dbt-dispatch))))
+    (dbt-cli-run command
+                 (dbt-cli-arguments arguments (and (member "--changed" arguments)
+                                                   (dbt-cli-changed-selection
+                                                    (or (dbt-project-root) (user-error "Not in a dbt project"))))))))
 
 ;;;###autoload (autoload 'dbt-dispatch "dbt-cli" nil t)
 (transient-define-prefix dbt-dispatch ()
@@ -179,6 +206,7 @@ See `dbt-cli-option-commands'."
    ("-s" "Select" "--select="
     :init-value (lambda (option)
                   (oset option value (and (dbt-project-root) (dbt-mode-selection-at-point)))))
+   ("-c" "Changed on the branch" "--changed")
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
    ("-x" "Exclude" "--exclude=")]

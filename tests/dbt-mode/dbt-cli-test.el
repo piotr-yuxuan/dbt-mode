@@ -56,6 +56,36 @@ command, the selection only to the commands that select resources, and
           (should (equal (cons (car case) (sort (split-string (match-string 1) " --" t)))
                          (cons (car case) (sort (cdr case))))))))))
 
+(defmacro dbt-test-with-git (root &rest body)
+  "Run BODY with git committing as the tests' identity, in ROOT, no user configuration read."
+  (declare (indent 1) (debug (form body)))
+  `(let ((default-directory ,root)
+         (process-environment (append '("GIT_CONFIG_GLOBAL=/dev/null" "GIT_CONFIG_NOSYSTEM=1"
+                                        "GIT_AUTHOR_NAME=Tests" "GIT_AUTHOR_EMAIL=tests@example.invalid"
+                                        "GIT_COMMITTER_NAME=Tests" "GIT_COMMITTER_EMAIL=tests@example.invalid")
+                                      process-environment)))
+     ,@body))
+
+(ert-deftest dbt-cli-selects-what-changed-on-the-branch ()
+  "Changed on the branch selects the models changed since main, new ones included.
+A YAML file or a macro that changed selects nothing of its own."
+  (dbt-test-with-project root
+    (dbt-test-with-git root
+      (dolist (arguments '(("init" "-q" "-b" "main") ("add" "-A") ("commit" "-q" "-m" "Start")
+                           ("switch" "-q" "-c" "feature")))
+        (apply #'call-process "git" nil nil nil arguments))
+      (write-region "select 1 as id\n" nil (expand-file-name "models/marts/orders.sql" root))
+      (write-region "select 2 as id\n" nil (expand-file-name "models/marts/fresh.sql" root))
+      (write-region "-- touched\n" nil (expand-file-name "macros/cents_to_dollars.sql" root) 'append)
+      (should (equal (sort (dbt-cli-changed-selection root) #'string<) '("fresh" "orders")))
+      (dbt-test-visit root "models/marts/customers.sql")
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (transient-values '((dbt-dispatch "--select=customers" "--changed" "--downstream"))))
+        (with-current-buffer (dbt-cli-dispatch "build")
+          (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+          (should (string-match-p "^arguments: build --select \\(orders\\+ fresh\\+\\|fresh\\+ orders\\+\\)$"
+                                  (buffer-string))))))))
+
 (ert-deftest dbt-cli-runs-at-the-root-and-links-errors ()
   "dbt runs at the root of the project, and its errors link to their files."
   (dbt-test-with-project root
