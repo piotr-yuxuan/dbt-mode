@@ -132,6 +132,12 @@ name, so two nodes of one name stay apart."
               (dbt-lineage-export (expand-file-name "lineage.dot" root))
               (funcall said "^Wrote .*/lineage\\.svg$")
               (should (file-exists-p (expand-file-name "lineage.svg" root)))
+              ;; Emacs goes on while dot renders.
+              (write-region "#!/bin/sh\nsleep 1\necho '<svg/>' > \"$4\"\n" nil dot)
+              (delete-file (expand-file-name "lineage.svg" root))
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (should-not (file-exists-p (expand-file-name "lineage.svg" root)))
+              (dbt-test-wait (lambda () (file-exists-p (expand-file-name "lineage.svg" root))))
               (write-region "#!/bin/sh\necho 'syntax error in line 3' >&2\nexit 1\n" nil dot)
               (dbt-lineage-export (expand-file-name "lineage.dot" root))
               (funcall said "^dot failed on .*/lineage\\.dot: syntax error in line 3$")

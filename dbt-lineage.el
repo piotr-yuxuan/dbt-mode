@@ -178,11 +178,11 @@ the message says when it is there, or why not."
                     :buffer (generate-new-buffer " *dot*")
                     :sentinel (lambda (process _event)
                                 (unless (process-live-p process)
-                                  (message (if (zerop (process-exit-status process)) "Wrote %s" "dot failed on %s: %s")
-                                           (if (zerop (process-exit-status process)) svg file)
-                                           (with-current-buffer (process-buffer process)
-                                             (string-trim (buffer-string))))
-                                  (kill-buffer (process-buffer process))))))))
+                                  (with-current-buffer (process-buffer process)
+                                    (message "%s" (if (zerop (process-exit-status process))
+                                                      (format "Wrote %s" svg)
+                                                    (format "dot failed on %s: %s" file (string-trim (buffer-string)))))
+                                    (kill-buffer))))))))
 
 (defvar-keymap dbt-lineage-mode-map
   :doc "Keymap of `dbt-lineage-mode'."
