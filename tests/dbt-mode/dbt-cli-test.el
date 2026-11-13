@@ -83,10 +83,23 @@ quote counts as it is; a commit on main after the branch does not."
       (dolist (arguments '(("add" "-A") ("commit" "-q" "-m" "Feature") ("switch" "-q" "main")))
         (apply #'call-process "git" nil nil nil arguments))
       (write-region "-- on main\n" nil (expand-file-name "models/marts/customers.sql" root) 'append)
-      (dolist (arguments '(("commit" "-q" "-am" "Main moves on") ("switch" "-q" "feature")))
+      (dolist (arguments '(("commit" "-q" "-am" "Main moves on") ("switch" "-q" "feature")
+                           ;; A tag of the same name makes git warn, on stderr.
+                           ("tag" "main" "refs/heads/main")))
         (apply #'call-process "git" nil nil nil arguments))
       (should (equal (sort (dbt-cli-changed-selection root) #'string<)
                      '("path:models/marts/café.sql" "path:models/marts/orders.sql" "path:models/staging/_staging.yml")))
+      ;; What dbt's selectors read as operators, and a newline, are globs.
+      (make-directory (expand-file-name "models/my marts" root))
+      (dolist (file '("models/my marts/spaced.sql" "models/marts/a,b.sql" "models/marts/n\nl.sql"))
+        (write-region "select 1 as id\n" nil (expand-file-name file root)))
+      (should (equal (sort (seq-difference (dbt-cli-changed-selection root)
+                                           '("path:models/marts/café.sql" "path:models/marts/orders.sql"
+                                             "path:models/staging/_staging.yml"))
+                           #'string<)
+                     '("path:models/marts/a?b.sql" "path:models/marts/n?l.sql" "path:models/my?marts/spaced.sql")))
+      (dolist (file '("models/my marts/spaced.sql" "models/marts/a,b.sql" "models/marts/n\nl.sql"))
+        (delete-file (expand-file-name file root)))
       (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
         (goto-char (point-max))
         (insert "-- unsaved\n"))
@@ -103,11 +116,32 @@ quote counts as it is; a commit on main after the branch does not."
                            "path:models/staging/_staging.yml+" "path:models/staging/stg_customers.sql+"))))))))
 
 (ert-deftest dbt-cli-says-what-git-says-of-the-changes ()
-  "Outside a git repository, Changed on the branch says what git says."
+  "Outside a git repository, Changed on the branch says what git says; without a merge base, so."
   (dbt-test-with-project root
     (dbt-test-with-git root
       (should (string-match-p "not a git repository"
-                              (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error)))))))
+                              (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error))))
+      (dolist (arguments '(("init" "-q" "-b" "main") ("add" "-A") ("commit" "-q" "-m" "Start")
+                           ("switch" "-q" "--orphan" "unrelated") ("commit" "-q" "--allow-empty" "-m" "Apart")))
+        (apply #'call-process "git" nil nil nil arguments))
+      (should (equal (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error))
+                     "No merge base with main to compare with")))))
+
+(ert-deftest dbt-cli-live-selects-a-changed-path-as-dbt-reads-it ()
+  "With the real dbt, the selector of a changed file in a directory with a space selects that file only."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (dbt-test-with-git root
+      (dolist (arguments '(("init" "-q" "-b" "main") ("add" "-A") ("commit" "-q" "-m" "Start")))
+        (apply #'call-process "git" nil nil nil arguments))
+      (make-directory (expand-file-name "models/my marts" root))
+      (write-region "select 1 as id\n" nil (expand-file-name "models/my marts/spaced.sql" root))
+      (let ((selectors (dbt-cli-changed-selection root)))
+        (should (equal selectors '("path:models/my?marts/spaced.sql")))
+        (with-temp-buffer
+          (call-process (getenv "DBT_MODE_TEST_DBT") nil t nil "list" "--quiet" "--select" (car selectors)
+                        "--project-dir" root "--profiles-dir" root)
+          (should (equal (split-string (buffer-string) "\n" t "[ \t]+") '("shop.my marts.spaced"))))))))
 
 (ert-deftest dbt-cli-dispatch-selects-what-point-is-on ()
   "C-c C-d selects the ref at point, else the resource, else the file by path, as a singular test."

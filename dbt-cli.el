@@ -180,24 +180,35 @@ They are path:FILE for each file of the project that dbt reads, SQL,
 Python, YAML or CSV, that git sees changed since the merge base with the
 default branch, origin/HEAD or else main: committed, uncommitted and
 untracked ones.  dbt 2.0.9 selects by path what a file defines, and what
-a YAML file describes and tests; a macro, by path, selects nothing.
-git's own errors are the message."
+a YAML file describes and tests; a macro, by path, selects nothing.  A
+character that dbt's selectors read as an operator, such as a space, a
+comma or +, is the glob ? in the path.  git's own errors are the message."
   (let* ((default-directory root)
          (coding-system-for-read 'utf-8)
-         (git (lambda (&rest arguments)
-                (with-temp-buffer
-                  (unless (eql 0 (apply #'process-file "git" nil t nil "-c" "core.quotepath=off" arguments))
-                    (user-error "Git %s failed: %s" (car arguments) (string-trim (buffer-string))))
-                  (split-string (buffer-string) "[\0\n]" t))))
-         (branch (or (ignore-errors (car (funcall git "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main"))
-         (base (car (funcall git "merge-base" "HEAD" branch)))
+         ;; git's lines, split on SEPARATOR; its error output, on failure.
+         (git (lambda (separator &rest arguments)
+                (let ((errors (make-temp-file "dbt-git")))
+                  (unwind-protect
+                      (with-temp-buffer
+                        (unless (eql 0 (apply #'process-file "git" nil (list t errors) nil
+                                              "-c" "core.quotepath=off" arguments))
+                          (user-error "Git %s failed: %s" (car arguments)
+                                      (with-temp-buffer
+                                        (insert-file-contents errors)
+                                        (string-trim (buffer-string)))))
+                        (split-string (buffer-string) separator t))
+                    (delete-file errors)))))
+         (branch (progn (funcall git "\n" "rev-parse" "--git-dir")
+                        (or (ignore-errors (car (funcall git "\n" "rev-parse" "--abbrev-ref" "origin/HEAD"))) "main")))
+         (base (or (ignore-error user-error (car (funcall git "\n" "merge-base" "HEAD" branch)))
+                   (user-error "No merge base with %s to compare with" branch)))
          (selectors (delete-dups
-                     (mapcar (lambda (file) (concat "path:" file))
+                     (mapcar (lambda (file) (concat "path:" (replace-regexp-in-string "[][ ,+*?@\n]" "?" file)))
                              (seq-filter (lambda (file)
                                            (and (string-match-p "\\.\\(?:sql\\|py\\|ya?ml\\|csv\\)\\'" file)
                                                 (file-exists-p file)))
-                                         (append (funcall git "diff" "--name-only" "-z" "--relative" base "--")
-                                                 (funcall git "ls-files" "-z" "--others" "--exclude-standard")))))))
+                                         (append (funcall git "\0" "diff" "--name-only" "-z" "--relative" base "--")
+                                                 (funcall git "\0" "ls-files" "-z" "--others" "--exclude-standard")))))))
     (or selectors (user-error "Nothing that dbt reads changed since %s" branch))))
 
 (defun dbt-cli-dispatch (command)
