@@ -99,12 +99,6 @@ The buffer is killed, so that the next preview makes a new one."
              (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries))
       (kill-buffer buffer))))
 
-(defun dbt-lsp-test-file-text (root file)
-  "Return the text of FILE, relative to ROOT, as it is on disk."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file root))
-    (buffer-string)))
-
 (ert-deftest dbt-lsp-loads-without-the-commands-of-dbt ()
   "The client of dbt lsp takes the preview limit from the project model.
 So it does not load dbt-cli, with transient and compile."
@@ -177,7 +171,7 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
     (let ((dbt-executable dbt))
       (should-not (dbt-lsp-server-p))
       (should-not (dbt-lsp-server-p)))
-    (should (equal (dbt-lsp-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
 
 (ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
@@ -486,7 +480,7 @@ for a CTE, the model is compiled again first."
     (dbt-lsp-show)
     (should (equal (dbt-lsp-test-rows "orders") '(("1"))))
     (should-not (buffer-modified-p))
-    (should (string-suffix-p "-- compiled\n-- shown\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-suffix-p "-- compiled\n-- shown\n" (dbt-test-file-text root "models/marts/orders.sql")))
     (should (member "workspace/executeCommand dbt.show"
                     (member "textDocument/didSave"
                             (member "workspace/executeCommand dbt.compileFile"
@@ -653,13 +647,13 @@ stands."
       (goto-char (point-min))
       (insert "-- edited\n")
       (execute-kbd-macro (kbd "C-c C-q"))
-      (should (string-prefix-p "-- edited\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+      (should (string-prefix-p "-- edited\n" (dbt-test-file-text root "models/marts/orders.sql")))
       (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
       (dbt-format-on-save-mode 1)
       (execute-kbd-macro (kbd "C-x C-s"))
       (should-not (buffer-modified-p))
       (should (string-prefix-p "-- formatted\n-- formatted\n-- edited\n"
-                               (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+                               (dbt-test-file-text root "models/marts/orders.sql")))
       ;; C-c C-q formats once, its save included.
       (goto-char (point-min))
       (insert "-- again\n")
@@ -673,7 +667,7 @@ stands."
       (insert "-- edited\n")
       (execute-kbd-macro (kbd "C-x C-s"))
       (should-not (buffer-modified-p))
-      (should (string-prefix-p "-- edited\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+      (should (string-prefix-p "-- edited\n" (dbt-test-file-text root "models/marts/orders.sql")))
       (dbt-lsp-test-message "dbt could not format orders\\.sql"))))
 
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
@@ -684,7 +678,7 @@ stands."
     (goto-char (point-min))
     (insert "-- unsaved\n")
     (dbt-lsp-format-buffer)
-    (should (string-prefix-p "-- unsaved\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-prefix-p "-- unsaved\n" (dbt-test-file-text root "models/marts/orders.sql")))
     (should (string-prefix-p "-- formatted\n-- unsaved\n" (buffer-string)))
     (should (member "textDocument/didSave"
                     (member "textDocument/didChange" (dbt-lsp-test-methods))))
@@ -702,7 +696,7 @@ stands."
     (goto-char (point-min))
     (insert "-- unsaved\n")
     (dbt-lsp-fix-all)
-    (should (string-prefix-p "-- unsaved\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-prefix-p "-- unsaved\n" (dbt-test-file-text root "models/marts/orders.sql")))
     (should (string-prefix-p "-- fixed\n-- unsaved\n" (buffer-string)))
     (should (member "textDocument/codeAction"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))

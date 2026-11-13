@@ -293,14 +293,6 @@ another dbt holds the project."
         (dbt-preview (point-min) (+ (point-min) 10)))
       (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/query*"))))))
 
-(defun dbt-test-write-state (root)
-  "Write a state of ROOT's artifacts, with a relation of the model orders; return its directory."
-  (let ((state (expand-file-name "prod-state/" root)))
-    (make-directory state)
-    (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"prod\\\".\\\"orders\\\"\"}}}"
-                  nil (expand-file-name "manifest.json" state))
-    state))
-
 (ert-deftest dbt-cli-diffs-the-rows-of-a-model-with-a-state ()
   "The data diff runs one query on the default target, of the rows that each side lacks.
 The state's relation is the relation_name of its manifest, verbatim; a
