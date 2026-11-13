@@ -28,6 +28,24 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
 - the lineage of a model, from its `ref` and `source` calls.
 
+Writing and moving:
+
+- typing `{` then `{`, `%` or `#` gives `{{ | }}`, `{% | %}` or `{# | #}`,
+  point in the middle, with or without `electric-pair-mode`;
+  `dbt-edit-pair-jinja` turns it off;
+- `C-c /` closes the innermost open Jinja block, `{% endif %}` and the like,
+  and `C-c %` moves between a block's opening and closing tags;
+- CTEs are the defuns of a model: `C-M-a`, `C-M-e`, `C-M-h` and `C-x n d`
+  work on them; with [expreg](https://elpa.gnu.org/packages/expreg.html),
+  `expreg-expand` also selects the Jinja tag and its contents, the block and
+  the CTE around point (add `dbt-edit-expreg-regions` to `expreg-functions`
+  when expreg loads after dbt-mode);
+- `C-c C-n` writes a new staging model from a source table, as dbt Labs'
+  style guide lays it out with its YAML entry, a model, an incremental
+  model, a macro, a snapshot defined in YAML, the YAML entry of the current
+  model, or a unit test of it with an input for each model and source it
+  reads.
+
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
 `{# #}` comments out. A project nested in another, such as a package's
@@ -58,12 +76,18 @@ need a dbt account: without one, the server says nothing about columns.
 | Key           | Command                | What it does                                                     |
 |---------------|------------------------|------------------------------------------------------------------|
 | `C-c C-d`     | `dbt-dispatch`         | Run a dbt command, by default on the current model               |
-| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model                                    |
+| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model; with `C-u`, the SQL of the last run |
 | `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
 | `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, analysis, macro, docs block or source |
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion                             |
+| `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries and singular tests      |
+| `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
+| `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s MODEL`; with `C-u`, `+MODEL+`               |
+| `C-c C-n`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
+| `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |
+| `C-c %`       | `dbt-jump-to-matching-tag` | Move between a block's opening and closing tags              |
 | `M-.`, `M-?`  | `xref`                 | Definition and uses of what point is on                          |
 
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
