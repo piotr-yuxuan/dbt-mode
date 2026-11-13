@@ -182,6 +182,20 @@ buffer is narrowed, and keeps the states it reaches."
           "\\|\\_<\\(?:left\\|right\\|full\\|inner\\|cross\\|natural\\)\\_>[^(\n]*\\_<join\\_>\\)")
   "The keywords that start a clause of SQL, on a line of their own level.")
 
+(defconst dbt-edit--closer-regexp
+  "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
+  "What a line starts with when it closes the construct that holds it.")
+
+(defconst dbt-edit--base-regexp
+  (let ((leads (concat "\\(?:,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp "\\)")))
+    (concat "\\(?:" leads
+            ;; A tag, past tags, comments and blank lines, before one, a
+            ;; closer or the end: {% if is_incremental() %} then where.
+            "\\|{%.*\\(?:\n[ \t]*\\(?:\\(?:{[%#]\\|--\\).*\\)?\\)*"
+            "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
+  "What a line starts with when it stays at the base of its construct.
+A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
+
 (defun dbt-edit--opener (position blocks)
   "Return the start of the parenthesis or Jinja block open at POSITION, or 0.
 It is the one that opened last.  BLOCKS are Jinja blocks, closed or
@@ -199,11 +213,12 @@ The nearest construct open at the line's start, a parenthesis or a Jinja
 block, indents it by `dbt-indent-offset' from the line that opened it.
 A line that starts by closing it, with `)', `]', `}' or a tag such as
 `{% endif %}' or `{% else %}', is at that line's column.  At that base,
-a line that starts with a clause keyword, such as select or from, with
-a Jinja statement tag, or with a CTE, NAME as (, stays at the base; any
-other is one step in
-from the nearest line above at its level that starts a clause: the
-columns of a select, the conditions of a where."
+a line that starts with a clause keyword, such as select or from, or
+with a CTE, NAME as (, stays at the base, and so does a Jinja statement
+tag that leads to one of them, to a closer or to the end of the buffer,
+past tags, comments and blank lines; any other line is one step in from
+the nearest line above at its level that starts a clause: the columns
+of a select, the conditions of a where, a tag among them."
   (save-excursion
     (back-to-indentation)
     (let* ((opener (dbt-edit--opener (line-beginning-position) blocks))
@@ -212,9 +227,8 @@ columns of a select, the conditions of a where."
                        (- dbt-indent-offset)
                      (save-excursion (goto-char opener) (current-indentation))))
            found)
-      (cond ((looking-at-p "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)") (max 0 column))
-            ((looking-at-p (concat "{%\\|,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp))
-             (+ column dbt-indent-offset))
+      (cond ((looking-at-p dbt-edit--closer-regexp) (max 0 column))
+            ((looking-at-p dbt-edit--base-regexp) (+ column dbt-indent-offset))
             (t
              ;; Up the clause lines of its level, past what a construct
              ;; closed since then holds, and past lines in a string or a

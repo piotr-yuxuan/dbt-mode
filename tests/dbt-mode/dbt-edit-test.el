@@ -259,12 +259,15 @@ above it, and dbt-mode indents with spaces."
                          "    from orders\n    where a = 1\n        and b = 2\n)\nselect * from final\n"))))
 
 (ert-deftest dbt-edit-indents-the-jinja-blocks-of-a-model ()
-  "A Jinja tag is at the level of the clauses, its block one step in, its end and else at its column."
+  "A Jinja tag among a clause's lines is at their level, one before a clause at the clauses'; its block one step in.
+Its end and else are at its column, as dbt Labs' style guide writes
+Jinja."
   (should (equal (dbt-test-indented
                   (concat "select\nid,\n{% if x %}\nname,\n{% else %}\nother,\n{% endif %}\nlast\nfrom t\n"
-                          "{% if is_incremental() %}\nwhere a > 1\n{% endif %}\n"))
-                 (concat "select\n    id,\n{% if x %}\n    name,\n{% else %}\n    other,\n{% endif %}\n    last\n"
-                         "from t\n{% if is_incremental() %}\n    where a > 1\n{% endif %}\n")))
+                          "{% if is_incremental() %}\n-- new rows only\nwhere a > 1\n{% endif %}\n"))
+                 (concat "select\n    id,\n    {% if x %}\n        name,\n    {% else %}\n        other,\n"
+                         "    {% endif %}\n    last\nfrom t\n{% if is_incremental() %}\n    -- new rows only\n"
+                         "    where a > 1\n{% endif %}\n")))
   (should (equal (dbt-test-indented "{% macro cents_to_dollars(col) %}\n({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n")
                  "{% macro cents_to_dollars(col) %}\n    ({{ col }} / 100)::numeric(16, 2)\n{% endmacro %}\n"))
   (should (equal (dbt-test-indented "{{\nconfig(\nmaterialized='table'\n)\n}}\n")
@@ -300,7 +303,7 @@ orders.sql does not indent the body of its block; dbt-mode does."
                    (string-replace "\n    where orders" "\n        where orders" text)))))
 
 (ert-deftest dbt-edit-indents-a-large-model-at-once ()
-  "C-x h C-M-\\ indents a model of 2,000 lines, with a Jinja block in each CTE, in well under 2 s."
+  "C-x h C-M-\\ indents a model of 2,000 lines, with a Jinja block in each CTE, in under 2 s."
   (let ((text (with-temp-buffer
                 (insert "with ")
                 (dotimes (cte 40)
@@ -315,7 +318,7 @@ orders.sql does not indent the body of its block; dbt-mode does."
         (dbt-test-keys "C-x h C-M-\\")
         (should (< (- (float-time) start) 2.0)))
       (goto-char (point-min))
-      (should (search-forward "\n        col_39,\n    {% if is_incremental() %}\n        updated_at,\n" nil t)))))
+      (should (search-forward "\n        col_39,\n        {% if is_incremental() %}\n            updated_at,\n" nil t)))))
 
 (ert-deftest dbt-edit-indents-a-wide-select-at-once ()
   "C-x h C-M-\\ indents a select of 1,000 columns, all in one clause, in under 2 s.
