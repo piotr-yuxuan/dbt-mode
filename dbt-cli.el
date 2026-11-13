@@ -16,10 +16,9 @@
 ;;; Code:
 
 (require 'compile)
+(require 'dbt-mode)
 (require 'dbt-project)
 (require 'transient)
-
-(declare-function dbt-mode-current-resource "dbt-mode")
 
 (defconst dbt-cli-selecting-commands
   '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint" "clone"
@@ -86,8 +85,7 @@ A command that takes no selection gets none of them."
   ["Selection"
    ("-s" "Select" "--select="
     :init-value (lambda (option)
-                  (oset option value (and (fboundp 'dbt-mode-current-resource)
-                                          (dbt-project-root)
+                  (oset option value (and (dbt-project-root)
                                           (plist-get (dbt-mode-current-resource) :name)))))
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
