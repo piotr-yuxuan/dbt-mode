@@ -22,7 +22,16 @@
 
 (defconst dbt-cli-selecting-commands
   '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint")
-  "The commands of dbt that take a selection and the options of `dbt-dispatch'.")
+  "The commands of dbt that take a selection.")
+
+(defconst dbt-cli-option-commands
+  `(("--select" . ,dbt-cli-selecting-commands)
+    ("--exclude" . ,dbt-cli-selecting-commands)
+    ("--full-refresh" "build" "run" "compile" "seed")
+    ("--limit" "build" "run" "test" "compile" "show" "list"))
+  "The options of `dbt-dispatch' that only some commands take, with these commands.
+dbt 2.0.9 rejects --full-refresh and --limit on any other command.  The
+other options, --target and --fail-fast, go to every command.")
 
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
@@ -73,10 +82,15 @@ add a `+' before or after the selection."
             arguments)))
 
 (defun dbt-cli-dispatch (command)
-  "Run the dbt COMMAND with the arguments of `dbt-dispatch'.
-A command that takes no selection gets none of them."
-  (dbt-cli-run command (and (member command dbt-cli-selecting-commands)
-                            (dbt-cli-arguments (transient-args 'dbt-dispatch)))))
+  "Run the dbt COMMAND with those arguments of `dbt-dispatch' that it takes.
+See `dbt-cli-option-commands'."
+  (dbt-cli-run command
+               (dbt-cli-arguments
+                (seq-filter (lambda (argument)
+                              (let ((commands (assoc (car (split-string argument "="))
+                                                     dbt-cli-option-commands)))
+                                (or (not commands) (member command (cdr commands)))))
+                            (transient-args 'dbt-dispatch)))))
 
 ;;;###autoload (autoload 'dbt-dispatch "dbt-cli" nil t)
 (transient-define-prefix dbt-dispatch ()
