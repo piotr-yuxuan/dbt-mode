@@ -57,7 +57,8 @@ errors show in Babel's error buffer."
   "Run the dbt block BODY with Babel's PARAMS: its rows, or its compiled SQL.
 The rows come from `dbt show', a table with a header, NULL as such; the
 compiled SQL, with `:compile yes', from the event CompiledNode of `dbt
-compile --log-format json'.  For `org-babel-execute-src-block'."
+compile --log-format json'.  Each cell of the table is on one line, as
+`dbt-rows-org-text' writes it.  For `org-babel-execute-src-block'."
   (if (equal (cdr (assq :compile params)) "yes")
       (or (seq-some (lambda (line)
                       (let ((event (ignore-errors (json-parse-string line :object-type 'alist))))
@@ -72,8 +73,9 @@ compile --log-format json'.  For `org-babel-execute-src-block'."
                                                "--inline" body)))))
       (cond ((null rows) (user-error "No rows that dbt-mode can read in what dbt show told"))
             ((null (car rows)) "No rows")
-            (t (cons (car rows)
-                     (cons 'hline (mapcar (lambda (row) (mapcar (lambda (cell) (or cell "NULL")) row))
+            (t (cons (mapcar #'dbt-rows-org-text (car rows))
+                     (cons 'hline (mapcar (lambda (row)
+                                            (mapcar (lambda (cell) (if cell (dbt-rows-org-text cell) "NULL")) row))
                                           (cdr rows)))))))))
 
 (provide 'dbt-babel)

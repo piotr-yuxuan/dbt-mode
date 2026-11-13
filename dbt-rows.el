@@ -188,6 +188,10 @@ in `occur', an upper-case letter in REGEXP makes the case matter."
   (setq dbt-rows--filter (and (not (string-empty-p regexp)) (cons column regexp)))
   (dbt-rows--print))
 
+(defun dbt-rows-org-text (text)
+  "Return TEXT on one line of an Org table: a newline as \\n, | as \\vert{}."
+  (string-replace "|" "\\vert{}" (string-replace "\n" "\\n" text)))
+
 (defun dbt-rows-copy (format)
   "Copy the rows shown, in their order, as FORMAT, with their header.
 FORMAT is \"CSV\", \"Markdown\" or \"Org\".  The CSV holds the raw value
@@ -202,7 +206,7 @@ tables show each row on one line, as the grid does."
                                    (concat "\"" (string-replace "\"" "\"\"" cell) "\""))
                                   (t cell))))
                    ("Markdown" (lambda (text) (string-replace "|" "\\|" text)))
-                   (_ (lambda (text) (string-replace "|" "\\vert{}" text)))))
+                   (_ #'dbt-rows-org-text)))
          (line (lambda (cells)
                  (if csv
                      (mapconcat escape cells ",")

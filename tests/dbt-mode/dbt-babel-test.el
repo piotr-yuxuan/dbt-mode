@@ -58,6 +58,14 @@ The default target is the profile's, unless DBT_TARGET says otherwise."
       (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_prompt) t)))
         (should (dbt-test-babel root "" "select 1"))))))
 
+(ert-deftest dbt-babel-writes-each-cell-on-one-line ()
+  "A name or a value that holds a newline or a | stays in its cell of the table."
+  (dbt-test-with-project root
+    (let ((process-environment (cons "FAKE_DBT_OUTPUT=[{\"a|b\":\"x|y\",\"nl\":\"one\\ntwo\"}]"
+                                     process-environment)))
+      (should (equal (dbt-test-babel root "" "select 1")
+                     '(("a\\vert{}b" "nl") hline ("x\\vert{}y" "one\\ntwo")))))))
+
 (ert-deftest dbt-babel-shows-what-dbt-says-when-it-fails ()
   "A block that dbt refuses shows dbt's errors in Babel's error buffer."
   (dbt-test-with-project root
