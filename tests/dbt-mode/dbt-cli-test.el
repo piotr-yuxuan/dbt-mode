@@ -110,13 +110,16 @@ quote counts as it is; a commit on main after the branch does not."
                               (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error)))))))
 
 (ert-deftest dbt-cli-runs-the-last-command-again ()
-  "Again runs the project's last dbt command, with its arguments."
+  "Again runs the project's last dbt command, with its arguments, which the menu shows."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
       (should-error (dbt-cli-again) :type 'user-error)
       (with-current-buffer (dbt-cli-run "test" '("--select" "orders"))
         (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer))))))
+      ;; The menu says which command Again runs.
+      (should (equal (funcall (plist-get (cdr (transient-get-suffix 'dbt-dispatch ".")) :description))
+                     "Again: test --select orders"))
       (let ((buffer (dbt-cli-again)))
         (with-current-buffer buffer
           (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
