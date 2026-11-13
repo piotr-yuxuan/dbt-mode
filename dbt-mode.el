@@ -80,7 +80,8 @@
 (autoload 'dbt-edit-beginning-of-cte "dbt-edit")
 (autoload 'dbt-edit-end-of-cte "dbt-edit")
 (autoload 'dbt-edit-blocks "dbt-edit")
-(declare-function dbt-cli-show "dbt-cli")
+(autoload 'dbt-cli-show "dbt-cli")
+(autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
 (declare-function dbt-lsp-compile-file "dbt-lsp")
@@ -677,15 +678,15 @@ server runs the query, on the compiled SQL for a CTE; otherwise `dbt
 show' runs it, on the Jinja of the CTE."
   (interactive (cond (current-prefix-arg (list nil nil t))
                      ((use-region-p) (list (region-beginning) (region-end)))))
+  ;; QUERY is the name of the rows, and their SQL unless they are the
+  ;; model's.
   (let ((query (cond (cte (dbt-mode-cte-query))
-                     (start (cons "query" (buffer-substring-no-properties start end))))))
-    (cond ((not (dbt-mode-server-p))
-           (require 'dbt-cli)
-           (dbt-cli-show (or (car query)
-                             (dbt-mode-resource-selector (or (dbt-mode-current-resource) (user-error "No model here"))))
-                         (cdr query)))
-          (cte (dbt-lsp-preview-cte (car query)))
-          (t (dbt-lsp-show (cdr query) (car query))))))
+                     (start (cons "query" (buffer-substring-no-properties start end)))
+                     (t (list (dbt-mode-resource-selector
+                               (or (dbt-mode-current-resource) (user-error "No model here"))))))))
+    (cond (cte (funcall (if (dbt-mode-server-p) #'dbt-lsp-preview-cte #'dbt-cli-preview-cte) (car query)))
+          ((dbt-mode-server-p) (dbt-lsp-show (cdr query) (car query)))
+          (t (dbt-cli-show (car query) (cdr query))))))
 
 (defun dbt-lineage (selector)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.

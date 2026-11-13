@@ -218,18 +218,22 @@ The buffer is saved first, as the server compiles the file on disk."
   (interactive)
   (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
 
-(defun dbt-lsp-show (&optional sql title limit)
+(defun dbt-lsp-show (&optional sql title limit rerun)
   "Show the rows of the current model, or of the query SQL, as TITLE.
 SQL may hold Jinja.  At most LIMIT rows, `dbt-preview-limit' by default.
 TITLE defaults to the name of the model, or \"query\".  Without SQL, the
 buffer is saved first, as the server reads the model on disk.  A nested
 value shows as JSON.  JSON false reads as null in lsp-mode, so it shows
-as NULL."
+as NULL.  RERUN, a function of a limit, asks for the rows again from
+their grid; by default, the same query from the model's file."
   (interactive)
   (unless sql (save-buffer))
-  (let ((buffer (current-buffer))
-        (title (or title (if sql "query" (file-name-base buffer-file-name))))
-        (limit (or limit dbt-preview-limit)))
+  (let* ((file buffer-file-name)
+         (title (or title (if sql "query" (file-name-base file))))
+         (limit (or limit dbt-preview-limit))
+         (rerun (or rerun (lambda (limit)
+                            (with-current-buffer (find-file-noselect file)
+                              (dbt-lsp-show sql title limit))))))
     (dbt-lsp--execute
      "dbt.show" (list (if sql
                           (list :inline sql :limit limit)
@@ -246,22 +250,26 @@ as NULL."
                                                 (if (or (null value) (stringp value)) value (json-encode value))))
                                             columns))
                                   (append (lsp-get result :data) nil))
-                          limit
-                          (lambda (limit) (with-current-buffer buffer (dbt-lsp-show sql title limit))))
+                          limit rerun)
            (message "%d rows of %s" (length (lsp-get result :data)) title)))))))
 
-(defun dbt-lsp-preview-cte (name)
-  "Show the rows of the CTE NAME of the current model.
+(defun dbt-lsp-preview-cte (name &optional limit)
+  "Show the rows of the CTE NAME of the current model, at most LIMIT of them.
 The CTE comes from the compiled SQL, where the Jinja that needs a model,
 such as `is_incremental', is rendered.  The buffer is saved first, as
-the server compiles the file on disk."
+the server compiles the file on disk.  Asked for again from its grid,
+the model is compiled again."
   (interactive (list (car (dbt-mode-cte-query))))
-  (let ((source (current-buffer)))
+  (let ((source (current-buffer))
+        (file buffer-file-name))
     (dbt-lsp--compiled
      (lambda ()
        (let ((query (dbt-mode-cte-query name)))
          (with-current-buffer source
-           (dbt-lsp-show (cdr query) (car query))))))))
+           (dbt-lsp-show (cdr query) (car query) limit
+                         (lambda (limit)
+                           (with-current-buffer (find-file-noselect file)
+                             (dbt-lsp-preview-cte name limit))))))))))
 
 (defun dbt-lsp--preview-cte (command)
   "Show the rows of the CTE that COMMAND, the command of a code lens, names.

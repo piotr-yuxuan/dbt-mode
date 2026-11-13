@@ -78,12 +78,14 @@ saving first, under `compilation-ask-about-save'."
                        #'dbt-compilation-mode
                        (lambda (_mode) (format "*dbt %s: %s*" (dbt-project-name root) command)))))
 
-(defun dbt-cli-show (name sql &optional limit)
+(defun dbt-cli-show (name sql &optional limit rerun)
   "Show the rows of the query SQL, as NAME, or else of the resource NAME.
 At most LIMIT rows, `dbt-preview-limit' by default, in the grid of
 `dbt-rows-show'.  dbt prints them as JSON; when it fails, its output
 shows in a buffer whose errors link to their files.  The project's
-modified buffers are offered for saving first."
+modified buffers are offered for saving first.  RERUN, a function of a
+limit, asks for the rows again from their grid; by default, the same
+query."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (limit (or limit dbt-preview-limit))
@@ -115,12 +117,22 @@ modified buffers are offered for saving first."
                         (display-buffer (current-buffer))))
                      ((not (car rows)) (message "dbt show: no rows for %s" name))
                      (t (dbt-rows-show name (car rows) (cdr rows) limit
-                                       (lambda (limit)
-                                         (let ((default-directory root))
-                                           (dbt-cli-show name sql limit)))))))
+                                       (or rerun (lambda (limit)
+                                                   (let ((default-directory root))
+                                                     (dbt-cli-show name sql limit))))))))
            (kill-buffer output)
            (kill-buffer (process-buffer errors))
            (delete-process errors)))))))
+
+(defun dbt-cli-preview-cte (name &optional limit)
+  "Show the rows of the CTE NAME of the current model, at most LIMIT of them.
+`dbt show' runs the query of `dbt-mode-cte-query', Jinja and all.  Asked
+for again from its grid, the query is taken again from the model's file."
+  (let ((file buffer-file-name))
+    (dbt-cli-show name (cdr (dbt-mode-cte-query name)) limit
+                  (lambda (limit)
+                    (with-current-buffer (find-file-noselect file)
+                      (dbt-cli-preview-cte name limit))))))
 
 (defun dbt-cli-arguments (arguments)
   "Return the command-line arguments that the transient ARGUMENTS mean.

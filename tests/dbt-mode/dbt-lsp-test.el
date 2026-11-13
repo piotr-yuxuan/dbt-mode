@@ -294,6 +294,36 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
     (dbt-lsp-test-message "dbt lsp: dbt\\.show has no rows to show for orders")
     (should-not (get-buffer "*dbt rows: orders*"))))
 
+(ert-deftest dbt-lsp-asks-again-for-rows-from-the-model-s-file ()
+  "g in the rows asks the server again, once the model's buffer is gone too;
+for a CTE, the model is compiled again first."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.show" :columns ["n"] :data [(:n 1)] :error nil)
+        ("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))
+         :error nil))
+    (let ((compiled (expand-file-name "target/compiled/shop/models/marts/orders.sql" root)))
+      (make-directory (file-name-directory compiled) t)
+      (copy-file (expand-file-name "models/marts/orders.sql" root) compiled))
+    ;; Another buffer of the project keeps the server running.
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
+      (dbt-lsp))
+    (dbt-lsp-show)
+    (dbt-lsp-preview-cte "customers")
+    (let ((orders (current-buffer)))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: customers*")))
+        (let ((compiles (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                   (dbt-lsp-test-methods))))
+          (revert-buffer)
+          (dbt-test-wait (lambda () (> (seq-count (lambda (method) (equal method "workspace/executeCommand dbt.compileFile"))
+                                                  (dbt-lsp-test-methods))
+                                       compiles)))))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (kill-buffer orders)
+        (let ((asked (length (dbt-lsp-test-methods))))
+          (revert-buffer)
+          (dbt-test-wait (lambda () (> (length (dbt-lsp-test-methods)) asked))))))))
+
 (ert-deftest dbt-lsp-compile-file-shows-the-compiled-sql ()
   "C-c C-v shows, read-only, the file of compiled SQL that the server names."
   (dbt-lsp-test-with-server root

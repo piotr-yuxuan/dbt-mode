@@ -89,6 +89,24 @@ In the grid, + runs dbt show again with twice the limit."
         (dbt-test-wait (lambda () (string-search "--limit 14 " (aref (cadr (car tabulated-list-entries)) 0))))
         (kill-buffer)))))
 
+(ert-deftest dbt-cli-asks-again-for-a-cte-as-it-is-now ()
+  "g in the rows of a CTE runs its query as the model's file now writes it."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (dbt-cli-preview-cte "customers")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: customers*")))
+        (should (string-search "ref('stg_customers')" (aref (cadr (car tabulated-list-entries)) 0)))
+        (with-current-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root))
+          (dbt-test-goto "ref('stg_customers')")
+          (replace-match "ref('raw_customers')")
+          (save-buffer)
+          (kill-buffer))
+        (revert-buffer)
+        (dbt-test-wait (lambda () (string-search "ref('raw_customers')" (aref (cadr (car tabulated-list-entries)) 0))))
+        (kill-buffer)))))
+
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
 Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and

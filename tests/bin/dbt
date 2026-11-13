@@ -12,9 +12,9 @@ case "$1 $2" in
   "lsp "*) exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@" ;;
 esac
 if [ -n "$FAKE_DBT_SUCCEED" ]; then
-  printf '[{"arguments":"%s","nothing":null}]\n' "$*"
-  echo "[warning] a warning, on stderr" >&2
-  exit 0
+  exec python3 -I -c 'import json, sys
+print(json.dumps([{"arguments": " ".join(sys.argv[1:]), "nothing": None}]))
+print("[warning] a warning, on stderr", file=sys.stderr)' "$@"
 fi
 echo "arguments: $*"
 echo "[error] [DependencyNotFound (dbt1048)]: Ref 'nope' not found in project."
