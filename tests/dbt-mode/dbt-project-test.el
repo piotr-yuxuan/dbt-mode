@@ -288,14 +288,19 @@ A package whose dbt_project.yml cannot be read is named after its directory."
 
 (ert-deftest dbt-project-index-reads-again-only-the-files-that-changed ()
   "Once forgotten, the index reads the files that changed, and those alone.
-A file made unreadable without changing still gives what it held."
+A file rewritten with its size, time and mode kept still gives what it held."
   (dbt-test-with-project root
     (should (dbt-project-entities root '(macro) "cents_to_dollars"))
-    (set-file-modes (expand-file-name "macros/cents_to_dollars.sql" root) 0)
+    (let* ((file (expand-file-name "macros/cents_to_dollars.sql" root))
+           (time (file-attribute-modification-time (file-attributes file)))
+           (text (with-temp-buffer (insert-file-contents file) (buffer-string))))
+      (write-region (string-replace "cents_to_dollars" "cents_to_dollarz" text) nil file)
+      (set-file-times file time))
     (write-region "{% macro renamed(x) %}{{ x }}{% endmacro %}" nil
                   (expand-file-name "dbt_packages/shop_utils/macros/is_positive.sql" root))
     (dbt-project-forget root)
     (should (dbt-project-entities root '(macro) "cents_to_dollars"))
+    (should-not (dbt-project-entities root '(macro) "cents_to_dollarz"))
     (should (dbt-project-entities root '(macro) "renamed"))
     (should-not (dbt-project-entities root '(macro) "is_positive"))))
 
@@ -317,6 +322,56 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "model.shop.from_snap") '("snapshot.shop.customers_snapshot")))
       (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
     (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
+
+(ert-deftest dbt-project-index-reads-a-file-that-becomes-readable ()
+  "A file unreadable when indexed is read once its mode lets it be."
+  (dbt-test-with-project root
+    (let ((file (expand-file-name "macros/secret.sql" root)))
+      (write-region "{% macro secret_macro() %}1{% endmacro %}\n" nil file)
+      (set-file-modes file #o000)
+      (unwind-protect
+          (progn
+            (should-not (dbt-project-entities root '(macro) "secret_macro"))
+            (set-file-modes file #o644)
+            (dbt-project-forget root)
+            (should (dbt-project-entities root '(macro) "secret_macro")))
+        (set-file-modes file #o644)))))
+
+(ert-deftest dbt-project-index-skips-a-directory-it-cannot-read ()
+  "A directory that cannot be read holds nothing, and stops nothing."
+  (dbt-test-with-project root
+    (let ((private (expand-file-name "models/private" root)))
+      (make-directory private)
+      (set-file-modes private #o000)
+      (unwind-protect
+          (should (dbt-project-entities root '(model) "orders"))
+        (set-file-modes private #o755)))))
+
+(ert-deftest dbt-project-index-skips-python-environments ()
+  "A virtual environment or a conda environment in the project is not read."
+  (dbt-test-with-project root
+    (dolist (environment '(("dbt-env" . "pyvenv.cfg") ("conda" . "conda-meta/history")))
+      (let ((directory (expand-file-name (car environment) root)))
+        (make-directory (expand-file-name "lib" directory) t)
+        (make-directory (file-name-directory (expand-file-name (cdr environment) directory)) t)
+        (write-region "" nil (expand-file-name (cdr environment) directory))
+        (write-region (format "{%% docs leaked_%s %%}x{%% enddocs %%}\n" (car environment)) nil
+                      (expand-file-name "lib/README.md" directory))))
+    (should-not (dbt-project-entities root '(doc) "leaked_dbt-env"))
+    (should-not (dbt-project-entities root '(doc) "leaked_conda"))
+    (should (dbt-project-entities root '(doc) "order_status"))))
+
+(ert-deftest dbt-project-file-entity-takes-the-nearest-package ()
+  "In integration_tests that installs its parent with local: ../, a new model is its own."
+  (dbt-test-with-project outer
+    (let ((root (expand-file-name "integration_tests/" outer)))
+      (make-directory (expand-file-name "models" root) t)
+      (write-region "name: 'shop_tests'\nconfig-version: 2\n" nil (expand-file-name "dbt_project.yml" root))
+      (write-region "packages:\n  - local: ../\n" nil (expand-file-name "packages.yml" root))
+      (should (equal (dbt-project-root (expand-file-name "models/new.sql" root)) root))
+      (let ((entity (dbt-project-file-entity root (expand-file-name "models/new.sql" root))))
+        (should (equal (plist-get entity :kind) 'model))
+        (should (equal (plist-get entity :package) "shop_tests"))))))
 
 (ert-deftest dbt-project-index-names-versioned-models-after-the-model ()
   "A version's file is the model with that version; a ref without one means the latest."

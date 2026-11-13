@@ -64,14 +64,18 @@ changed.
 With dbt 2 (`dbt lsp`), `dbt-lsp-deferred` starts the server through
 lsp-mode, which then gives:
 
-- definitions and references of models, sources and macros, packages' and
-  dbt's own included;
+- definitions of what dbt-mode does not resolve, such as dbt's own macros:
+  on a `ref`, a source, a doc or a macro of the project or its packages,
+  `M-.` and `M-?` stay dbt-mode's, as dbt lsp 2.0.9 lists the uses in the
+  current file only, ignores a `ref`'s version and resolves no `doc`;
 - hover with a model's description, parents, children and columns;
 - completion of models, macros and SQL functions;
 - diagnostics as you type, such as a `ref` to a model that does not exist;
 - semantic tokens, and a "Preview CTE" code lens above each CTE;
-- renaming a model renames every `ref` and YAML entry that names it, whether
-  by `dbt-lsp-rename-model`, Dired or `rename-visited-file`;
+- renaming a model, whether by `dbt-lsp-rename-model`, Dired or
+  `rename-visited-file`, renames its `ref` calls in models and its YAML
+  entry; dbt lsp 2.0.9 leaves those of analyses and YAML tests, which
+  `dbt-lsp-rename-model` then lists. A version of a model is not renamed;
 - the compiled SQL, the rows of a model, a region or a CTE, and the lineage
   as the server computes it. The server compiles and previews the file on
   disk, so these commands save the buffer first.
@@ -168,9 +172,11 @@ lenses, `lsp-semantic-tokens-enable` the server's semantic tokens.
 `dbt lsp` 2.0.9 formats the file on disk rather than the buffer, and so does
 its linter's fix-all code action: their edits would corrupt unsaved changes.
 dbt-mode hides both from lsp-mode. `dbt-lsp-format-buffer` saves the buffer
-first, then formats it; `dbt-lsp-fix-all`, with `dbt-lsp-enable-linter`,
-saves, then fixes and formats; `dbt-dispatch` runs `dbt format` and `dbt
-lint`.
+first, then formats it; `dbt-lsp-fix-all` saves, then fixes and formats,
+whether or not `dbt-lsp-enable-linter` is on; `dbt-dispatch` runs `dbt
+format` and `dbt lint`. lsp-mode's `lsp-format-buffer-on-save` and
+`lsp-fix-all-on-save` are turned off in the buffers of dbt lsp, where they
+could only fail.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.

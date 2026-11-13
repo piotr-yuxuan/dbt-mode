@@ -221,6 +221,33 @@ Its one code action, which fixes and formats, is hidden too."
       (should-not (string-match-p "Unknown notification"
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
+(ert-deftest dbt-lsp-turns-off-lsp-mode-s-formatting-on-save ()
+  "Set for other languages, lsp-mode's formatting and fixes on save log no error here."
+  (let ((lsp-format-buffer-on-save t)
+        (lsp-fix-all-on-save t))
+    (dbt-lsp-test-with-server root nil
+      (should-not lsp-format-buffer-on-save)
+      (should-not lsp-fix-all-on-save)
+      (insert " ")
+      (save-buffer)
+      (should-not (with-current-buffer (messages-buffer)
+                    (string-search "before-save" (buffer-substring dbt-lsp-test-messages-start (point-max))))))))
+
+(ert-deftest dbt-lsp-leaves-xref-to-dbt-mode-where-it-resolves ()
+  "With the server, M-. and M-? on a ref or a snapshot are dbt-mode's; elsewhere, the server's.
+Choosing the server reads nothing of the project."
+  (dbt-lsp-test-with-server root nil
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should (eq (xref-find-backend) 'dbt))
+    (dbt-project-forget (dbt-project-root))
+    (dbt-test-goto "customers.first_name")
+    (should (eq (xref-find-backend) 'xref-lsp))
+    (should-not (seq-some (lambda (key) (equal (car key) root)) (hash-table-keys dbt-project--cache)))
+    (with-current-buffer (dbt-test-visit root "snapshots/orders_snapshot.sql")
+      (dbt-lsp)
+      (dbt-test-goto "orders_snapshot %}")
+      (should (eq (xref-find-backend) 'dbt)))))
+
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.
 lsp-mode reads false as it reads null, so false shows as NULL too."
@@ -365,7 +392,7 @@ A node of a package that dbt-mode does not know has no file."
                              :package_name "dbt_adapters" :original_file_path "models/internal.sql"
                              :depends_on (:nodes ["model.shop_utils.util"]))]
          :error nil))
-    (dbt-lsp-lineage "stg_orders")
+    (dbt-lsp-lineage "stg_orders" "model.shop.stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
       (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
@@ -391,14 +418,60 @@ their files are."
     (should-not (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))))
 
 (ert-deftest dbt-lsp-rename-model-renames-the-file ()
-  "Renaming a model renames its file, which lsp-mode tells the server first."
+  "Renaming a model renames its file, which lsp-mode tells the server first.
+The new name is then taken, before any buffer is saved."
   (dbt-lsp-test-with-server root nil
     (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
       (dbt-lsp)
       (dbt-lsp-rename-model "stg_clients")
       (should (equal buffer-file-name (expand-file-name "models/staging/stg_clients.sql" root)))
       (should-not (file-exists-p (expand-file-name "models/staging/stg_customers.sql" root))))
-    (should (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))))
+    (should (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))
+    (should-error (dbt-lsp-rename-model "stg_clients") :type 'user-error)
+    (should (equal buffer-file-name (expand-file-name "models/marts/orders.sql" root)))))
+
+(ert-deftest dbt-lsp-rename-model-lists-the-uses-the-server-leaves ()
+  "The uses that still name a renamed model are listed; a version is not renamed.
+The server edits the ref of orders.sql and that of a CTE named as the
+model, in their buffers; the uses it leaves are listed wherever they
+are, in a visited buffer or a file, the renamed file included."
+  (dbt-lsp-test-with-server root
+      `(("workspace/willRenameFiles"
+         . (:changes ((,(lsp--path-to-uri (expand-file-name "models/marts/orders.sql" root))
+                       . [(:range (:start (:line 11 :character 26) :end (:line 11 :character 36))
+                                  :newText "stg_sales")])
+                      (,(lsp--path-to-uri (expand-file-name "models/marts/recent.sql" root))
+                       . [(:range (:start (:line 0 :character 42) :end (:line 0 :character 52))
+                                  :newText "stg_sales")])))))
+    (write-region "with stg_orders as (select * from {{ ref('stg_orders') }})\nselect * from stg_orders\n" nil
+                  (expand-file-name "models/marts/recent.sql" root))
+    (write-region "-- formerly {{ ref('stg_orders') }}\n" nil
+                  (expand-file-name "models/staging/stg_orders.sql" root) t)
+    (dbt-project-forget root)
+    (dbt-test-visit root "analyses/order_counts.sql")
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
+      (dbt-lsp)
+      (let* (shown
+             (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
+        (dbt-lsp-rename-model "stg_sales")
+        (should (equal (sort (mapcar (lambda (item)
+                                       (let ((location (xref-item-location item)))
+                                         (format "%s:%d" (file-relative-name (xref-location-group location) root)
+                                                 (xref-location-line location))))
+                                     shown))
+                       '("analyses/order_counts.sql:1" "models/staging/_staging.yml:4"
+                         "models/staging/stg_sales.sql:18" "snapshots/orders_snapshot.sql:3"
+                         "tests/assert_positive_amount.sql:1")))
+        (dbt-lsp-test-message "5 uses still name stg_orders, which dbt lsp leaves")))
+    (dolist (file '("dim_v1" "dim_v2"))
+      (write-region "select 1" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
+    (write-region "models:\n  - name: dim\n    versions:\n      - v: 1\n      - v: 2\n" nil
+                  (expand-file-name "models/marts/_dim.yml" root))
+    (dbt-project-forget root)
+    (with-current-buffer (dbt-test-visit root "models/marts/dim_v2.sql")
+      (dbt-lsp)
+      (should-error (dbt-lsp-rename-model "dim_clients") :type 'user-error)
+      (should (file-exists-p (expand-file-name "models/marts/dim_v2.sql" root))))))
 
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
   "Formatting saves the buffer, then applies the edits of the server."
@@ -444,7 +517,7 @@ their files are."
     (dbt-lsp-test-message "dbt lsp: dbt\\.show answered what dbt-mode cannot read: {\"columns\":3")
     (dbt-lsp-compile-file)
     (dbt-lsp-test-message "dbt lsp: dbt\\.compileFile answered what dbt-mode cannot read")
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (let ((text (buffer-string)))
       (should (string-match-p "\\`dbt lsp: textDocument/formatting answered what dbt-mode cannot read"
@@ -453,6 +526,24 @@ their files are."
     (should-not (get-buffer "*dbt rows: orders*"))
     (should-not (get-buffer "*dbt lineage: orders*"))))
 
+(ert-deftest dbt-lsp-lineage-asks-again-without-the-model-buffer ()
+  "g in the lineage asks the server again, once the model's buffer is gone too."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.listNodes"
+         :nodes [(:unique_id "model.shop.orders" :name "orders" :resource_type "model"
+                             :package_name "shop" :original_file_path "models/marts/orders.sql"
+                             :depends_on (:nodes []))]
+         :error nil))
+    ;; Another buffer of the project keeps the server running.
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
+      (dbt-lsp))
+    (dbt-lsp-lineage "orders" "model.shop.orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: orders*")))
+      (kill-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root)))
+      (let ((asked (length (dbt-lsp-test-methods))))
+        (revert-buffer)
+        (dbt-test-wait (lambda () (> (length (dbt-lsp-test-methods)) asked)))))))
+
 (ert-deftest dbt-lsp-names-the-node-it-cannot-read ()
   "A node of an unexpected shape among those of the lineage is reported."
   (dbt-lsp-test-with-server root
@@ -460,7 +551,7 @@ their files are."
          :nodes [(:unique_id "model.shop.orders" :name "orders" :resource_type "model"
                              :package_name "shop" :original_file_path "models/marts/orders.sql"
                              :depends_on (:nodes [3]))]))
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (should-not (get-buffer "*dbt lineage: orders*"))))
 
@@ -470,7 +561,7 @@ their files are."
       '(("workspace/executeCommand dbt.listNodes" :error "No nodes found" :nodes []))
     (dbt-lsp-show)
     (dbt-lsp-test-message "dbt lsp: dbt\\.show answered nothing")
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes failed: No nodes found")
     (should-not (get-buffer "*dbt rows: orders*"))))
 

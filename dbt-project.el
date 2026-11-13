@@ -293,7 +293,8 @@ which."
 
 (defvar dbt-project--files (make-hash-table :test #'equal)
   "What was read of each file, from its name to (STAMP . CONTENTS).
-STAMP is the modification time and size of the file when it was read.")
+STAMP is the modification time, the size and the mode of the file when
+it was read.")
 
 (defun dbt-project-forget (&optional root)
   "Forget what was read of the project at ROOT, or of every project.
@@ -357,16 +358,22 @@ copy.  NAME falls back to the name of the directory."
 (defun dbt-project-source-files (directory)
   "Return the source files of the project or package at DIRECTORY.
 They are its SQL, Python, CSV, Markdown and YAML files, outside hidden
-directories, those of `dbt-project-skipped-directories' and those of
-nested projects, such as local packages.  Hidden files go too, such as
-the lock files .#NAME of the buffers being edited."
+directories, those of `dbt-project-skipped-directories', those of
+nested projects, such as local packages, and Python environments, such
+as the dbt-env or venv that holds dbt itself: a directory with the
+pyvenv.cfg of venv, virtualenv and uv, or the conda-meta of conda.
+Hidden files go too, such as the lock files .#NAME of the buffers being
+edited."
   (directory-files-recursively
    directory "\\`[^.].*\\.\\(?:sql\\|py\\|csv\\|md\\|ya?ml\\)\\'" nil
    (lambda (subdirectory)
      (not (or (string-prefix-p "." (file-name-nondirectory subdirectory))
+              ;; What cannot be read holds nothing, rather than an error.
+              (not (file-accessible-directory-p subdirectory))
               (member (file-relative-name subdirectory directory)
                       dbt-project-skipped-directories)
-              (file-exists-p (expand-file-name dbt-project-file subdirectory)))))))
+              (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))
+                        (list dbt-project-file "pyvenv.cfg" "conda-meta")))))))
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.
@@ -389,10 +396,12 @@ entities without :package and :file: an entry defines a source, a table,
 an exposure or a snapshot that has a relation, and gives the properties
 of any other resource; CALLS are as `dbt-project-calls'
 returns them.  What a Jinja comment holds is left out.  FILE is read
-again only when its modification time or its size changed.  A file that
+again only when its modification time, its size or its mode changed,
+the mode telling when an unreadable file becomes readable.  A file that
 cannot be read holds nothing."
   (let* ((attributes (file-attributes (file-chase-links file)))
-         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)))
+         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)
+                      (file-attribute-modes attributes)))
          (cached (gethash file dbt-project--files)))
     (if (equal (car cached) stamp)
         (cdr cached)
@@ -482,10 +491,14 @@ is looked up in a table, built once for each index."
 It is the first that the index has of FILE, a snapshot of a Jinja block
 included: a YAML file defines no resource of its own.  FILE need not
 exist yet, nor the index know it: a model, a seed or an analysis is told
-by its place alone."
+by its place alone.  FILE belongs to the package whose directory is the
+nearest above it: an installed package rather than the project, the
+project rather than a local package that holds it, such as the `../'
+of a package's integration_tests."
   (let* ((file (expand-file-name file))
-         (package (seq-find (lambda (package) (string-prefix-p (nth 1 package) file))
-                            (reverse (dbt-project-packages root))))
+         (package (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
+                                    (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
+                                                (dbt-project-packages root)))))
          (kind (dbt-project-file-kind file (nth 1 package) (nth 2 package))))
     (or (seq-find (lambda (entity)
                     (and (equal (plist-get entity :file) file)

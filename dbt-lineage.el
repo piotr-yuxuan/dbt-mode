@@ -75,19 +75,20 @@ excluded."
                                ("Name" 32 t) ("File" 0 t)])
   (setq-local revert-buffer-function (lambda (&rest _) (funcall dbt-lineage--refresh))))
 
-(defun dbt-lineage-show (root name nodes description refresh)
-  "Show the lineage of the resource NAME of ROOT among NODES.
-DESCRIPTION says where NODES come from, for the header.  REFRESH is a
-function of no argument that asks for the lineage again, from where the
-nodes came."
-  (let ((focus (or (seq-find (lambda (node) (and (equal (plist-get node :name) name)
-                                                 (memq (plist-get node :type) '(model seed snapshot))))
-                             nodes)
-                   (user-error "No model, seed or snapshot named %s" name)))
+(defun dbt-lineage-show (root id nodes description refresh)
+  "Show the lineage of the node ID of ROOT among NODES.
+ID is a unique id, such as model.shop.orders or, for a version,
+model.shop.orders.v2.  DESCRIPTION says where NODES come from, for the
+header.  REFRESH is a function of no argument that asks for the lineage
+again, from where the nodes came."
+  (let ((focus (or (seq-find (lambda (node) (equal (plist-get node :id) id)) nodes)
+                   (user-error "No node %s" id)))
+        ;; The name in an id, with a version, or a source with a table.
+        (label (lambda (id) (mapconcat #'identity (nthcdr 2 (split-string id "\\.")) ".")))
         (by-id (make-hash-table :test #'equal)))
     (dolist (node (reverse nodes))
       (puthash (plist-get node :id) node by-id))
-    (with-current-buffer (get-buffer-create (format "*dbt lineage: %s*" name))
+    (with-current-buffer (get-buffer-create (format "*dbt lineage: %s*" (funcall label id)))
       (dbt-lineage-mode)
       (setq dbt-lineage--refresh refresh
             tabulated-list-entries
@@ -96,7 +97,7 @@ nodes came."
                                 (let ((node (or (gethash id by-id) (list :id id :name id))))
                                   (list node (vector (symbol-name direction) (number-to-string depth)
                                                      (format "%s" (or (plist-get node :type) ""))
-                                                     (plist-get node :name)
+                                                     (funcall label id)
                                                      (if (plist-get node :file)
                                                          (file-relative-name (plist-get node :file) root)
                                                        "")))))
@@ -105,7 +106,7 @@ nodes came."
       (tabulated-list-init-header)
       (tabulated-list-print)
       (display-buffer (current-buffer))
-      (message "Lineage of %s %s, from %s" (plist-get focus :type) name description))))
+      (message "Lineage of %s %s, from %s" (plist-get focus :type) (funcall label id) description))))
 
 (provide 'dbt-lineage)
 ;;; dbt-lineage.el ends here

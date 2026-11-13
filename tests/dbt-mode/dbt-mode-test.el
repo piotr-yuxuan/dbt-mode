@@ -33,10 +33,11 @@
       (delete-file file))))
 
 (ert-deftest dbt-mode-leaves-the-target-path-alone ()
-  "What dbt writes under the configured target-path opens in sql-mode."
+  "What dbt writes under the configured target-path, or logs, opens in sql-mode."
   (dbt-test-with-project root
     (write-region "target-path: build\n" nil (expand-file-name "dbt_project.yml" root) 'append)
-    (dolist (case '(("build/compiled/x.sql" . sql-mode) ("target/x.sql" . dbt-mode)))
+    (dolist (case '(("build/compiled/x.sql" . sql-mode) ("target/x.sql" . dbt-mode)
+                    ("logs/query_log.sql" . sql-mode) ("models/logs/x.sql" . dbt-mode)))
       (make-directory (file-name-directory (expand-file-name (car case) root)) t)
       (write-region "select 1" nil (expand-file-name (car case) root))
       (should (eq (with-current-buffer (dbt-test-visit root (car case)) major-mode) (cdr case))))))
@@ -62,6 +63,21 @@
     (should-not (nth 4 (syntax-ppss)))
     (dbt-test-goto "from x")
     (should-not (nth 4 (syntax-ppss)))))
+
+(ert-deftest dbt-mode-reads-jinja-after-what-starts-no-comment ()
+  "After /- or -*, a Jinja comment or tag holding an apostrophe is read as one.
+Jinja's rules see that /- and -* start no comment."
+  (dolist (text '("select revenue/-1 as neg, {# it's old #} b\nfrom t\nselect 2 as z\n"
+                  "select revenue/-1 as neg, {{ log(\"it's\") }} b\nfrom t\nselect 2 as z\n"
+                  "select 1 as a -*\n{# it's old #}\nfrom t\nselect 2 as z\n"
+                  ;; A banner after a Jinja comment holding a quote closes.
+                  "{# it's #}\n/*----*/\nfrom t\nselect 2 as z\n"))
+    (with-temp-buffer
+      (insert text)
+      (dbt-mode)
+      (dolist (word '("from t" "2 as z"))
+        (dbt-test-goto word)
+        (should-not (nth 8 (syntax-ppss)))))))
 
 (ert-deftest dbt-mode-reads-a-long-jinja-comment-in-pieces ()
   "A comment that the chunks of syntax and font lock cut is still a comment."
@@ -168,7 +184,8 @@
     (should (eq (dbt-test-face "config(") 'font-lock-builtin-face))))
 
 (ert-deftest dbt-mode-jinja-bounds-find-the-tag-around-point ()
-  "Point inside a tag gets its bounds; outside, or in an open tag, none or no end."
+  "Point inside a tag gets its bounds; outside, or in an open tag, none or no end.
+A tag inside the string of a tag is part of that string."
   (with-temp-buffer
     (dbt-mode)
     (insert "select {{ ref('a') }} from t {% if x")
@@ -177,7 +194,12 @@
     (dbt-test-goto "from")
     (should-not (dbt-mode-jinja-bounds))
     (goto-char (point-max))
-    (should (equal (dbt-mode-jinja-bounds) (cons 30 nil)))))
+    (should (equal (dbt-mode-jinja-bounds) (cons 30 nil))))
+  (with-temp-buffer
+    (dbt-mode)
+    (insert "{{ f(\"a {{ b }} c\", x) }}")
+    (dbt-test-goto "x)")
+    (should (equal (dbt-mode-jinja-bounds) (cons 1 26)))))
 
 (ert-deftest dbt-mode-reads-the-strings-of-a-tag ()
   "A quote of the other kind, or escaped, in a Jinja string ends nothing."
@@ -220,6 +242,24 @@
     (dbt-test-goto "and x")
     (should-not (nth 3 (syntax-ppss)))
     (should (eq (dbt-test-face "and x") 'font-lock-keyword-face))))
+
+(ert-deftest dbt-mode-finds-no-tag-at-once-between-many ()
+  "Between the tags of a file dense with them, no tag is found at once.
+Font lock asks at each change, twice; a model of 3,000 lines with a tag
+on each takes well under a second for 3,000 such questions, whether the
+tags are code, in SQL strings or in comments."
+  (dolist (line '("    {{ ref('m_%d') }} as c_%d,\n" "    and status = '{{ var(\"s_%d\") }}' -- %d\n"
+                  "-- {{ ref('m_%d') }} as c_%d\n"))
+    (with-temp-buffer
+      (dotimes (i 3000) (insert (format line i i)))
+      (dbt-mode)
+      (let ((start (float-time)))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (end-of-line)
+          (should-not (dbt-mode-jinja-bounds))
+          (forward-line 1))
+        (should (< (- (float-time) start) 1.0))))))
 
 (ert-deftest dbt-mode-ends-a-tag-at-its-own-closer ()
   "A closer that ends a nested dict, or in a string, does not end the tag."
@@ -283,7 +323,7 @@
                     (:kind macro :qualifier nil :name "m" :version nil)
                     (:kind analysis :qualifier nil :name "counts" :version nil)))
     (should (equal (dbt-mode-parse-identifier (dbt-mode-identifier target)) target)))
-  (should-not (dbt-mode-parse-identifier "model:orders")))
+  (should-error (dbt-mode-parse-identifier "model:orders") :type 'user-error))
 
 (defun dbt-test-xref-files (items root)
   "Return the files of the xref ITEMS, relative to ROOT, with their lines."
@@ -324,8 +364,10 @@
                    '(("analyses/order_counts.sql" . 1))))))
 
 (ert-deftest dbt-mode-xref-finds-references ()
-  "M-? lists the calls of a model, and its YAML entry; the calls of a macro, not its definition."
+  "M-? lists the calls of a model, and its YAML entry; the calls of a macro, not its definition.
+A dangling link among the project's files holds none and stops nothing."
   (dbt-test-with-project root
+    (make-symbolic-link "/nonexistent/model.sql" (expand-file-name "models/dangling.sql" root))
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (should (equal (sort (mapcar #'car (dbt-test-xref-files (xref-backend-references 'dbt "ref:stg_orders") root))
                          #'string<)
@@ -335,6 +377,8 @@
                    '(("models/staging/stg_orders.sql" . 13))))
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt "doc:order_status") root)
                    '(("models/staging/_staging.yml" . 5))))
+    ;; A name typed at the prompt, which is no KIND:NAME, is refused.
+    (should-error (xref-backend-references 'dbt "orders") :type 'user-error)
     (write-region "select * from {{ source('raw', 'raw_orders') }}" nil
                   (expand-file-name "models/staging/from_raw.sql" root))
     (dolist (case '(("source:raw" ("models/staging/from_raw.sql" . 1))
@@ -419,18 +463,45 @@
                    '(("Macros" "cents_to_dollars"))))))
 
 (ert-deftest dbt-mode-cte-query-selects-from-the-cte ()
-  "A CTE's query is the model's WITH up to the CTE, then a select from it."
+  "A CTE's query is the model up to the CTE, then a select from it."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (dbt-test-goto "customers.first_name")
     (let ((query (dbt-mode-cte-query)))
       (should (equal (car query) "final"))
-      (should (string-prefix-p "with orders as (" (cdr query)))
+      (should (string-prefix-p (buffer-substring-no-properties (point-min) (progn (dbt-test-goto "with orders as (")
+                                                                                     (point)))
+                               (cdr query)))
       (should (string-suffix-p "{% endif %}\n)\nselect * from final" (cdr query))))
     (let ((query (dbt-mode-cte-query "customers")))
       (should (string-suffix-p "{{ ref('stg_customers') }}\n)\nselect * from customers" (cdr query))))
     (goto-char (point-min))
     (should-error (dbt-mode-cte-query) :type 'user-error)))
+
+(ert-deftest dbt-mode-cte-query-keeps-what-comes-before-the-with ()
+  "What comes before the WITH comes first in a CTE's query, sets in their blocks.
+The tag of a Jinja block open at the WITH, as a legacy snapshot's, does not."
+  (let ((before (concat "{# {% set old = 1 %} #}\n{% if target.name == 'prod' %}\n{% set cols = ['a'] %}\n"
+                        "{% else %}\n{% set cols = ['a', 'b'] %}\n{% endif %}\n-- {% set commented = 'x' %}\n"
+                        "{% set pattern = 'p%' %}\n"))
+        (chain "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)"))
+    (with-temp-buffer
+      (insert before chain "\nselect * from x\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query)) (concat before chain "\nselect * from x"))))
+    (with-temp-buffer
+      (insert "{% snapshot s %}\n{{ config(unique_key='a') }}\n{% set cols = ['a'] %}\n"
+              chain "\nselect * from x\n{% endsnapshot %}\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query))
+                     (concat "\n{{ config(unique_key='a') }}\n{% set cols = ['a'] %}\n" chain "\nselect * from x"))))
+    (with-temp-buffer
+      (insert "{% set cols = ['a'] %}\n{% if execute %}{% if true %}\n" chain "\nselect * from x\n{% endif %}{% endif %}\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query)) (concat "{% set cols = ['a'] %}\n\n" chain "\nselect * from x"))))))
 
 (ert-deftest dbt-mode-knows-when-no-server-runs ()
   "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."
@@ -453,17 +524,24 @@
         (should buffer-read-only)))))
 
 (ert-deftest dbt-mode-visits-the-compiled-sql-of-snapshots-and-packages ()
-  "C-c C-v finds where dbt 2 compiles a snapshot, and a package's model."
+  "C-c C-v finds where dbt 2 compiles a snapshot, and a package's model.
+dbt compiles a local package in the copy it installs."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (write-region "select 1 as one" nil (expand-file-name "dbt_packages/shop_utils/models/util_one.sql" root))
+    (make-directory (expand-file-name "local_pkgs/util/models" root) t)
+    (write-region "name: 'util'\nconfig-version: 2\n" nil (expand-file-name "local_pkgs/util/dbt_project.yml" root))
+    (write-region "select 2 as two" nil (expand-file-name "local_pkgs/util/models/util_two.sql" root))
+    (write-region "  - local: local_pkgs/util\n" nil (expand-file-name "packages.yml" root) 'append)
     (with-temp-file (expand-file-name "snapshots/orders_snapshot.sql" root)
       (insert "{% snapshot snap_orders %}\nselect * from {{ ref('stg_orders') }}\n{% endsnapshot %}\n"))
     ;; Where dbt 2.0.9 wrote them.
     (dolist (case '(("snapshots/orders_snapshot.sql"
                      . "target/compiled/shop/snapshots/orders_snapshot.sql/snap_orders.sql")
                     ("dbt_packages/shop_utils/models/util_one.sql"
-                     . "target/compiled/shop_utils/dbt_packages/shop_utils/models/util_one.sql")))
+                     . "target/compiled/shop_utils/dbt_packages/shop_utils/models/util_one.sql")
+                    ("local_pkgs/util/models/util_two.sql"
+                     . "target/compiled/util/dbt_packages/util/models/util_two.sql")))
       (let ((compiled (expand-file-name (cdr case) root)))
         (make-directory (file-name-directory compiled) t)
         (write-region "select 1" nil compiled)
@@ -533,6 +611,61 @@
     (should (equal (xref-find-backend) 'dbt))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_customers.sql" . 1))))))
+
+(defun dbt-test-write-versions (root)
+  "Write a model dim of ROOT with versions 1 and 2, the latest, and a user of v1."
+  (dolist (file '("dim_v1" "dim_v2"))
+    (write-region "select * from {{ ref('stg_orders') }}" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
+  (write-region "models:\n  - name: dim\n    latest_version: 2\n    versions:\n      - v: 1\n      - v: 2\n"
+                nil (expand-file-name "models/marts/_dim.yml" root))
+  (write-region "select * from {{ ref('dim', v=1) }}" nil (expand-file-name "models/marts/uses_v1.sql" root)))
+
+(ert-deftest dbt-mode-names-a-version-as-dbt-selects-it ()
+  "A version is NAME.vVERSION: its lineage, the ref inserted, the choices offered.
+A name alone is the latest version, as for `ref'."
+  (dbt-test-with-project root
+    (dbt-test-write-versions root)
+    (dbt-test-visit root "models/marts/dim_v2.sql")
+    (should (equal (dbt-mode-resource-selector (dbt-mode-current-resource)) "dim.v2"))
+    ;; dbt show selects one node only.
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+      (with-current-buffer (dbt-preview)
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+        (should (string-match-p "^arguments: show --select dim\\.v2 " (buffer-string)))))
+    (should (equal (dbt-mode-parse-selector "dim.v2") '("dim" . "2")))
+    (should (equal (dbt-mode-parse-selector "dim") '("dim")))
+    (let ((completing-read-function (lambda (_prompt collection &rest _) (all-completions "dim" collection))))
+      (should (equal (sort (dbt-mode-read-resource "Lineage of: ") #'string<) '("dim" "dim.v1" "dim.v2"))))
+    (dbt-lineage "dim.v1")
+    (with-current-buffer "*dbt lineage: dim.v1*"
+      (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
+                      (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (kill-buffer))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer "*dbt lineage: stg_orders*"
+      (should (member "dim.v1" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (should (member "dim.v2" (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+      (kill-buffer))
+    (dbt-lineage "dim")
+    (with-current-buffer "*dbt lineage: dim.v2*"
+      (should-not (assoc "downstream" (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (kill-buffer))
+    (goto-char (point-max))
+    (insert "\n")
+    (dbt-insert-ref "dim.v1")
+    (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))
+    ;; The model itself, unpinned, floats to its latest version.
+    (insert "\n")
+    (dbt-insert-ref "dim")
+    (should (looking-back "^{{ ref('dim') }}" (line-beginning-position)))))
+
+(ert-deftest dbt-mode-offers-no-analysis-as-a-resource ()
+  "In an analysis, the resource read has no default: an analysis has no lineage."
+  (dbt-test-with-project root
+    (dbt-test-visit root "analyses/order_counts.sql")
+    ;; The seventh argument of `completing-read' is the default.
+    (let ((completing-read-function (lambda (&rest arguments) (nth 6 arguments))))
+      (should-not (dbt-mode-read-resource "Lineage of: ")))))
 
 (ert-deftest dbt-mode-copies-relations-from-the-manifest ()
   "The relation of the model, or of the ref or source at point, comes from the manifest.

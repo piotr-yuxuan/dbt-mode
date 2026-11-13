@@ -18,8 +18,8 @@
 ;; What lsp-mode does not do by itself, this client does with the
 ;; server's own requests and commands:
 ;;
-;; - `dbt-lsp-rename-model' renames the file of a model, and every `ref'
-;;   and YAML entry that names it: lsp-mode asks the server, by
+;; - `dbt-lsp-rename-model' renames the file of a model, which has the
+;;   server edit the uses it knows of: lsp-mode asks the server, by
 ;;   workspace/willRenameFiles, whenever a file is renamed;
 ;; - `dbt-lsp-compile-file' shows the compiled SQL (dbt.compileFile);
 ;; - `dbt-lsp-show' shows the rows of the model, or of a query
@@ -32,7 +32,7 @@
 ;;   changes: this client hides formatting from lsp-mode, and this
 ;;   command saves the buffer first;
 ;; - `dbt-lsp-fix-all' fixes the lint issues of the buffer and formats it,
-;;   with the linter on, and saves it first likewise.
+;;   and saves it first likewise.
 ;;
 ;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
 ;; project a folder of the lsp session before lsp-mode starts, so that
@@ -179,7 +179,11 @@ value that its SCHEMA fits, a missing key holding null."
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
 or holds an error, a message says so."
-  (let ((workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))))
+  ;; From a buffer the server does not serve, such as that of the
+  ;; lineage, the server of the project.
+  (let ((workspace (or (dbt-lsp-workspace)
+                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
+                       (user-error "No dbt lsp runs on this project"))))
     (with-lsp-workspace workspace
       (lsp-request-async "workspace/executeCommand"
                          (list :command command :arguments (vconcat arguments))
@@ -287,19 +291,19 @@ client.  Its arguments are the file and the CTE."
        (dbt-lsp-preview-cte (lsp-get cte :name))))
     (arguments (error "%s" (dbt-lsp--unreadable "dbt.previewCte" arguments)))))
 
-(defun dbt-lsp-lineage (name)
-  "Show the lineage of the model, seed or snapshot NAME, as the server sees it."
-  (interactive (list (file-name-base buffer-file-name)))
-  (let ((root (dbt-project-root))
-        (buffer (current-buffer)))
+(defun dbt-lsp-lineage (selector id)
+  "Show the lineage of the node ID, which SELECTOR selects, as the server sees it.
+SELECTOR is dbt's selector of a model, seed or snapshot, such as
+orders or orders.v2."
+  (let ((root (dbt-project-root)))
     (dbt-lsp--execute
-     "dbt.listNodes" (list (format "+%s+" name))
+     "dbt.listNodes" (list (format "+%s+" selector))
      '(object (:nodes (array (object (:unique_id stringp) (:name stringp) (:resource_type stringp)
                                      (:package_name stringp) (:original_file_path stringp)
                                      (:depends_on (or null (object (:nodes (or null (array stringp))))))))))
      (lambda (result)
        (dbt-lineage-show
-        root name
+        root id
         (mapcar (lambda (node)
                   (let ((directory (nth 1 (assoc (lsp-get node :package_name) (dbt-project-packages root)))))
                     (list :id (lsp-get node :unique_id)
@@ -310,32 +314,68 @@ client.  Its arguments are the file and the CTE."
                           :parents (append (lsp-get (lsp-get node :depends_on) :nodes) nil))))
                 (append (lsp-get result :nodes) nil))
         "dbt lsp"
-        (lambda () (with-current-buffer buffer (dbt-lsp-lineage name))))))))
+        (lambda () (let ((default-directory root)) (dbt-lsp-lineage selector id))))))))
 
 (defun dbt-lsp-rename-model (name)
-  "Rename the model of the current buffer to NAME, and every use of it.
+  "Rename the model of the current buffer to NAME, and the uses of it.
 lsp-mode asks the server what renaming the file changes, and the server
-edits each `ref' and YAML entry that names the model; the edited buffers
-are left unsaved.  Renaming the file otherwise, such as in Dired, does
-the same.  The current buffer is saved first.  NAME must not be that of
-another model, seed or snapshot of the package."
+edits the `ref' calls of models and the YAML entry that name the model;
+the edited buffers are left unsaved.  dbt lsp 2.0.9 leaves those of
+analyses and YAML tests: the uses that still name the model are listed.
+Renaming the file otherwise, such as in Dired, has the server do the
+same, without the list.  The current buffer is saved first.  NAME must
+not be that of another model, seed or snapshot of the package; a version
+of a model is not renamed, as the server would edit nothing."
   (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
   (unless (dbt-lsp-workspace)
     (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
+         (entity (dbt-project-file-entity root buffer-file-name))
+         (file buffer-file-name)
+         (old (file-name-base buffer-file-name))
          (new (expand-file-name (concat name "." (file-name-extension buffer-file-name))
                                 (file-name-directory buffer-file-name))))
+    (when (plist-get entity :version)
+      (user-error "This file is version %s of %s, which dbt lsp does not rename"
+                  (plist-get entity :version) (plist-get entity :name)))
     (when (file-exists-p new)
       (user-error "%s exists already" new))
     ;; The server would make each ref of the model one of that resource.
-    (when (dbt-project-entities root '(model seed snapshot) name
-                                (plist-get (dbt-project-file-entity root buffer-file-name) :package))
+    (when (dbt-project-entities root '(model seed snapshot) name (plist-get entity :package))
       (user-error "A model, seed or snapshot named %s exists already" name))
     (save-buffer)
-    (rename-visited-file new)
-    (message "Renamed to %s; save the buffers it edited with C-x s" name)))
+    (let ((uses (xref-backend-references 'dbt (concat "ref:" old))))
+      (rename-visited-file new)
+      ;; The next rename's check must know the new name.
+      (dbt-project-forget root)
+      ;; What still names the model where it was used: a call of it or its
+      ;; YAML entry, in the buffers that the server edited or else in the
+      ;; files.  An edit before a use on its line moves the use, and the
+      ;; server edits every use of a line or none.
+      (setq uses (seq-filter (lambda (item)
+                               (let ((location (xref-item-location item)))
+                                 ;; A use in the renamed file is now in its new one.
+                                 (when (equal (xref-file-location-file location) file)
+                                   (setf (xref-file-location-file location) new))
+                                 (with-temp-buffer
+                                   (if-let* ((buffer (get-file-buffer (xref-file-location-file location))))
+                                       (insert-buffer-substring buffer)
+                                     (insert-file-contents (xref-file-location-file location)))
+                                   (goto-char (point-min))
+                                   (forward-line (1- (xref-location-line location)))
+                                   (forward-char (min (xref-file-location-column location)
+                                                      (- (line-end-position) (point))))
+                                   (and (looking-at (concat (alist-get 'ref dbt-project-call-regexps)
+                                                            "\\|[ \t-]*name:[ \t]*['\"]?\\(?1:[^'\"\n \t]+\\)"))
+                                        (equal (match-string 1) old)))))
+                             uses))
+      (if (not uses)
+          (message "Renamed to %s; save the buffers it edited with C-x s" name)
+        (xref-show-xrefs (lambda () uses) nil)
+        (message "Renamed to %s; save the buffers it edited with C-x s; %d uses still name %s, which dbt lsp leaves"
+                 name (length uses) old)))))
 
 (defun dbt-lsp-format-buffer ()
   "Save the buffer, and format it with the server."
@@ -362,7 +402,7 @@ another model, seed or snapshot of the package."
 
 (defun dbt-lsp-fix-all ()
   "Save the buffer, then fix its lint issues and format it with the server.
-The server offers this with `dbt-lsp-enable-linter' only."
+dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   (interactive)
   (save-buffer)
   (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
@@ -383,6 +423,10 @@ The server offers this with `dbt-lsp-enable-linter' only."
   :server-id 'dbt-lsp
   :library-folders-fn #'dbt-lsp--library-folders
   :initialized-fn #'dbt-lsp--hide-formatting
+  ;; lsp-mode's own formatting and fixes on save would ask for what
+  ;; `dbt-lsp--hide-formatting' hid, and log an error at each save.
+  :after-open-fn (lambda () (setq-local lsp-format-buffer-on-save nil
+                                        lsp-fix-all-on-save nil))
   ;; The server tells of its compilations with notifications of its own;
   ;; lsp-mode already shows their progress, from $/progress.
   :notification-handlers (lsp-ht ("dbt/lspCompileStart" #'ignore)

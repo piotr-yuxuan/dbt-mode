@@ -37,10 +37,13 @@ other options, --target and --fail-fast, go to every command.")
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
   ;; message", then, within a few lines that start no other, " -->
-  ;; FILE:LINE:COLUMN", or " --> FILE" alone.
+  ;; FILE:LINE:COLUMN", or " --> FILE" alone.  An error of the database
+  ;; has no such line: its message ends with the SQL that ran, as
+  ;; "(target/run/PACKAGE/PATH.sql)".
   '((dbt-location
      "^\\[\\(?:error\\|\\(warning\\)\\)\\][^\n]*\n\\(?:\\(?:[^[\n][^\n]*\\)?\n\\)\\{0,3\\}?[ \t]*--> \\([^:\n]+\\)\\(?::\\([0-9]+\\):\\([0-9]+\\)\\)?"
-     2 3 4 (1)))
+     2 3 4 (1))
+    (dbt-database "^\\[error\\][^\n]*(\\([^()\n]+\\.sql\\))$" 1))
   "The errors and warnings of dbt's output.
 For `compilation-error-regexp-alist'.")
 
@@ -110,8 +113,9 @@ See `dbt-cli-option-commands'."
   ["Selection"
    ("-s" "Select" "--select="
     :init-value (lambda (option)
-                  (oset option value (and (dbt-project-root)
-                                          (plist-get (dbt-mode-current-resource) :name)))))
+                  (oset option value (when-let* (((dbt-project-root))
+                                                 (resource (dbt-mode-current-resource)))
+                                       (dbt-mode-resource-selector resource)))))
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
    ("-x" "Exclude" "--exclude=")]
