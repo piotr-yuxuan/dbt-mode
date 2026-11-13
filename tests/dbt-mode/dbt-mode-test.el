@@ -474,7 +474,7 @@ A dangling link among the project's files holds none and stops nothing."
 
 (ert-deftest dbt-mode-cte-query-keeps-what-comes-before-the-with ()
   "What comes before the WITH comes first in a CTE's query, sets in their blocks.
-Unless a Jinja block is open at the WITH, as a legacy snapshot's."
+The tag of a Jinja block open at the WITH, as a legacy snapshot's, does not."
   (let ((before (concat "{# {% set old = 1 %} #}\n{% if target.name == 'prod' %}\n{% set cols = ['a'] %}\n"
                         "{% else %}\n{% set cols = ['a', 'b'] %}\n{% endif %}\n-- {% set commented = 'x' %}\n"
                         "{% set pattern = 'p%' %}\n"))
@@ -485,10 +485,17 @@ Unless a Jinja block is open at the WITH, as a legacy snapshot's."
       (dbt-test-goto "select {%")
       (should (equal (cdr (dbt-mode-cte-query)) (concat before chain "\nselect * from x"))))
     (with-temp-buffer
-      (insert "{% snapshot s %}\n" chain "\nselect * from x\n{% endsnapshot %}\n")
+      (insert "{% snapshot s %}\n{{ config(unique_key='a') }}\n{% set cols = ['a'] %}\n"
+              chain "\nselect * from x\n{% endsnapshot %}\n")
       (dbt-mode)
       (dbt-test-goto "select {%")
-      (should (equal (cdr (dbt-mode-cte-query)) (concat chain "\nselect * from x"))))))
+      (should (equal (cdr (dbt-mode-cte-query))
+                     (concat "\n{{ config(unique_key='a') }}\n{% set cols = ['a'] %}\n" chain "\nselect * from x"))))
+    (with-temp-buffer
+      (insert "{% set cols = ['a'] %}\n{% if execute %}{% if true %}\n" chain "\nselect * from x\n{% endif %}{% endif %}\n")
+      (dbt-mode)
+      (dbt-test-goto "select {%")
+      (should (equal (cdr (dbt-mode-cte-query)) (concat "{% set cols = ['a'] %}\n\n" chain "\nselect * from x"))))))
 
 (ert-deftest dbt-mode-knows-when-no-server-runs ()
   "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."

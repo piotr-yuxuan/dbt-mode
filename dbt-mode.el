@@ -287,9 +287,9 @@ multiline construct, read again whole after a change within it.")
   "Return the name of a CTE and a query of its rows, as a pair.
 The CTE is that named NAME, or else the last that starts before the end
 of the line of point.  The query is the buffer up to the end of that
-CTE, then a select from it; Jinja stays as it is.  The query starts at
-the WITH of the CTE's chain when a Jinja block is open there, as that of
-a snapshot."
+CTE, then a select from it; Jinja stays as it is, but for the tags that
+open a block still open at the WITH of the CTE's chain, as that of a
+snapshot, which the query would not close."
   (let ((case-fold-search t))
     (save-excursion
       (unless (if name
@@ -305,11 +305,14 @@ a snapshot."
                     (let ((state (syntax-ppss)))
                       (or (> (car state) 0) (nth 8 state)))))
         ;; What comes before the WITH defines what the CTE may use, sets in
-        ;; their if blocks included, unless a block opens there, as that of
-        ;; a snapshot does.
-        (cons name (format "%s\nselect * from %s"
-                           (buffer-substring-no-properties (if (cdr (dbt-edit-blocks (point))) (point) (point-min)) end)
-                           name))))))
+        ;; their if blocks included; the tag of a block open there goes.
+        (let ((start (point-min))
+              parts)
+          (dolist (block (reverse (cdr (dbt-edit-blocks (point)))))
+            (push (buffer-substring-no-properties start (nth 1 block)) parts)
+            (setq start (nth 2 block)))
+          (cons name (format "%s%s\nselect * from %s"
+                             (apply #'concat (nreverse parts)) (buffer-substring-no-properties start end) name)))))))
 
 (defconst dbt-mode-macro-call-regexp
   "\\_<\\(?:\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\)?\\(?1:[A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*("
