@@ -7,7 +7,7 @@
 ;; Maintainer: piotr-yuxuan <piotr-yuxuan@users.noreply.github.com>
 ;; URL: https://github.com/piotr-yuxuan/dbt-mode
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (lsp-mode "9.0.0"))
+;; Package-Requires: ((emacs "31.1") (lsp-mode "9.0.0"))
 ;; Keywords: languages, sql, tools
 
 ;; This file is not part of GNU Emacs.
