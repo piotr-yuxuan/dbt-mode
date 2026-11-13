@@ -387,6 +387,37 @@ The output is that of dbt 2.0.9 on a model that selects a missing column."
     (dbt-compilation-mode)
     (should (equal (dbt-test-compilation-messages) '(("target/run/shop/models/marts/badcol.sql" nil nil 2))))))
 
+(ert-deftest dbt-cli-diffs-the-rows-of-a-model-by-the-names-of-its-columns ()
+  "With the real dbt on DuckDB, the data diff shows only the rows that differ, under the model's columns.
+The state's relation has the same columns in another order."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (let ((dbt-executable (getenv "DBT_MODE_TEST_DBT"))
+          (state (expand-file-name "prod-state/" root)))
+      (write-region "select 1 as id, 'a' as name union all select 2, 'b'\n" nil
+                    (expand-file-name "models/diff_here.sql" root))
+      (write-region "select 'a' as name, 1 as id union all select 'c', 3\n" nil
+                    (expand-file-name "models/diff_there.sql" root))
+      (let ((default-directory root))
+        (should (eq 0 (call-process dbt-executable nil nil nil "run" "--profiles-dir" root
+                                    "--select" "diff_here" "diff_there"))))
+      (make-directory state)
+      (write-region (json-encode
+                     `((nodes (model.shop.diff_here
+                               (relation_name
+                                . ,(gethash "relation_name"
+                                            (dbt-project-manifest-node (expand-file-name "target/manifest.json" root)
+                                                                       "model.shop.diff_there")))))))
+                    nil (expand-file-name "manifest.json" state))
+      (with-current-buffer (dbt-test-visit root "models/diff_here.sql")
+        (dbt-data-diff state)
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: diff_here/diff*")) 60)
+          (should (equal (mapcar #'car tabulated-list-format) '("dbt_diff" "id" "name")))
+          (should (equal (sort (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+                               (lambda (a b) (string< (car a) (car b))))
+                         '(("only in dev" "2" "b") ("only in prod-state" "3" "c"))))
+          (kill-buffer))))))
+
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
   "With TERM naming a colour terminal, dbt's JSON reads and its output links.
 Emacs started from a terminal passes its TERM on to dbt, which then
@@ -526,7 +557,6 @@ as it is."
         (should-not (with-current-buffer (messages-buffer)
                       (string-search "your edits since" (buffer-substring start (point-max)))))))))
 
-
 (ert-deftest dbt-cli-formats-a-buffer-saved-while-another-formats ()
   "A buffer saved while another one formats, as by a timer, is formatted after its save."
   (dbt-test-with-project root
@@ -545,7 +575,6 @@ as it is."
         (execute-kbd-macro (kbd "C-c C-q"))
         (dbt-test-formatted)
         (should (string-prefix-p "-- formatted\n-- other\n" (dbt-test-file-text root "models/marts/customers.sql")))))))
-
 
 (ert-deftest dbt-cli-stops-a-format-that-runs-too-long ()
   "A save waits for a running dbt format `dbt-cli-format-deadline' seconds at most, then stops it; the save stands."
@@ -566,7 +595,6 @@ as it is."
         (dbt-test-message-since start "dbt format ran over 0\\.5 seconds: stopped")
         (should-not (buffer-modified-p))
         (should (string-prefix-p "-- typed\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
-
 
 (ert-deftest dbt-cli-formats-each-save-after-the-one-before ()
   "A save waits for the format that runs: an older format never writes over a newer save.
