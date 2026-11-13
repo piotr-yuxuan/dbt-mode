@@ -69,14 +69,29 @@ dbt writes the first four; installed packages are indexed apart.")
 (defun dbt-project-root (&optional file)
   "Return the root of the dbt project that holds FILE, or nil.
 FILE defaults to the visited file, or else `default-directory'.  The root
-is the outermost directory holding a dbt_project.yml, as each package
-installed under dbt_packages has one of its own."
+is the nearest directory holding a dbt_project.yml, unless that project
+is a package of the project above it: installed under its
+packages-install-path or dbt_internal_packages, or a local package that
+it declares.  A project nested for another reason, such as the
+integration_tests of a package, is a project of its own."
   (let ((directory (or file buffer-file-name default-directory))
-        root)
+        roots)
+    ;; ROOTS holds the projects above FILE, the outermost first, then the
+    ;; innermost first once reversed.
     (while-let ((found (and directory (locate-dominating-file directory dbt-project-file))))
-      (setq root (file-name-as-directory (expand-file-name found))
-            directory (file-name-directory (directory-file-name root))))
-    root))
+      (push (file-name-as-directory (expand-file-name found)) roots)
+      (setq directory (file-name-directory (directory-file-name (car roots)))))
+    (setq roots (nreverse roots))
+    (while (and (cdr roots)
+                (let ((packages (dbt-project-packages (cadr roots))))
+                  (or (member (file-name-directory (directory-file-name (car roots)))
+                              (list (file-name-as-directory
+                                     (expand-file-name (plist-get (nth 2 (car packages)) :packages-install-path)
+                                                       (cadr roots)))
+                                    (expand-file-name "dbt_internal_packages/" (cadr roots))))
+                      (member (car roots) (mapcar #'cadr (cdr packages))))))
+      (pop roots))
+    (car roots)))
 
 ;;;; Reading YAML
 

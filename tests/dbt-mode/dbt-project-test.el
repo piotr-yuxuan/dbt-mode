@@ -109,13 +109,34 @@ An empty list is empty, as dbt keeps its default for a missing key only."
     (dbt-project-forget root)
     (should (dbt-project-entities root '(model) "orders"))))
 
-(ert-deftest dbt-project-root-is-the-outermost-project ()
-  "A package's file belongs to the project that installed it."
+(ert-deftest dbt-project-root-of-a-package-is-the-project-using-it ()
+  "A package's file belongs to the project that installed or declared it."
   (dbt-test-with-project root
     (should (equal (dbt-project-root (expand-file-name "dbt_packages/shop_utils/macros/is_positive.sql" root))
                    root))
     (should (equal (dbt-project-root (expand-file-name "models/marts/" root)) root))
-    (should-not (dbt-project-root temporary-file-directory))))
+    (should-not (dbt-project-root temporary-file-directory))
+    (dolist (directory '("dbt_internal_packages/dbt_adapters/" "local_packages/vocab/"))
+      (make-directory (expand-file-name directory root) t)
+      (write-region "name: inner\n" nil (expand-file-name (concat directory "dbt_project.yml") root)))
+    (write-region "packages:\n  - local: local_packages/vocab\n" nil (expand-file-name "packages.yml" root))
+    (dbt-project-forget root)
+    (dolist (directory '("dbt_internal_packages/dbt_adapters/" "local_packages/vocab/"))
+      (should (equal (dbt-project-root (expand-file-name (concat directory "macros/m.sql") root)) root)))))
+
+(ert-deftest dbt-project-root-of-a-nested-project-is-its-own ()
+  "A project nested in another but not one of its packages is a project apart."
+  (dbt-test-with-project root
+    (let ((tests (expand-file-name "integration_tests/" root)))
+      (make-directory (expand-file-name "models" tests) t)
+      (write-region "name: shop_tests\n" nil (expand-file-name "dbt_project.yml" tests))
+      (write-region "packages:\n  - local: ../\n" nil (expand-file-name "packages.yml" tests))
+      (write-region "select 1" nil (expand-file-name "models/test_base.sql" tests))
+      (write-region "select * from {{ ref('test_base') }}" nil (expand-file-name "models/test_uses.sql" tests))
+      (should (equal (dbt-project-root (expand-file-name "models/test_uses.sql" tests)) tests))
+      (should (equal (plist-get (car (dbt-project-resolve tests '(:kind ref :name "test_base"))) :file)
+                     (expand-file-name "models/test_base.sql" tests)))
+      (should (equal (dbt-project-root (expand-file-name "models/marts/orders.sql" root)) root)))))
 
 (defun dbt-test-entity (root kind name)
   "Return the entity of ROOT of KIND named NAME, as (KIND NAME PACKAGE FILE LINE)."
