@@ -577,5 +577,24 @@
     (dbt-test-visit root "models/marts/customers.sql")
     (should-error (dbt-visit-tests) :type 'user-error)))
 
+(ert-deftest dbt-mode-visits-the-sql-of-the-last-run ()
+  "With a prefix, C-c C-v shows what the last run ran, or says there was none."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-visit-compiled t) :type 'user-error)
+    (let ((run (expand-file-name "target/run/shop/models/marts/orders.sql" root)))
+      (make-directory (file-name-directory run) t)
+      (write-region "create table x as select 1" nil run)
+      (dbt-visit-compiled t)
+      (should (get-file-buffer run))
+      (with-current-buffer (get-file-buffer run)
+        (should buffer-read-only)))))
+
+(ert-deftest dbt-mode-binds-the-editing-commands ()
+  "The keys that the README lists run their commands."
+  (dolist (binding '(("C-c /" . dbt-close-block) ("C-c %" . dbt-jump-to-matching-tag) ("C-c C-t" . dbt-visit-tests)
+                     ("C-c C-w" . dbt-copy-relation) ("C-c M-w" . dbt-copy-build-command) ("C-c C-n" . dbt-new)))
+    (should (eq (keymap-lookup dbt-mode-map (car binding)) (cdr binding)))))
+
 (provide 'dbt-mode-test)
 ;;; dbt-mode-test.el ends here

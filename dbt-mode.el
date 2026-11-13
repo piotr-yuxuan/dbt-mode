@@ -538,12 +538,14 @@ or not a language server runs."
                         entries))
      nil)))
 
-(defun dbt-visit-compiled ()
+(defun dbt-visit-compiled (&optional run)
   "Show the SQL that the current model compiles to.
 With dbt lsp, the buffer is saved and the server compiles it.
-Otherwise, show what the last `dbt compile' or `dbt run' wrote."
-  (interactive)
-  (if (dbt-mode-server-p)
+Otherwise, show what the last `dbt compile' or `dbt run' wrote.  With
+RUN, interactively a prefix argument, show what the last `dbt run' or
+`dbt build' ran, its DDL included."
+  (interactive "P")
+  (if (and (dbt-mode-server-p) (not run))
       (dbt-lsp-compile-file)
     (let* ((root (dbt-mode--root))
            (resource (or (dbt-mode-current-resource) (user-error "No model here")))
@@ -551,7 +553,7 @@ Otherwise, show what the last `dbt compile' or `dbt run' wrote."
            ;; package, at its path from the root of the project.
            (file (expand-file-name
                   (file-relative-name (plist-get resource :file) root)
-                  (expand-file-name (concat "compiled/" (plist-get resource :package))
+                  (expand-file-name (concat (if run "run/" "compiled/") (plist-get resource :package))
                                     (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
            ;; dbt 2 writes that of a snapshot in a directory of that path,
            ;; named after the snapshot.
@@ -559,7 +561,7 @@ Otherwise, show what the last `dbt compile' or `dbt run' wrote."
                      (expand-file-name (concat (plist-get resource :name) ".sql") file)
                    file)))
       (unless (file-regular-p file)
-        (user-error "Not compiled yet: run dbt compile, or start dbt lsp"))
+        (user-error (if run "Not run yet: run dbt run or dbt build" "Not compiled yet: run dbt compile, or start dbt lsp")))
       (with-current-buffer (find-file-noselect file)
         (read-only-mode 1)
         (pop-to-buffer (current-buffer))))))
@@ -711,6 +713,7 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
     ["Tests of this model" dbt-visit-tests]
+    ["SQL of the last run" (dbt-visit-compiled t)]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     "---"
