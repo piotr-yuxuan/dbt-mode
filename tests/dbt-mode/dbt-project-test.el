@@ -302,6 +302,20 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "model.shop.from_source") '("source.shop.raw.raw_orders")))
       (should (equal (funcall parents "seed.shop.raw_orders") nil)))))
 
+(ert-deftest dbt-project-leaves-jinja-comments-out ()
+  "A macro or a call within {# #} is not there; lines after a comment keep their number."
+  (dbt-test-with-project root
+    (write-region "{# {% macro hidden(x) %}{% endmacro %}\n\n#}\n{% macro after(x) %}{{ x }}{% endmacro %}\n" nil
+                  (expand-file-name "macros/commented.sql" root))
+    (write-region "{# {{ ref('stg_customers') }} #}\nselect * from {{ ref('stg_orders') }}" nil
+                  (expand-file-name "models/commented.sql" root))
+    (should-not (dbt-project-entities root '(macro) "hidden"))
+    (should (equal (dbt-test-entity root 'macro "after") '(macro "after" "shop" "macros/commented.sql" 4)))
+    (should (equal (plist-get (seq-find (lambda (node) (equal (plist-get node :id) "model.shop.commented"))
+                                        (dbt-project-graph root))
+                              :parents)
+                   '("model.shop.stg_orders")))))
+
 (ert-deftest dbt-project-graph-grows-with-the-calls ()
   "The graph costs about the same per call however large the project.
 Eight times the models, each with three calls, take about eight times

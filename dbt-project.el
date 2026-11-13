@@ -364,8 +364,9 @@ Each is a target plist (:kind KIND :qualifier QUALIFIER :name NAME), as
   "Return what FILE defines and calls, as (:entities ENTITIES :calls CALLS).
 ENTITIES are its Jinja blocks and, in a YAML file, its entries, as
 entities without :package and :file; CALLS are as `dbt-project-calls'
-returns them.  FILE is read again only when its modification time or
-its size changed.  A file that cannot be read holds nothing."
+returns them.  What a Jinja comment holds is left out.  FILE is read
+again only when its modification time or its size changed.  A file that
+cannot be read holds nothing."
   (let* ((attributes (file-attributes (file-chase-links file)))
          (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)))
          (cached (gethash file dbt-project--files)))
@@ -373,6 +374,12 @@ its size changed.  A file that cannot be read holds nothing."
         (cdr cached)
       (with-temp-buffer
         (ignore-error file-error (insert-file-contents file))
+        ;; Blank each {# #} comment, newlines kept, so that what follows
+        ;; keeps its line.
+        (while (search-forward "{#" nil t)
+          (let ((start (match-beginning 0)))
+            (when (search-forward "#}" nil t)
+              (insert (replace-regexp-in-string "[^\n]" " " (delete-and-extract-region start (point)))))))
         (let (entities)
           (pcase-dolist (`(,kind . ,regexp) dbt-project-block-regexps)
             (goto-char (point-min))
