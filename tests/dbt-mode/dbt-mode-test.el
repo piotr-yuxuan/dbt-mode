@@ -620,7 +620,7 @@ A name alone is the latest version, as for `ref'."
     (should (equal (dbt-mode-parse-selector "dim.v2") '("dim" . "2")))
     (should (equal (dbt-mode-parse-selector "dim") '("dim")))
     (let ((completing-read-function (lambda (_prompt collection &rest _) (all-completions "dim" collection))))
-      (should (equal (sort (dbt-mode-read-resource "Lineage of: ") #'string<) '("dim.v1" "dim.v2"))))
+      (should (equal (sort (dbt-mode-read-resource "Lineage of: ") #'string<) '("dim" "dim.v1" "dim.v2"))))
     (dbt-lineage "dim.v1")
     (with-current-buffer "*dbt lineage: dim.v1*"
       (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
@@ -633,7 +633,11 @@ A name alone is the latest version, as for `ref'."
     (goto-char (point-max))
     (insert "\n")
     (dbt-insert-ref "dim.v1")
-    (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))))
+    (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))
+    ;; The model itself, unpinned, floats to its latest version.
+    (insert "\n")
+    (dbt-insert-ref "dim")
+    (should (looking-back "^{{ ref('dim') }}" (line-beginning-position)))))
 
 (ert-deftest dbt-mode-offers-no-analysis-as-a-resource ()
   "In an analysis, the resource read has no default: an analysis has no lineage."

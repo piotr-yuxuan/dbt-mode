@@ -574,11 +574,14 @@ nil for a bare name."
 
 (defun dbt-mode-read-resource (prompt &optional no-default)
   "Read a model, seed or snapshot with PROMPT, as its selector.
-A version of a model is NAME.vVERSION.  The default is the resource of
-the current buffer, unless NO-DEFAULT, or unless it is none of these."
-  (let ((resource (dbt-mode-current-resource)))
-    (completing-read prompt (dbt-mode--candidates (dbt-project-entities (dbt-mode--root) '(model seed snapshot))
-                                                  #'dbt-mode-resource-selector)
+A version of a model is NAME.vVERSION, and NAME is the model itself, its
+latest version, as for an unpinned `ref'.  The default is the resource
+of the current buffer, unless NO-DEFAULT, or unless it is none of these."
+  (let ((resource (dbt-mode-current-resource))
+        (entities (dbt-project-entities (dbt-mode--root) '(model seed snapshot))))
+    (completing-read prompt (append (dbt-mode--candidates entities #'dbt-mode-resource-selector)
+                                    (dbt-mode--candidates (seq-filter (lambda (entity) (plist-get entity :version))
+                                                                      entities)))
                      nil t nil nil (and (not no-default)
                                         (memq (plist-get resource :kind) '(model seed snapshot))
                                         (dbt-mode-resource-selector resource)))))
