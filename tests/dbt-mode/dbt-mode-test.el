@@ -69,7 +69,9 @@
 Jinja's rules see that /- and -* start no comment."
   (dolist (text '("select revenue/-1 as neg, {# it's old #} b\nfrom t\nselect 2 as z\n"
                   "select revenue/-1 as neg, {{ log(\"it's\") }} b\nfrom t\nselect 2 as z\n"
-                  "select 1 as a -*\n{# it's old #}\nfrom t\nselect 2 as z\n"))
+                  "select 1 as a -*\n{# it's old #}\nfrom t\nselect 2 as z\n"
+                  ;; A banner after a Jinja comment holding a quote closes.
+                  "{# it's #}\n/*----*/\nfrom t\nselect 2 as z\n"))
     (with-temp-buffer
       (insert text)
       (dbt-mode)

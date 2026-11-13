@@ -242,19 +242,14 @@ makes no tag, so that it does not swallow the next tag's closer."
       (,(dbt-mode-cte-regexp) (1 'font-lock-function-name-face))))
   "Font lock of the Jinja tags and of the CTEs, before that of `sql-mode'.")
 
-(defconst dbt-mode--sql-comment-starters
+(defconst dbt-mode--syntax-propertize
   (syntax-propertize-rules
+   ;; As `sql-mode', keep `/-' and `-*' from starting a comment, in the
+   ;; pass of the Jinja rules, so that each decision sees those before it.
    ("\\(/-\\)" (1 "."))
    ("\\(-\\*\\)"
     (1 (unless (ppss-comment-depth (save-excursion (syntax-ppss (match-beginning 1))))
-         (string-to-syntax ".")))))
-  "Keep `/-' and `-*' from starting a comment, as `sql-mode' does.
-The Jinja rules ask `syntax-ppss' whether a `{#' or a `{{' sits in a
-comment, so these come before them; the rest of `sql-mode''s rules,
-about strings, come after.")
-
-(defconst dbt-mode--syntax-propertize
-  (syntax-propertize-rules
+         (string-to-syntax "."))))
    ("\\({\\)#"
     (1 (unless (nth 8 (save-excursion (syntax-ppss (match-beginning 1))))
          (string-to-syntax "!"))))
@@ -272,6 +267,7 @@ about strings, come after.")
                                            (point))
                                  'syntax-multiline t))))))))
   "Make each Jinja comment `{# #}' a comment, and the strings of a tag strings.
+As in `sql-mode', `/-' and `-*' start no comment.
 A comment is fenced by generic comment fences, each decided alone, from
 the state before it: `{#' opens a comment outside a string or a comment,
 and `#}' closes the comment that a fence opened.  So the comment is one
@@ -863,14 +859,12 @@ commentary of dbt-mode.el for the rest.
 
 \\{dbt-mode-map}"
   (let ((sql-propertize syntax-propertize-function))
-    ;; Jinja first, as dbt renders it before SQL is read, but for the SQL
-    ;; that starts no comment, which Jinja's rules must see; then the
-    ;; rules of `sql-mode', which must not meet the states that
-    ;; `syntax-ppss' cached without their own properties.
+    ;; Jinja first, as dbt renders it before SQL is read, with the SQL
+    ;; that starts no comment; then the rest of `sql-mode''s rules, which
+    ;; must not meet the states that `syntax-ppss' cached without their
+    ;; own properties.
     (setq-local syntax-propertize-function
                 (lambda (start end)
-                  (funcall dbt-mode--sql-comment-starters start end)
-                  (syntax-ppss-flush-cache start)
                   (funcall dbt-mode--syntax-propertize start end)
                   (syntax-ppss-flush-cache start)
                   (funcall sql-propertize start end))))
