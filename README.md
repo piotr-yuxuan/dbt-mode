@@ -75,12 +75,13 @@ Rows and compiled SQL:
   when dbt writes it. `dbt-compiled-diff` shows how it differs from the
   compiled SQL of another state, such as that of `dbt compile --target-path
   STATE` on main, or production's artifacts;
-- `dbt-data-diff` compares the rows of the model with those of its relation
-  in another state, such as production's artifacts: one query on the
-  default target gives the rows that each side lacks, `{{ dbt.except() }}`
-  as dbt writes it for the adapter, in a first column `dbt_diff` naming the
-  side, in the grid of the rows. Both relations must be readable from the
-  default target's connection, with the same columns;
+- `dbt-data-diff` compares the rows of the model, as last built on the
+  default target, with those of its relation in another state, such as
+  production's artifacts: one query on the default target gives the rows
+  that each side lacks, `{{ dbt.except() }}` as dbt writes it for the
+  adapter, in a first column `dbt_diff` naming the side, in the grid of the
+  rows. The columns are the model's, by name, in any order on the other
+  side, which must have them all and be readable from the same connection;
 - in Org, `C-c C-c` on a `#+begin_src dbt` block gives its rows as a table,
   or its compiled SQL with `:compile yes`; `:limit`, `:target`, `:var`,
   passed as dbt's `--vars`, and Babel's `:dir` apply; each cell is on one
@@ -92,13 +93,15 @@ Rows and compiled SQL:
   a block does.
 
 The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
-the project from the artifacts of your own runs, which it never writes: the
-nodes that failed, errored or warned in `target/run_results.json` with
-dbt's message, the ten slowest nodes, and the sources that
-`target/sources.json` says are stale, each section saying which command
-wrote its file and how long ago. `RET` visits a node's file, `TAB` folds a
-section, `g` reads the files again, and `f` runs `dbt source freshness`,
-then reads them again.
+the project from the artifacts of your own runs, which it never writes, and
+which dbt-mode's previews, diffs and formats leave as they are: the nodes
+that errored, failed, warned or were skipped in `target/run_results.json`,
+the most severe first, with dbt's message to its cause and a test's
+failing rows, the ten slowest nodes, and the sources that
+`target/sources.json` says are stale or failed, each section saying which
+command wrote its file and how long ago. `RET` visits a node's file, `TAB`
+folds a section, `n` and `p` move by line, `g` reads the files again, and
+`f` runs `dbt source freshness`, then reads them again once it ends.
 
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
@@ -249,13 +252,17 @@ format` and `dbt lint`. lsp-mode's `lsp-format-buffer-on-save` and
 `lsp-fix-all-on-save` are turned off in the buffers of dbt lsp, where they
 could only fail.
 
-`C-c C-q`, `dbt-format-buffer`, saves the buffer, then formats it: with dbt
-lsp by the server, which leaves the buffer modified; without one by `dbt
-format FILE`, which formats the saved file, the buffer then showing the
-result unless you modified it meanwhile. `dbt-format-on-save-mode`, a
-minor mode to turn on from `dbt-mode-hook`, formats after each save and
-saves again when that changed the buffer; a failure to format is a
-message, and the save stands.
+`C-c C-q`, `dbt-format-buffer`, saves the buffer, then formats it while you
+go on: with dbt lsp by the server, whose edits leave the buffer modified;
+without one by `dbt format FILE`, which formats the saved file, the buffer
+then showing the result. Text you type meanwhile wins the next save, which
+asks nothing; a save waits for a format that runs, so that an older one
+never writes over it. dbt may format the file and still fail on another
+file of the project: the buffer shows the file, and dbt's error is the
+message. `dbt-format-on-save-mode`, a minor mode to turn on from
+`dbt-mode-hook`, formats after each save, and with dbt lsp saves again
+when that changed the buffer; a failure to format is a message, and the
+save stands.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.
