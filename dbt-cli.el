@@ -21,11 +21,6 @@
 
 (declare-function dbt-mode-current-resource "dbt-mode")
 
-(defcustom dbt-preview-limit 50
-  "The number of rows that a preview of a model or a query shows."
-  :type 'natnum
-  :group 'dbt)
-
 (defconst dbt-cli-selecting-commands
   '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint" "clone"
     "freshness")
