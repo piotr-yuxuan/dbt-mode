@@ -8,10 +8,10 @@
 ;;; Commentary:
 
 ;; `dbt-dashboard' shows what your own runs left in the target path,
-;; read and never written: the nodes that failed, errored or warned in
-;; run_results.json, with dbt's message; the slowest of them; the sources
-;; that sources.json says are stale.  Each section says which command
-;; wrote its file, and when.  RET visits a node's file, TAB folds a
+;; read and never written: the nodes that failed, errored, warned or were
+;; skipped in run_results.json, with dbt's message; the slowest of them;
+;; the sources that sources.json says are stale.  Each section says which
+;; command wrote its file, and when.  RET visits a node's file, TAB folds a
 ;; section, g reads the files again, and f runs `dbt source freshness',
 ;; then reads them again once it ends.
 
@@ -171,10 +171,10 @@ It runs on the default target, which a protected target asks first, as
 ;;;###autoload
 (defun dbt-dashboard ()
   "Show the state of the current project, from the artifacts of your runs.
-The nodes that failed, errored or warned in target/run_results.json,
-with dbt's message, the slowest nodes, and the sources that
-target/sources.json says are stale; each section says when dbt wrote
-its file.  See `dbt-dashboard-mode'."
+The nodes that failed, errored, warned or were skipped in
+target/run_results.json, with dbt's message, the slowest nodes, and the
+sources that target/sources.json says are stale; each section says when
+dbt wrote its file.  See `dbt-dashboard-mode'."
   (interactive)
   (let ((root (or (dbt-project-root) (user-error "Not in a dbt project"))))
     (with-current-buffer (get-buffer-create (format "*dbt dashboard: %s*" (dbt-project-name root)))
