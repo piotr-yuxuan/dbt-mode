@@ -170,9 +170,11 @@ lenses, `lsp-semantic-tokens-enable` the server's semantic tokens.
 `dbt lsp` 2.0.9 formats the file on disk rather than the buffer, and so does
 its linter's fix-all code action: their edits would corrupt unsaved changes.
 dbt-mode hides both from lsp-mode. `dbt-lsp-format-buffer` saves the buffer
-first, then formats it; `dbt-lsp-fix-all`, with `dbt-lsp-enable-linter`,
-saves, then fixes and formats; `dbt-dispatch` runs `dbt format` and `dbt
-lint`.
+first, then formats it; `dbt-lsp-fix-all` saves, then fixes and formats,
+whether or not `dbt-lsp-enable-linter` is on; `dbt-dispatch` runs `dbt
+format` and `dbt lint`. lsp-mode's `lsp-format-buffer-on-save` and
+`lsp-fix-all-on-save` are turned off in the buffers of dbt lsp, where they
+could only fail.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.

@@ -32,7 +32,7 @@
 ;;   changes: this client hides formatting from lsp-mode, and this
 ;;   command saves the buffer first;
 ;; - `dbt-lsp-fix-all' fixes the lint issues of the buffer and formats it,
-;;   with the linter on, and saves it first likewise.
+;;   and saves it first likewise.
 ;;
 ;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
 ;; project a folder of the lsp session before lsp-mode starts, so that
@@ -368,7 +368,7 @@ another model, seed or snapshot of the package."
 
 (defun dbt-lsp-fix-all ()
   "Save the buffer, then fix its lint issues and format it with the server.
-The server offers this with `dbt-lsp-enable-linter' only."
+dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   (interactive)
   (save-buffer)
   (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
@@ -389,6 +389,10 @@ The server offers this with `dbt-lsp-enable-linter' only."
   :server-id 'dbt-lsp
   :library-folders-fn #'dbt-lsp--library-folders
   :initialized-fn #'dbt-lsp--hide-formatting
+  ;; lsp-mode's own formatting and fixes on save would ask for what
+  ;; `dbt-lsp--hide-formatting' hid, and log an error at each save.
+  :after-open-fn (lambda () (setq-local lsp-format-buffer-on-save nil
+                                        lsp-fix-all-on-save nil))
   ;; The server tells of its compilations with notifications of its own;
   ;; lsp-mode already shows their progress, from $/progress.
   :notification-handlers (lsp-ht ("dbt/lspCompileStart" #'ignore)

@@ -221,6 +221,18 @@ Its one code action, which fixes and formats, is hidden too."
       (should-not (string-match-p "Unknown notification"
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
+(ert-deftest dbt-lsp-turns-off-lsp-mode-s-formatting-on-save ()
+  "Set for other languages, lsp-mode's formatting and fixes on save log no error here."
+  (let ((lsp-format-buffer-on-save t)
+        (lsp-fix-all-on-save t))
+    (dbt-lsp-test-with-server root nil
+      (should-not lsp-format-buffer-on-save)
+      (should-not lsp-fix-all-on-save)
+      (insert " ")
+      (save-buffer)
+      (should-not (with-current-buffer (messages-buffer)
+                    (string-search "before-save" (buffer-substring dbt-lsp-test-messages-start (point-max))))))))
+
 (ert-deftest dbt-lsp-leaves-xref-to-dbt-mode-where-it-resolves ()
   "With the server, M-. and M-? on a ref are dbt-mode's; elsewhere, the server's."
   (dbt-lsp-test-with-server root nil
