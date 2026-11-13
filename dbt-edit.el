@@ -210,6 +210,25 @@ within it.  For `indent-line-function'."
       (dbt-edit--indent (dbt-edit-blocks (line-beginning-position)))
     (save-excursion (dbt-edit--indent (dbt-edit-blocks (line-beginning-position))))))
 
+(defun dbt-edit-indent-region (start end)
+  "Indent the lines from START to END that hold text.
+They indent as `dbt-edit-indent-line' indents them.  The Jinja blocks
+are read once, as markers, which follow the changes of indentation.
+For `indent-region-function'."
+  (let* ((end (copy-marker end))
+         (blocks (mapcar (lambda (block) (cons (car block) (mapcar #'copy-marker (cdr block))))
+                         (let ((blocks (dbt-edit-blocks end))) (append (car blocks) (cdr blocks))))))
+    (save-excursion
+      (goto-char start)
+      (unwind-protect
+          (while (< (point) end)
+            (unless (looking-at-p "[ \t]*$")
+              (dbt-edit--indent (list blocks)))
+            (forward-line 1))
+        (dolist (block blocks)
+          (mapc (lambda (marker) (set-marker marker nil)) (cdr block)))
+        (set-marker end nil)))))
+
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.
 On a blank line, the tag is indented as its opening tag."

@@ -297,5 +297,23 @@ orders.sql does not indent the body of its block; dbt-mode does."
     (should (equal (dbt-test-indented text)
                    (string-replace "\n    where orders" "\n        where orders" text)))))
 
+(ert-deftest dbt-edit-indents-a-large-model-at-once ()
+  "C-x h C-M-\\ indents a model of 2,000 lines, with a Jinja block in each CTE, in well under 2 s."
+  (let ((text (with-temp-buffer
+                (insert "with ")
+                (dotimes (cte 40)
+                  (insert (format "%scte_%d as (\nselect\n" (if (> cte 0) ",\n" "") cte))
+                  (dotimes (column 40)
+                    (insert (format "col_%d,\n" column)))
+                  (insert "{% if is_incremental() %}\nupdated_at,\n{% endif %}\nid\nfrom {{ ref('x') }}\n)"))
+                (insert "\nselect * from cte_39\n")
+                (buffer-string))))
+    (dbt-test-with-window text
+      (let ((start (float-time)))
+        (dbt-test-keys "C-x h C-M-\\")
+        (should (< (- (float-time) start) 2.0)))
+      (goto-char (point-min))
+      (should (search-forward "\n        col_39,\n    {% if is_incremental() %}\n        updated_at,\n" nil t)))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
