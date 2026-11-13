@@ -80,7 +80,7 @@ says how long ago dbt wrote FILE, or that it holds no results."
          (name (lambda (result) (dbt-lineage-label (format "%s" (gethash "unique_id" result)))))
          ;; dbt's message, to its cause: a database error says it second.
          (said (lambda (result key)
-                 (string-join (seq-take (split-string (format "%s" (gethash key result)) "\n" t "[ \t]+") 2)
+                 (string-join (seq-take (split-string (format "%s" (or (gethash key result) "")) "\n" t "[ \t]+") 2)
                               ": "))))
     (erase-buffer)
     (dbt-dashboard--section

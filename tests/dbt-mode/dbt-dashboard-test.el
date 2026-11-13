@@ -17,8 +17,8 @@
   "Write in ROOT's target the artifacts of a failing build and of freshness.
 They have the shape of dbt 2.0.9's: a warned test, a failed one with its
 failing rows, an errored model whose message gives its cause second, a
-model of a package, a skipped node, statuses of freshness capitalised,
-a freshness that failed."
+model of a package, a skipped node, one with no message, statuses of
+freshness capitalised, a freshness that failed."
   (let ((target (expand-file-name "target" root)))
     (make-directory target t)
     (write-region
@@ -35,6 +35,8 @@ a freshness that failed."
                      (message . "Error") (failures . 1))
                     ((status . "skipped") (unique_id . "model.shop.customers") (execution_time . 0)
                      (message . "Skipped"))
+                    ((status . "skipped") (unique_id . "test.shop.not_null_customers_customer_id.5c9bf9911d")
+                     (execution_time . 0) (message))
                     ((status . "error") (unique_id . "model.shop_utils.util") (execution_time . 0.75)
                      (message . "Compilation Error"))
                     ((status . "pass") (unique_id . "test.shop.unique_stg_orders_order_id.e3b841c71a")
@@ -86,14 +88,15 @@ error; a missing file says so."
       (let ((lines (dbt-test-dashboard-lines)))
         (should (string-match-p "\\`Failed, warned or skipped in dbt build, from run_results.json, written [0-9]+ seconds? ago\\'"
                                 (nth 0 lines)))
-        (should (equal (seq-take (cdr lines) 6)
+        (should (equal (seq-take (cdr lines) 7)
                        '("  error   orders  Database Error in model orders (target/run/shop/models/marts/orders.sql): Catalog Error: Table with name nowhere does not exist!"
                          "  error   util  Compilation Error"
                          "  fail    assert_positive_amount  Error, 1 failing rows"
                          "  warn    not_null_stg_orders_order_id.81cfe2fe64  Warn, 2 failing rows"
                          "  skipped customers  Skipped"
+                         "  skipped not_null_customers_customer_id.5c9bf9911d  "
                          "")))
-        (should (equal (seq-take (nthcdr 8 lines) 3)
+        (should (equal (seq-take (nthcdr 9 lines) 3)
                        '("     1.50 s  orders  error" "     0.75 s  util  error" "")))
         (should (member "  warn    raw.raw_orders  loaded 2018-01-04T00:00:00Z, 3235 days ago" lines))
         (should (member "  runtime error events.page_views  Catalog Error: Table page_views does not exist" lines))
