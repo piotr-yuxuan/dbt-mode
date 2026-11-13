@@ -97,7 +97,9 @@ lsp-mode calls it with `default-directory' at the root of the workspace,
 in the buffer that starts it.  With `dbt-lsp-proxy', dbt-lsp-plus runs
 it, as `dbt-lsp-plus -- COMMAND'."
   (append (and dbt-lsp-proxy (executable-find "dbt-lsp-plus") (list "dbt-lsp-plus" "--"))
-          (list dbt-executable "lsp" "--project-dir"
+          ;; dbt-lsp-plus runs the server as given, from PATH, not
+          ;; `exec-path'.
+          (list (dbt-project-executable) "lsp" "--project-dir"
                 (directory-file-name (or (and buffer-file-name (dbt-project-root buffer-file-name))
                                          (dbt-project-root default-directory)
                                          default-directory)))

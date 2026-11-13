@@ -289,7 +289,11 @@ dbt-lsp-plus runs the server, given after --, when `dbt-lsp-proxy' is on."
           (dbt-test-goto "raw_orders')")
           (should (eq (xref-find-backend) 'xref-lsp))
           (dbt-test-goto "ref('stg_orders')" 6)
-          (should (eq (xref-find-backend) 'dbt)))
+          (should (eq (xref-find-backend) 'dbt))
+          ;; dbt, as found on exec-path, which dbt-lsp-plus does not search.
+          (let ((dbt-executable (file-name-nondirectory dbt-lsp-test-dbt))
+                (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
+            (should (equal (seq-take (dbt-lsp--command) 3) (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))))
       (delete-directory bin t))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
