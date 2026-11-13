@@ -442,8 +442,15 @@ dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   :initialized-fn #'dbt-lsp--hide-formatting
   ;; lsp-mode's own formatting and fixes on save would ask for what
   ;; `dbt-lsp--hide-formatting' hid, and log an error at each save.
-  :after-open-fn (lambda () (setq-local lsp-format-buffer-on-save nil
-                                        lsp-fix-all-on-save nil))
+  :after-open-fn (lambda ()
+                   (setq-local lsp-format-buffer-on-save nil
+                               lsp-fix-all-on-save nil)
+                   ;; Once no server serves the buffer, nothing compiles it.
+                   (add-hook 'lsp-unconfigure-hook
+                             (lambda ()
+                               (setq dbt-mode-compiling nil)
+                               (force-mode-line-update))
+                             nil t))
   ;; The server tells of its compilations with notifications of its own,
   ;; which the mode line shows; lsp-mode shows their progress, from
   ;; $/progress.

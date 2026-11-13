@@ -222,15 +222,22 @@ Its one code action, which fixes and formats, is hidden too."
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
 (ert-deftest dbt-lsp-says-in-the-mode-line-when-the-server-compiles ()
-  "While the server compiles, as it notifies, the mode line says so."
+  "While the server compiles, as it notifies, the mode line says so; once it stops, no more.
+A start, background or not, says so; a completion ends it.  The
+notifications come before the answer to a later request."
   (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileStart"]))
     (dbt-test-wait (lambda () dbt-mode-compiling))
     ;; In batch, `format-mode-line' formats nothing: what it would show,
     ;; kept within the spinner that lsp-mode adds around it.
     (should (string-search "(dbt-mode-compiling \" compiling\")" (format "%S" mode-line-process))))
-  (dbt-lsp-test-with-server root nil
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileStart" "dbt/lspCompileComplete"]))
     (lsp-request "textDocument/hover" (lsp--text-document-position-params))
-    (should-not dbt-mode-compiling)))
+    (should-not dbt-mode-compiling))
+  (dbt-lsp-test-with-server root '(("$notifications" . ["dbt/lspCompileComplete" "dbt/lspBackgroundCompileStart"]))
+    (lsp-request "textDocument/hover" (lsp--text-document-position-params))
+    (should dbt-mode-compiling)
+    (lsp-workspace-shutdown (dbt-lsp-workspace))
+    (dbt-test-wait (lambda () (not dbt-mode-compiling)))))
 
 (ert-deftest dbt-lsp-turns-off-lsp-mode-s-formatting-on-save ()
   "Set for other languages, lsp-mode's formatting and fixes on save log no error here."
