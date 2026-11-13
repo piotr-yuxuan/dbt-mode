@@ -274,7 +274,10 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ("." dbt-cli-again
      :description (lambda ()
                     (let ((last (gethash (dbt-project-root) dbt-cli--last)))
-                      (if last (format "Again: %s" (string-join (cons (car last) (cdr last)) " ")) "Again"))))]])
+                      (if last
+                          (truncate-string-to-width (format "Again: %s" (string-join (cons (car last) (cdr last)) " "))
+                                                    100 nil nil "...")
+                        "Again"))))]])
 
 (provide 'dbt-cli)
 ;;; dbt-cli.el ends here

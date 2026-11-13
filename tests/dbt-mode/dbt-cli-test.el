@@ -174,7 +174,13 @@ quote counts as it is; a commit on main after the branch does not."
       (let ((buffer (dbt-cli-again)))
         (with-current-buffer buffer
           (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
-          (should (string-match-p "^arguments: test --select orders$" (buffer-string))))))))
+          (should (string-match-p "^arguments: test --select orders$" (buffer-string)))))
+      ;; A long selection, as Changed on the branch gives, is cut in the menu.
+      (with-current-buffer (dbt-cli-run "build" (cons "--select" (make-list 50 "path:models/marts/orders.sql")))
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer))))))
+      (let ((label (funcall (plist-get (cdr (transient-get-suffix 'dbt-dispatch ".")) :description))))
+        (should (<= (string-width label) 100))
+        (should (string-prefix-p "Again: build --select path:models/marts/orders.sql" label))))))
 
 (ert-deftest dbt-cli-runs-at-the-root-and-links-errors ()
   "dbt runs at the root of the project, and its errors link to their files."
