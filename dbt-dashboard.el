@@ -65,26 +65,36 @@ says how long ago dbt wrote FILE, or that it holds no results."
     (insert (propertize (concat "  " text) 'dbt-dashboard-node id) "\n"))
   (insert "\n"))
 
+(defconst dbt-dashboard-severities '("error" "runtime error" "fail" "warn" "skipped")
+  "The statuses of a node that the dashboard lists, the most severe first.")
+
 (defun dbt-dashboard--render ()
   "Write the dashboard of this buffer's project from its artifacts."
   (let* ((inhibit-read-only t)
-         (target (expand-file-name (plist-get (dbt-project-config dbt-dashboard--root) :target-path)
-                                   dbt-dashboard--root))
+         (target (dbt-project-target dbt-dashboard--root))
          (runs-file (expand-file-name "run_results.json" target))
          (sources-file (expand-file-name "sources.json" target))
          (runs (dbt-dashboard--read runs-file))
          (sources (dbt-dashboard--read sources-file))
          (status (lambda (result) (downcase (format "%s" (gethash "status" result)))))
-         (name (lambda (result) (dbt-lineage-label (format "%s" (gethash "unique_id" result))))))
+         (name (lambda (result) (dbt-lineage-label (format "%s" (gethash "unique_id" result)))))
+         ;; dbt's message, to its cause: a database error says it second.
+         (said (lambda (result key)
+                 (string-join (seq-take (split-string (format "%s" (gethash key result)) "\n" t "[ \t]+") 2)
+                              ": "))))
     (erase-buffer)
     (dbt-dashboard--section
-     (format "Failures and warnings of dbt %s" (or (cdr runs) "runs")) runs-file runs
+     (format "Failed, warned or skipped in dbt %s" (or (cdr runs) "runs")) runs-file runs
      (mapcar (lambda (result)
-               (cons (format "%-6s %s  %s" (funcall status result) (funcall name result)
-                             (car (split-string (format "%s" (gethash "message" result)) "\n")))
+               (cons (format "%-7s %s  %s%s" (funcall status result) (funcall name result)
+                             (funcall said result "message")
+                             (if (natnump (gethash "failures" result))
+                                 (format ", %d failing rows" (gethash "failures" result))
+                               ""))
                      (gethash "unique_id" result)))
-             (seq-filter (lambda (result) (member (funcall status result) '("error" "fail" "warn" "runtime error")))
-                         (car runs))))
+             (seq-sort-by (lambda (result) (seq-position dbt-dashboard-severities (funcall status result))) #'<
+                          (seq-filter (lambda (result) (member (funcall status result) dbt-dashboard-severities))
+                                      (car runs)))))
     (dbt-dashboard--section
      "Slowest nodes" runs-file runs
      (mapcar (lambda (result)
@@ -98,10 +108,14 @@ says how long ago dbt wrote FILE, or that it holds no results."
     (dbt-dashboard--section
      "Stale sources, of dbt source freshness" sources-file sources
      (mapcar (lambda (result)
-               (cons (format "%-6s %s  loaded %s, %s ago" (funcall status result) (funcall name result)
-                             (gethash "max_loaded_at" result)
-                             (dbt-dashboard--age (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
-                                                          (if (numberp age) (max 0 age) 0)))))
+               (cons (format "%-7s %s  %s" (funcall status result) (funcall name result)
+                             (if (stringp (gethash "max_loaded_at" result))
+                                 (format "loaded %s, %s ago" (gethash "max_loaded_at" result)
+                                         (dbt-dashboard--age
+                                          (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
+                                                   (if (numberp age) (max 0 age) 0)))))
+                               ;; A freshness that failed has dbt's error instead.
+                               (funcall said result (if (gethash "error" result) "error" "message"))))
                      (gethash "unique_id" result)))
              (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
                          (car sources))))
