@@ -368,6 +368,8 @@ edited."
    directory "\\`[^.].*\\.\\(?:sql\\|py\\|csv\\|md\\|ya?ml\\)\\'" nil
    (lambda (subdirectory)
      (not (or (string-prefix-p "." (file-name-nondirectory subdirectory))
+              ;; What cannot be read holds nothing, rather than an error.
+              (not (file-accessible-directory-p subdirectory))
               (member (file-relative-name subdirectory directory)
                       dbt-project-skipped-directories)
               (seq-some (lambda (marker) (file-exists-p (expand-file-name marker subdirectory)))

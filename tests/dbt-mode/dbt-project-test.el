@@ -337,6 +337,16 @@ A file rewritten with its size, time and mode kept still gives what it held."
             (should (dbt-project-entities root '(macro) "secret_macro")))
         (set-file-modes file #o644)))))
 
+(ert-deftest dbt-project-index-skips-a-directory-it-cannot-read ()
+  "A directory that cannot be read holds nothing, and stops nothing."
+  (dbt-test-with-project root
+    (let ((private (expand-file-name "models/private" root)))
+      (make-directory private)
+      (set-file-modes private #o000)
+      (unwind-protect
+          (should (dbt-project-entities root '(model) "orders"))
+        (set-file-modes private #o755)))))
+
 (ert-deftest dbt-project-index-skips-python-environments ()
   "A virtual environment or a conda environment in the project is not read."
   (dbt-test-with-project root
