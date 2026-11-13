@@ -134,11 +134,16 @@ CLOSE-END), the last two only when it is closed.  A `set' opens a block
 only without `=', and a tag in a `{# #}' comment or not closed yet
 counts for nothing; a tag that starts before LIMIT counts whole.  The
 scan resumes from the last of `dbt-edit--scans' before LIMIT, unless the
-buffer is narrowed, and keeps the states it reaches."
+buffer is narrowed, and keeps the states it reaches when it resumed from
+the last of them.  The lists are those of the states: never modify
+them."
   (add-hook 'before-change-functions #'dbt-edit--forget-scans nil t)
   (save-excursion
     (let* ((scans (if (buffer-narrowed-p) (list (list 0)) dbt-edit--scans))
            (scans (member (seq-find (lambda (state) (<= (car state) limit)) scans) scans))
+           ;; Resumed from an earlier state, the scan reaches no further
+           ;; than the states kept.
+           (kept (eq scans dbt-edit--scans))
            (closed (cadar scans))
            (open (cddar scans)))
       (goto-char (caar scans))
@@ -163,7 +168,7 @@ buffer is narrowed, and keeps the states it reaches."
                    (push (list keyword start end) open)))
             (goto-char end))
           (push (cons (point) (cons closed open)) scans)))
-      (unless (buffer-narrowed-p)
+      (when kept
         (setq dbt-edit--scans scans))
       (cons closed open))))
 

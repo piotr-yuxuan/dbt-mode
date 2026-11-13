@@ -404,6 +404,26 @@ Its text is left as it is."
     (dbt-test-type "),")
     (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-"))))
 
+(ert-deftest dbt-edit-keeps-the-states-of-its-scan ()
+  "The Jinja blocks read from the states kept are those of a scan from the start; a scan near the start keeps the states further on."
+  (let ((fresh (lambda (limit) (let ((dbt-edit--scans (list (list 0)))) (dbt-edit-blocks limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% if a %}\n{% for b in c %}\nselect\n{% endif %}\nx\n")
+      (dbt-edit-blocks (point-max))
+      (let ((limit (progn (goto-char (point-min)) (search-forward "select") (point))))
+        (should (equal (dbt-edit-blocks limit) (funcall fresh limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (dotimes (n 50)
+        (insert (format "{%% macro m_%d() %%}\nselect %d\n{%% endmacro %%}\n" n n)))
+      (dbt-edit-blocks (point-max))
+      (let ((reached (caar dbt-edit--scans)))
+        (should (> reached (/ (point-max) 2)))
+        (dbt-edit-blocks 100)
+        (should (= (caar dbt-edit--scans) reached))
+        (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))))))
+
 (ert-deftest dbt-edit-indents-by-its-offset-a-region-alone ()
   "C-M-\\ indents the lines of its region alone, by `dbt-indent-offset'; a stray ) is at the first column."
   (let ((dbt-indent-offset 2))
