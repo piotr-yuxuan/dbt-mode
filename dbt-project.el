@@ -217,10 +217,12 @@ in any order, give the other properties."
     ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
     ("analysis-paths" :analysis-paths ("analyses")) ("macro-paths" :macro-paths ("macros"))
-    ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests")))
+    ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests"))
+    ("require_ref_searches_node_package_before_root" :package-first "true" "flags"))
   "The keys of dbt_project.yml that the configuration keeps.
-Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
-list of paths.")
+Each is (KEY PROPERTY DEFAULT . PATH): DEFAULT is dbt's, and a list for
+a list of paths; PATH, the keys that hold KEY, innermost first, is nil
+for a key at the top.")
 
 (defun dbt-project-target (root)
   "Return the directory where dbt writes the artifacts of the project at ROOT."
@@ -237,13 +239,13 @@ below it."
                                           (insert-file-contents (expand-file-name dbt-project-file root)))
                                         (buffer-string)))))
     (mapcan
-     (pcase-lambda (`(,key ,property ,default))
+     (pcase-lambda (`(,key ,property ,default . ,path))
        (let ((value (plist-get (seq-find (lambda (line)
-                                           (and (null (plist-get line :path)) (equal (plist-get line :key) key)))
+                                           (and (equal (plist-get line :path) path) (equal (plist-get line :key) key)))
                                          lines)
                                :value))
              (items (delq nil (mapcar (lambda (line)
-                                        (and (plist-get line :item) (equal (plist-get line :path) (list key))
+                                        (and (plist-get line :item) (equal (plist-get line :path) (cons key path))
                                              (plist-get line :value)))
                                       lines))))
          (list property
@@ -601,8 +603,13 @@ of a package's integration_tests."
 The value is a function of an entity, which gives 0 for the first
 package that a `ref' or a `source' of CALLER, the package of the calling
 file, looks in, 1 for the second, 2 for the others.  dbt 2.0.9 looks in
-CALLER, then in the project."
-  (let ((order (list caller (dbt-project-name root))))
+CALLER, then in the project, unless the project's dbt_project.yml sets
+the flag require_ref_searches_node_package_before_root to false, which
+puts the project first."
+  (let* ((project (car (dbt-project-packages root)))
+         (order (if (equal (plist-get (nth 2 project) :package-first) "false")
+                    (list (car project) caller)
+                  (list caller (car project)))))
     (lambda (entity) (or (seq-position order (plist-get entity :package)) 2))))
 
 (defun dbt-project-resolve-ref (root package name &optional caller version)
@@ -634,7 +641,8 @@ no call names.  QUALIFIER is the package of a `ref', a `doc', a macro
 or an analysis, or the source of a table, and nil for a source itself.
 VERSION is that of a `ref', nil for the latest.  CALLER is the package
 of the calling file, which a `ref' or a `source' looks in as
-`dbt-project-lookup-rank' says; a `doc' looks in the project first."
+`dbt-project-lookup-rank' says; a `doc' looks in the project first,
+whatever the flag that it reads."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)

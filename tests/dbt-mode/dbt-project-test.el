@@ -448,6 +448,37 @@ A file rewritten with its size, time and mode kept still gives what it held."
                      '("shop_utils" "shop")))
       (should (equal (funcall packages '(:kind source :name "raw") "shop_utils") '("shop_utils" "shop"))))))
 
+(ert-deftest dbt-project-resolve-reads-the-flag-that-puts-the-project-first ()
+  "With require_ref_searches_node_package_before_root false in the project, an unqualified ref or source resolves there first.
+True, or absent, the caller's package comes first; a doc resolves in the
+project first whatever the flag, and a package's own flags count for
+nothing."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_sources.yml" root))
+    (write-region "{% docs order_status %}\nIn the package.\n{% enddocs %}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/docs.md" root))
+    (let ((project-file (expand-file-name "dbt_project.yml" root))
+          (packages (lambda (target)
+                      (mapcar (lambda (entity) (plist-get entity :package))
+                              (dbt-project-resolve root target "shop_utils")))))
+      (dolist (case '(("" "shop_utils") ("flags:\n  require_ref_searches_node_package_before_root: true\n" "shop_utils")
+                      ("flags:\n  require_ref_searches_node_package_before_root: false\n" "shop")))
+        (with-temp-file project-file
+          (insert (dbt-test-file-text dbt-test-fixture "dbt_project.yml") (car case)))
+        (dbt-project-forget root)
+        (should (equal (car (funcall packages '(:kind ref :name "stg_orders"))) (cadr case)))
+        (should (equal (car (funcall packages '(:kind source :qualifier "raw" :name "raw_orders"))) (cadr case)))
+        (should (equal (car (funcall packages '(:kind doc :name "order_status"))) "shop")))
+      (write-region "name: shop_utils\nflags:\n  require_ref_searches_node_package_before_root: false\n" nil
+                    (expand-file-name "dbt_packages/shop_utils/dbt_project.yml" root))
+      (with-temp-file project-file
+        (insert (dbt-test-file-text dbt-test-fixture "dbt_project.yml")))
+      (dbt-project-forget root)
+      (should (equal (car (funcall packages '(:kind ref :name "stg_orders"))) "shop_utils")))))
+
 (ert-deftest dbt-project-graph-follows-ref-and-source ()
   "Each node depends on what its ref and source calls name."
   (dbt-test-with-project root
