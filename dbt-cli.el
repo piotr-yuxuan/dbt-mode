@@ -36,9 +36,10 @@ other options, --target and --fail-fast, go to every command.")
 
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
-  ;; message", then, within a few lines, " --> FILE:LINE:COLUMN".
+  ;; message", then, within a few lines that start no other, " -->
+  ;; FILE:LINE:COLUMN", or " --> FILE" alone.
   '((dbt-location
-     "^\\[\\(?:error\\|\\(warning\\)\\)\\][^\n]*\n\\(?:[^\n]*\n\\)\\{0,3\\}?[ \t]*--> \\([^:\n]+\\):\\([0-9]+\\):\\([0-9]+\\)"
+     "^\\[\\(?:error\\|\\(warning\\)\\)\\][^\n]*\n\\(?:\\(?:[^[\n][^\n]*\\)?\n\\)\\{0,3\\}?[ \t]*--> \\([^:\n]+\\)\\(?::\\([0-9]+\\):\\([0-9]+\\)\\)?"
      2 3 4 (1)))
   "The errors and warnings of dbt's output.
 For `compilation-error-regexp-alist'.")

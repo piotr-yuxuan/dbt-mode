@@ -86,6 +86,23 @@ Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and
               messages)))
     (nreverse messages)))
 
+(ert-deftest dbt-cli-links-a-warning-without-a-line-to-its-file ()
+  "A warning whose location has no line links to its file, not to the next error.
+The output is that of dbt 2.0.9 on a project with a properties file
+that names no model and a ref to no model."
+  (with-temp-buffer
+    (insert "=================== Errors and Warnings ====================\n"
+            "[warning] [NoNodeForYamlKey (dbt1089)]: Unused schema.yml entry for model 'does_not_exist'\n"
+            "  --> models/staging/_extra.yml\n"
+            "[error] [DependencyNotFound (dbt1048)]: Ref 'nope' not found in project. "
+            "Searched for 'shop.nope, nope'\n"
+            "  --> models/marts/customers.sql:4:6\n"
+            "\n"
+            "==================== Execution Summary =====================\n")
+    (dbt-compilation-mode)
+    (should (equal (dbt-test-compilation-messages)
+                   '(("models/staging/_extra.yml" nil nil 1) ("models/marts/customers.sql" 4 6 2))))))
+
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
   "With TERM naming a colour terminal, the output of dbt is plain and links.
 Emacs started from a terminal passes its TERM on to dbt, which then
