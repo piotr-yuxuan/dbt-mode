@@ -305,6 +305,7 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ("D" "debug" (lambda () (interactive) (dbt-cli-dispatch "debug")))
     ("R" "retry" (lambda () (interactive) (dbt-cli-dispatch "retry")))
     ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))
+    ("h" "dashboard" dbt-dashboard)
     ("." dbt-cli-again
      :description (lambda ()
                     (let ((last (gethash (dbt-project-root) dbt-cli--last)))

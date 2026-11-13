@@ -85,6 +85,7 @@
 (autoload 'dbt-cli-show "dbt-cli")
 (autoload 'dbt-cli-preview-cte "dbt-cli")
 (autoload 'dbt-cli-format "dbt-cli")
+(autoload 'dbt-dashboard "dbt-dashboard" nil t)
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
 (declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
@@ -992,6 +993,7 @@ CTE rather than by statement."
     ["Compiled SQL against a state..." dbt-compiled-diff]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
+    ["Dashboard of the project" dbt-dashboard]
     "---"
     ["New..." dbt-new]
     ["Close the Jinja block" dbt-close-block]

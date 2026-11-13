@@ -56,9 +56,10 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   :type 'natnum)
 
 (defcustom dbt-protected-targets '("prod")
-  "The targets on which an Org Babel block of dbt asks before it runs.
-While any target is protected, a block whose default target dbt-mode
-cannot read asks too."
+  "The targets on which dbt-mode asks before SQL runs on the warehouse.
+An Org Babel block of dbt asks, and so does `dbt-dashboard-freshness'.
+While any target is protected, a default target that dbt-mode cannot
+read asks too."
   :type '(repeat string))
 
 (defun dbt-project-executable ()
