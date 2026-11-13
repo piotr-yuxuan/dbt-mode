@@ -130,9 +130,9 @@ node through which the walk first reached ID, FOCUS at depth 1."
   (dbt-lineage--render))
 
 (defun dbt-lineage-visit ()
-  "Visit the file of the node at point."
+  "Visit the file of the node on point's line."
   (interactive)
-  (let ((node (or (get-text-property (point) 'dbt-lineage-node) (user-error "No node here"))))
+  (let ((node (or (get-text-property (line-beginning-position) 'dbt-lineage-node) (user-error "No node here"))))
     (unless (and (plist-get node :file) (file-exists-p (plist-get node :file)))
       (user-error "No file for %s" (dbt-lineage-label (plist-get node :id))))
     (find-file-other-window (plist-get node :file))

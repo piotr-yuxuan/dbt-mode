@@ -73,6 +73,7 @@ A node is under the node through which it is nearest."
                        ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql"))))
       (goto-char (point-min))
       (forward-line 1)
+      (end-of-line)
       (dbt-lineage-visit)
       (should (equal (file-relative-name buffer-file-name root) "seeds/raw_orders.csv"))
       (kill-buffer "*dbt lineage: stg_orders*"))))
