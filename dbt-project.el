@@ -293,7 +293,8 @@ which."
 
 (defvar dbt-project--files (make-hash-table :test #'equal)
   "What was read of each file, from its name to (STAMP . CONTENTS).
-STAMP is the modification time and size of the file when it was read.")
+STAMP is the modification time, the size and the mode of the file when
+it was read.")
 
 (defun dbt-project-forget (&optional root)
   "Forget what was read of the project at ROOT, or of every project.
