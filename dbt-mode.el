@@ -333,25 +333,46 @@ For `xref-backend-functions'."
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
-The YAML entries of a resource count as uses."
+A use is a call that resolves, from the package of its file, to what
+IDENTIFIER resolves to from the current buffer; a call of any table of
+a source uses that source.  The definition of a macro is not a use of
+it.  The YAML entries of what IDENTIFIER resolves to count as uses."
   (let* ((root (dbt-project-root))
          (target (dbt-mode-parse-identifier identifier))
-         (name (concat "['\"]" (regexp-quote (plist-get target :name)) "['\"]"))
-         (qualifier (and (plist-get target :qualifier)
-                         (concat "['\"]" (regexp-quote (plist-get target :qualifier)) "['\"] *, *"))))
-    (append
-     (xref-matches-in-files
-      (pcase (plist-get target :kind)
-        ('source (concat "source *( *" qualifier name))
-        ('macro (concat "\\(^\\|[^A-Za-z0-9_]\\)" (regexp-quote (plist-get target :name)) " *("))
-        (kind (format "%s *([^)]*%s" kind name)))
-      (mapcan (lambda (package) (dbt-project-source-files (nth 1 package)))
-              (dbt-project-packages root)))
-     (and (eq (plist-get target :kind) 'ref)
-          (mapcar #'dbt-mode--xref
-                  (seq-filter (lambda (entity)
-                                (member (plist-get entity :section) '("models" "seeds" "snapshots" "analyses")))
-                              (dbt-project-entities root '(properties) (plist-get target :name))))))))
+         (kind (plist-get target :kind))
+         (definition (car (dbt-mode-definitions target)))
+         ;; A definition of a macro matches the first pattern, which gives
+         ;; no name, rather than the pattern of a call.
+         (regexp (alist-get kind `((macro . ,(concat "\\_<\\(?:macro\\|test\\|materialization\\)[ \t\n]+"
+                                                     "[A-Za-z_][A-Za-z0-9_]*\\|" dbt-mode-macro-call-regexp))
+                                   ,@dbt-project-call-regexps)
+                            regexp-unmatchable))
+         (source (and (eq kind 'source) (null (plist-get target :qualifier))))
+         uses)
+    (pcase-dolist (`(,package ,directory) (dbt-project-packages root))
+      (dolist (file (seq-remove (lambda (file) (string-suffix-p ".csv" file)) (dbt-project-source-files directory)))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (while (re-search-forward regexp nil t)
+            (let ((call (if source
+                            (list :kind kind :name (match-string 2))
+                          (list :kind kind :qualifier (match-string 2) :name (match-string 1)
+                                :version (match-string 3)))))
+              (when (and (equal (plist-get call :name) (plist-get target :name))
+                         (equal (car (dbt-project-resolve root call package)) definition))
+                (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
+                                 (xref-make-file-location file (line-number-at-pos (match-beginning 0))
+                                                          (- (match-beginning 0) (line-beginning-position))))
+                      uses)))))))
+    (append (nreverse uses)
+            (and definition
+                 (mapcar #'dbt-mode--xref
+                         (seq-filter (lambda (entry)
+                                       (eq (alist-get (plist-get entry :section) dbt-project-section-kinds
+                                                      nil nil #'equal)
+                                           (plist-get definition :kind)))
+                                     (dbt-project-entities root '(properties) (plist-get definition :name)
+                                                           (plist-get definition :package))))))))
 
 ;;;; Completion
 

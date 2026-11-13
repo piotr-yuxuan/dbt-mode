@@ -191,7 +191,7 @@
                    '(("analyses/order_counts.sql" . 1))))))
 
 (ert-deftest dbt-mode-xref-finds-references ()
-  "M-? lists the calls of a model, and its YAML entry; the calls of a macro."
+  "M-? lists the calls of a model, and its YAML entry; the calls of a macro, not its definition."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (should (equal (sort (mapcar #'car (dbt-test-xref-files (xref-backend-references 'dbt "ref:stg_orders") root))
@@ -199,9 +199,16 @@
                    '("analyses/order_counts.sql" "models/marts/orders.sql" "models/staging/_staging.yml"
                      "snapshots/orders_snapshot.sql" "tests/assert_positive_amount.sql")))
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt "macro:cents_to_dollars") root)
-                   '(("macros/cents_to_dollars.sql" . 1) ("models/staging/stg_orders.sql" . 13))))
+                   '(("models/staging/stg_orders.sql" . 13))))
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt "doc:order_status") root)
-                   '(("models/staging/_staging.yml" . 5))))))
+                   '(("models/staging/_staging.yml" . 5))))
+    (write-region "select * from {{ source('raw', 'raw_orders') }}" nil
+                  (expand-file-name "models/staging/from_raw.sql" root))
+    (dolist (case '(("source:raw" ("models/staging/from_raw.sql" . 1))
+                    ("source:raw/raw_orders" ("models/staging/from_raw.sql" . 1))
+                    ("source:raw/raw_customers")
+                    ("source:events")))
+      (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (car case)) root) (cdr case))))))
 
 ;; A model with versions, as dbt documents them: one file per version,
 ;; NAME_vVERSION, and the latest version given in its YAML entry.
@@ -227,6 +234,24 @@
                      (list (cons (cdr case) 1)))))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt "ref:dim_customers@1") root)
                    '(("models/marts/dim_customers_v1.sql" . 1))))))
+
+(ert-deftest dbt-mode-xref-finds-the-references-of-one-of-two-namesakes ()
+  "M-? on a model lists the calls that resolve to it, not those of a namesake."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (pcase-dolist (`(,file . ,text) '(("dbt_packages/shop_utils/models/orders.sql" . "select 1 as id")
+                                      ("dbt_packages/shop_utils/models/uses_orders.sql"
+                                       . "select * from {{ ref('orders') }}")
+                                      ("models/marts/utils_orders.sql"
+                                       . "select * from {{ ref('shop_utils', 'orders') }}")))
+      (write-region text nil (expand-file-name file root)))
+    (dbt-test-visit root "models/marts/customers.sql")
+    (dolist (case '(("ref:shop_utils/orders" "dbt_packages/shop_utils/models/uses_orders.sql"
+                     "models/marts/utils_orders.sql")
+                    ("ref:orders" "models/marts/customers.sql")))
+      (should (equal (sort (mapcar #'car (dbt-test-xref-files (xref-backend-references 'dbt (car case)) root))
+                           #'string<)
+                     (cdr case))))))
 
 (defun dbt-test-completions (text)
   "Insert TEXT at the end of the buffer, and return what completes there."
