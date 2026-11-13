@@ -443,6 +443,22 @@ Its text is left as it is."
         (should (= (caar dbt-edit--scans) reached))
         (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))))))
 
+(ert-deftest dbt-edit-indents-a-tag-before-a-long-run-of-lines ()
+  "A tag looks past 50 tags, comments and blank lines at most for what it leads to; TAB on it never fails.
+Beyond them, or before a tag that stays open, it is one of the lines
+above."
+  (let ((text (concat "select *\nfrom t\n{% if x %}\n" (apply #'concat (make-list 10 "    -- note\n"))
+                      "    where a\n{% endif %}\n")))
+    (should (equal (dbt-test-indented text) text)))
+  (dbt-test-with-window (concat "select *\nfrom t\n{% if x %}\n" (make-string 100000 ?\n) "where a\n{% endif %}\n")
+    (dbt-test-goto "{% if x")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4)))
+  (dbt-test-with-window (concat "select *\nfrom t\n{% if x\n" (apply #'concat (make-list 20000 "and y = 1\n")))
+    (dbt-test-goto "{% if x")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))))
+
 (ert-deftest dbt-edit-indents-by-its-offset-a-region-alone ()
   "C-M-\\ indents the lines of its region alone, by `dbt-indent-offset'; a stray ) is at the first column."
   (let ((dbt-indent-offset 2))

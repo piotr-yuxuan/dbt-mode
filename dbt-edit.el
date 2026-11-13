@@ -195,12 +195,15 @@ them."
   "What a line starts with when it closes the construct that holds it.")
 
 (defconst dbt-edit--base-regexp
-  (let ((leads (concat "\\(?:,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp "\\)")))
+  (let ((leads (concat "\\(?:,?[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]+as[ \t]*(\\|" dbt-edit-clause-regexp "\\)"))
+        ;; A tag of one line or more, 4,000 characters at most, as the
+        ;; default of `dbt-mode-jinja-max-tag-length', or one not closed.
+        (tag "\\(?:{%\\(?:[^%]\\|%+[^%}]\\)\\{0,4000\\}%+}\\|{%\\)"))
     (concat "\\(?:" leads
-            ;; A tag, of one line or more, past tags, comments and blank
-            ;; lines, 50 at most, before one, a closer or the end: {% if
-            ;; is_incremental() %} then where.
-            "\\|\\(?:{%\\(?:[^%]\\|%+[^%}]\\)*%+}\\|{%\\).*\\(?:\n[ \t]*\\(?:\\(?:{[%#]\\|--\\).*\\)?\\)\\{0,50\\}"
+            ;; A tag, past tags, comments and blank lines, 50 at most,
+            ;; before one, a closer or the end: {% if is_incremental() %}
+            ;; then where.
+            "\\|" tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
             "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
   "What a line starts with when it stays at the base of its construct.
 A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
@@ -225,11 +228,11 @@ A line that starts by closing it, with `)', `]', `}' or a tag such as
 a line that starts with a clause keyword, such as select or from, or
 with a CTE, NAME as (, stays at the base, and so does a Jinja statement
 tag that leads to one of them, to a closer or to the end of the buffer,
-past tags, comments and blank lines; any other line is one step in from
-the nearest line above at its level that starts a clause: the columns
-of a select, the conditions of a where, a tag among them.  In an else
-or elif branch, that line is in the branch, else the line is one step
-in from its block."
+past 50 tags, comments and blank lines at most; any other line is one
+step in from the nearest line above at its level that starts a clause:
+the columns of a select, the conditions of a where, a tag among them.
+In an else or elif branch, that line is in the branch, else the line is
+one step in from its block."
   (save-excursion
     (back-to-indentation)
     (let* ((opener (dbt-edit--opener (line-beginning-position) blocks))
