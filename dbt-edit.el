@@ -179,7 +179,10 @@ buffer is narrowed, and keeps the states it reaches."
                       'symbols)
           ;; left(x, 3) is a column: a join's word starts a clause only
           ;; with join after it.
-          "\\|\\_<\\(?:left\\|right\\|full\\|inner\\|cross\\|natural\\)\\_>[^(\n]*\\_<join\\_>\\)")
+          "\\|\\_<\\(?:left\\|right\\|full\\|inner\\|cross\\|natural\\)\\_>[^(\n]*\\_<join\\_>"
+          ;; A window's partition and frame, at the level of its order by.
+          "\\|\\_<partition[ \t]+by\\_>"
+          "\\|\\_<\\(?:rows\\|range\\|groups\\)[ \t]+\\(?:between\\|unbounded\\|current\\|[0-9]\\)\\)")
   "The keywords that start a clause of SQL, on a line of their own level.")
 
 (defconst dbt-edit--closer-regexp

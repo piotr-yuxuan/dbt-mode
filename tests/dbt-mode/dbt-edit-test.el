@@ -380,6 +380,13 @@ Its text is left as it is."
                       "{% else %}\n    -- a full refresh reads everything\n    {{ some_filter() }}\n{% endif %}\n")))
     (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
 
+(ert-deftest dbt-edit-indents-a-window-frame-with-its-order-by ()
+  "A window's partition and frame are at the level of its order by; a column named range is a column."
+  (let ((text (concat "select\n    sum(amount) over (\n        partition by customer_id\n        order by order_date\n"
+                      "        rows between unbounded preceding and current row\n    ) as running_total,\n    range\n"
+                      "from payments\n")))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
 (ert-deftest dbt-edit-keeps-left-and-right-among-columns ()
   "Columns that call left() or right() are columns, one step in from select; a join with left or natural is a clause."
   (let ((text (concat "select\n    id,\n    left(name, 3) as initials,\n    RIGHT (code, 2) as suffix,\n    name\n"
