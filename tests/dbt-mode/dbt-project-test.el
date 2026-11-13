@@ -434,6 +434,20 @@ A file rewritten with its size, time and mode kept still gives what it held."
     (should (dbt-project-resolve root '(:kind macro :qualifier "shop_utils" :name "is_positive")))
     (should-not (dbt-project-resolve root '(:kind macro :qualifier "shop" :name "is_positive")))))
 
+(ert-deftest dbt-project-resolve-a-source-in-the-callers-package-first ()
+  "An unqualified source resolves in the caller's package, then the project's, as a ref does in dbt 2.0.9."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_sources.yml" root))
+    (let ((packages (lambda (&rest arguments)
+                      (mapcar (lambda (entity) (plist-get entity :package))
+                              (apply #'dbt-project-resolve root arguments)))))
+      (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders")) '("shop" "shop_utils")))
+      (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders") "shop_utils")
+                     '("shop_utils" "shop")))
+      (should (equal (funcall packages '(:kind source :name "raw") "shop_utils") '("shop_utils" "shop"))))))
+
 (ert-deftest dbt-project-graph-follows-ref-and-source ()
   "Each node depends on what its ref and source calls name."
   (dbt-test-with-project root
