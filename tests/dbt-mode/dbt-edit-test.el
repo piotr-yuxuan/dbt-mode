@@ -404,6 +404,18 @@ Its text is left as it is."
     (dbt-test-type "),")
     (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-"))))
 
+(ert-deftest dbt-edit-indents-by-its-offset-a-region-alone ()
+  "C-M-\\ indents the lines of its region alone, by `dbt-indent-offset'; a stray ) is at the first column."
+  (let ((dbt-indent-offset 2))
+    (should (equal (dbt-test-indented "with a as (\nselect\nid\nfrom t\n)\nselect * from a\n)\n")
+                   "with a as (\n  select\n    id\n  from t\n)\nselect * from a\n)\n")))
+  (dbt-test-with-window "  select\nid,\nname\n  from t\n"
+    (dbt-test-goto "id,")
+    (dbt-test-keys "C-SPC")
+    (dbt-test-goto "  from")
+    (dbt-test-keys "C-M-\\")
+    (should (equal (buffer-string) "  select\n      id,\n      name\n  from t\n"))))
+
 (ert-deftest dbt-edit-indents-the-buffer-as-it-is-now ()
   "TAB reads the Jinja blocks of the text as it is after an edit above it; in a narrowing, the blocks are its own.
 TAB indents in the whole buffer, as Emacs widens it; C-c / reads the
