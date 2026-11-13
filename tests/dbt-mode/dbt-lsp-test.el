@@ -623,6 +623,42 @@ are, in a visited buffer or a file, the renamed file included."
       (should-error (dbt-lsp-rename-model "dim_clients") :type 'user-error)
       (should (file-exists-p (expand-file-name "models/marts/dim_v2.sql" root))))))
 
+(ert-deftest dbt-lsp-formats-on-c-c-c-q-and-after-each-save ()
+  "With the server, C-c C-q saves, then formats; on save, the formatted buffer is saved too.
+In `dbt-format-on-save-mode', a save has the server format the file,
+and the buffer is saved again; a failure is a message, and the save
+stands."
+  (dbt-lsp-test-with-server root
+      '(("textDocument/formatting"
+         . [(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "-- formatted\n")]))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (should (string-prefix-p "-- edited\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+      (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+      (dbt-format-on-save-mode 1)
+      (execute-kbd-macro (kbd "C-x C-s"))
+      (should-not (buffer-modified-p))
+      (should (string-prefix-p "-- formatted\n-- formatted\n-- edited\n"
+                               (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+      ;; C-c C-q formats once, its save included.
+      (goto-char (point-min))
+      (insert "-- again\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (should (string-prefix-p "-- formatted\n-- again\n" (buffer-string)))))
+  (dbt-lsp-test-with-server root '(("textDocument/formatting" . "not edits"))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (dbt-format-on-save-mode 1)
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-x C-s"))
+      (should-not (buffer-modified-p))
+      (should (string-prefix-p "-- edited\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+      (dbt-lsp-test-message "dbt could not format orders\\.sql"))))
+
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
   "Formatting saves the buffer, then applies the edits of the server."
   (dbt-lsp-test-with-server root

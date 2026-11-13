@@ -444,5 +444,25 @@ failure of dbt is a message, the buffer as saved."
         (should (equal (process-list) processes))
         (should-not (seq-difference (buffer-list) buffers))))))
 
+(ert-deftest dbt-cli-formats-after-each-save ()
+  "In `dbt-format-on-save-mode', without a server, each save has dbt format the file."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+        (dbt-format-on-save-mode 1)
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
+        (dbt-test-formatted)
+        (should-not (buffer-modified-p))
+        (dbt-format-on-save-mode -1)
+        (insert "-- again\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (should-not (seq-some (lambda (process) (string-prefix-p "dbt format" (process-name process)))
+                              (process-list)))))))
+
 (provide 'dbt-cli-test)
 ;;; dbt-cli-test.el ends here

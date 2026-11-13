@@ -905,6 +905,9 @@ listed: their `model' key is not a call."
       (user-error "No test reads %s" (plist-get resource :name)))
     (xref-show-xrefs (lambda () items) nil)))
 
+(defvar dbt-mode--formatting nil
+  "Non-nil while a command or a save formats the buffer.")
+
 (defun dbt-format-buffer ()
   "Save the buffer, then format it.
 With dbt lsp, the server formats it, as `dbt-lsp-format-buffer' does,
@@ -912,10 +915,36 @@ and leaves it modified.  Otherwise `dbt format' formats the saved file,
 and the buffer shows the result once dbt ends, unless it was modified
 meanwhile."
   (interactive)
-  (if (dbt-mode-server-p)
-      (dbt-lsp-format-buffer)
-    (save-buffer)
-    (dbt-cli-format (current-buffer))))
+  (let ((dbt-mode--formatting t))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-format-buffer)
+      (save-buffer)
+      (dbt-cli-format (current-buffer)))))
+
+(defun dbt-mode--format-after-save ()
+  "Format the buffer just saved, and save it again when that changed it.
+For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
+message: the save stands."
+  (unless dbt-mode--formatting
+    (let ((dbt-mode--formatting t))
+      (condition-case err
+          (if (not (dbt-mode-server-p))
+              (dbt-cli-format (current-buffer))
+            (dbt-lsp-format-buffer)
+            (when (buffer-modified-p)
+              (save-buffer)))
+        (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
+
+(define-minor-mode dbt-format-on-save-mode
+  "Format the buffer after each save, as `dbt-format-buffer' does.
+With dbt lsp, the formatted buffer is saved again when formatting
+changed it.  Without a server, `dbt format' formats the saved file
+while you go on, and the buffer shows the result unless you modified it
+meanwhile.  A failure to format is a message, and the save stands."
+  :lighter " Fmt"
+  (if dbt-format-on-save-mode
+      (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)
+    (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
 
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
@@ -970,6 +999,7 @@ CTE rather than by statement."
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
     ["Format buffer" dbt-format-buffer]
+    ["Format on save" dbt-format-on-save-mode :style toggle :selected dbt-format-on-save-mode]
     ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 
