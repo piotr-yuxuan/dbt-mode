@@ -53,6 +53,13 @@
   :type '(repeat string)
   :group 'dbt)
 
+(defcustom dbt-lsp-proxy nil
+  "Whether dbt lsp runs through dbt-lsp-plus, when that executable exists.
+dbt-lsp-plus adds what dbt lsp lacks, such as the references of sources
+over the project; dbt-mode steps aside where it says that it answers."
+  :type 'boolean
+  :group 'dbt)
+
 (defcustom dbt-lsp-enable-linter nil
   "Whether the server lints the SQL, with dbt's built-in linter."
   :type 'boolean
@@ -87,8 +94,10 @@ answer within `dbt-lsp--probe-seconds' runs none."
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.
 lsp-mode calls it with `default-directory' at the root of the workspace,
-in the buffer that starts it."
-  (append (list dbt-executable "lsp" "--project-dir"
+in the buffer that starts it.  With `dbt-lsp-proxy', dbt-lsp-plus runs
+it, as `dbt-lsp-plus -- COMMAND'."
+  (append (and dbt-lsp-proxy (executable-find "dbt-lsp-plus") (list "dbt-lsp-plus" "--"))
+          (list dbt-executable "lsp" "--project-dir"
                 (directory-file-name (or (and buffer-file-name (dbt-project-root buffer-file-name))
                                          (dbt-project-root default-directory)
                                          default-directory)))
@@ -169,6 +178,16 @@ value that its SCHEMA fits, a missing key holding null."
      (and (or (hash-table-p value) (and lsp-use-plists (consp value)))
           (seq-every-p (pcase-lambda (`(,key ,field)) (dbt-lsp--conforms-p (lsp-get value key) field)) fields)))
     (_ (funcall schema value))))
+
+(defun dbt-lsp-proxy-answers-p (request kind)
+  "Return non-nil when the server of the buffer answers REQUEST on targets of KIND.
+REQUEST is :references or :rename and KIND \"source\" or \"cte\", as
+dbt-lsp-plus lists them under experimental.dbtLspPlus of its
+capabilities: dbt-mode then steps aside."
+  (let* ((workspace (dbt-lsp-workspace))
+         (capabilities (and workspace (lsp--workspace-server-capabilities workspace))))
+    (and (dbt-lsp--conforms-p capabilities `(object (:experimental (object (:dbtLspPlus (object (,request (array stringp))))))))
+         (seq-contains-p (lsp-get (lsp-get (lsp-get capabilities :experimental) :dbtLspPlus) request) kind))))
 
 (defun dbt-lsp--unreadable (method answer)
   "Return the message that dbt-mode cannot read ANSWER, of dbt lsp to METHOD."

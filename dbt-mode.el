@@ -86,6 +86,7 @@
 (autoload 'dbt-cli-preview-cte "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
+(declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
@@ -424,7 +425,8 @@ its version."
 For `xref-backend-functions', ahead of lsp-mode's.  Where dbt lsp runs,
 it answers only what dbt-mode does not resolve, such as dbt's own
 macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
-the version of a `ref' and resolves no `doc'."
+the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
+sources too, where it says so, as `dbt-lsp-proxy-answers-p' tells."
   (and (dbt-project-root)
        (or (not (dbt-mode-server-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
@@ -435,7 +437,10 @@ the version of a `ref' and resolves no `doc'."
                                (looking-at-p (concat "[^\n]*" (alist-get 'snapshot dbt-project-block-regexps))))
                              (dbt-mode-target-at-point)
                            (dbt-mode-call-at-point))))
-             (and target (dbt-mode-definitions target))))
+             (and target
+                  (not (and (eq (plist-get target :kind) 'source)
+                            (dbt-lsp-proxy-answers-p :references "source")))
+                  (dbt-mode-definitions target))))
        'dbt))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql dbt)))

@@ -254,10 +254,36 @@ Choosing the server reads nothing of the project."
     (dbt-test-goto "customers.first_name")
     (should (eq (xref-find-backend) 'xref-lsp))
     (should-not (seq-some (lambda (key) (equal (car key) root)) (hash-table-keys dbt-project--cache)))
+    ;; dbt lsp alone: a source is dbt-mode's.
+    (goto-char (point-max))
+    (insert "\n{{ source('raw', 'raw_orders') }}")
+    (dbt-test-goto "raw_orders')")
+    (should (eq (xref-find-backend) 'dbt))
     (with-current-buffer (dbt-test-visit root "snapshots/orders_snapshot.sql")
       (dbt-lsp)
       (dbt-test-goto "orders_snapshot %}")
       (should (eq (xref-find-backend) 'dbt)))))
+
+(ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
+  "With dbt-lsp-plus listing sources for references, M-. and M-? on a source are the server's.
+dbt-lsp-plus runs the server, given after --, when `dbt-lsp-proxy' is on."
+  (let* ((bin (make-temp-file "dbt-lsp-plus" t))
+         (exec-path (cons bin exec-path))
+         (dbt-lsp-proxy t))
+    (write-region "#!/bin/sh\nshift\nexec \"$@\"\n" nil (expand-file-name "dbt-lsp-plus" bin))
+    (set-file-modes (expand-file-name "dbt-lsp-plus" bin) #o755)
+    (unwind-protect
+        (dbt-lsp-test-with-server root
+            '(("$experimental" . (:dbtLspPlus (:version 1 :references ["source"] :rename ["source"]))))
+          (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 3)
+                         (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))
+          (goto-char (point-max))
+          (insert "\n{{ source('raw', 'raw_orders') }}")
+          (dbt-test-goto "raw_orders')")
+          (should (eq (xref-find-backend) 'xref-lsp))
+          (dbt-test-goto "ref('stg_orders')" 6)
+          (should (eq (xref-find-backend) 'dbt)))
+      (delete-directory bin t))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.
