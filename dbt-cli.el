@@ -75,16 +75,20 @@ dbt reads the project's files, not its buffers."
                      (lambda () (and buffer-file-name (string-prefix-p root (expand-file-name buffer-file-name))))))
 
 (defun dbt-cli-run (command &optional arguments)
-  "Run the dbt COMMAND with ARGUMENTS, a list of strings, in the project.
-It runs at the root of the project of the current buffer, in a
-compilation buffer of `dbt-compilation-mode'.  dbt runs without colours
-or progress bars, which it would otherwise draw when Emacs passes on the
-TERM of a terminal.  The project's modified buffers are offered for
-saving first, under `compilation-ask-about-save'."
+  "Run the dbt COMMAND with ARGUMENTS in the project.
+ARGUMENTS is a list of strings, or a function that returns one, called
+at the root once the project's buffers are saved.  It runs at the root
+of the project of the current buffer, in a compilation buffer of
+`dbt-compilation-mode'.  dbt runs without colours or progress bars,
+which it would otherwise draw when Emacs passes on the TERM of a
+terminal.  The project's modified buffers are offered for saving first,
+under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
     (dbt-cli--save-project root)
+    (when (functionp arguments)
+      (setq arguments (funcall arguments)))
     (puthash root (cons command arguments) dbt-cli--last)
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
@@ -206,10 +210,11 @@ as `dbt-cli-changed-selection' does, for a command that selects."
                                                           ,@dbt-cli-option-commands))))
                                    (or (not commands) (member command (cdr commands)))))
                                (transient-args 'dbt-dispatch))))
+    ;; git reads the files once dbt-cli-run has saved their buffers.
     (dbt-cli-run command
-                 (dbt-cli-arguments arguments (and (member "--changed" arguments)
-                                                   (dbt-cli-changed-selection
-                                                    (or (dbt-project-root) (user-error "Not in a dbt project"))))))))
+                 (lambda ()
+                   (dbt-cli-arguments arguments (and (member "--changed" arguments)
+                                                     (dbt-cli-changed-selection default-directory)))))))
 
 (defun dbt-cli-again ()
   "Run the last dbt command of the project again, with its arguments."

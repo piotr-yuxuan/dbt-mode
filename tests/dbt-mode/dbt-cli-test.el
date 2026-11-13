@@ -68,9 +68,9 @@ command, the selection only to the commands that select resources, and
 
 (ert-deftest dbt-cli-selects-what-changed-on-the-branch ()
   "Changed on the branch selects by path each file that dbt reads and that changed since the merge base.
-A YAML file counts, as dbt selects what it describes; a new file counts;
-a file that git would quote counts as it is; a commit on main after the
-branch does not."
+A YAML file counts, as dbt selects what it describes; a new file and an
+unsaved buffer count, the buffer saved first; a file that git would
+quote counts as it is; a commit on main after the branch does not."
   (dbt-test-with-project root
     (dbt-test-with-git root
       (dolist (arguments '(("init" "-q" "-b" "main") ("add" "-A") ("commit" "-q" "-m" "Start")
@@ -87,8 +87,12 @@ branch does not."
         (apply #'call-process "git" nil nil nil arguments))
       (should (equal (sort (dbt-cli-changed-selection root) #'string<)
                      '("path:models/marts/café.sql" "path:models/marts/orders.sql" "path:models/staging/_staging.yml")))
+      (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
+        (goto-char (point-max))
+        (insert "-- unsaved\n"))
       (dbt-test-visit root "models/marts/customers.sql")
       (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (compilation-ask-about-save nil)
             (transient-values '((dbt-dispatch "--select=customers" "--changed" "--downstream"))))
         (with-current-buffer (dbt-cli-dispatch "build")
           (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
@@ -96,7 +100,7 @@ branch does not."
           (should (re-search-forward "^arguments: build --select \\(.*\\)$" nil t))
           (should (equal (sort (split-string (match-string 1) " ") #'string<)
                          '("path:models/marts/café.sql+" "path:models/marts/orders.sql+"
-                           "path:models/staging/_staging.yml+"))))))))
+                           "path:models/staging/_staging.yml+" "path:models/staging/stg_customers.sql+"))))))))
 
 (ert-deftest dbt-cli-says-what-git-says-of-the-changes ()
   "Outside a git repository, Changed on the branch says what git says."
