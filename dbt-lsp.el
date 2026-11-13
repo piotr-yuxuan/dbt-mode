@@ -18,8 +18,8 @@
 ;; What lsp-mode does not do by itself, this client does with the
 ;; server's own requests and commands:
 ;;
-;; - `dbt-lsp-rename-model' renames the file of a model, and every `ref'
-;;   and YAML entry that names it: lsp-mode asks the server, by
+;; - `dbt-lsp-rename-model' renames the file of a model, which has the
+;;   server edit the uses it knows of: lsp-mode asks the server, by
 ;;   workspace/willRenameFiles, whenever a file is renamed;
 ;; - `dbt-lsp-compile-file' shows the compiled SQL (dbt.compileFile);
 ;; - `dbt-lsp-show' shows the rows of the model, or of a query
