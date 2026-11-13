@@ -575,13 +575,21 @@ DIRECTORY is \"compiled\", where `dbt compile' and every run write the
 compiled SQL, or \"run\", where a run writes the SQL it ran, its DDL
 included.  Return nil when dbt has not written it."
   (let* ((root (dbt-mode--root))
+         (config (dbt-project-config root))
          (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (package (plist-get resource :package))
          ;; dbt writes the SQL of a file under the directory of its
-         ;; package, at its path from the root of the project.
+         ;; package: at its path from the root for the project, and for
+         ;; another package at its path in the copy that dbt installs,
+         ;; wherever the package lives.
          (file (expand-file-name
-                (file-relative-name (plist-get resource :file) root)
-                (expand-file-name (concat directory "/" (plist-get resource :package))
-                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
+                (if (equal package (dbt-project-name root))
+                    (file-relative-name (plist-get resource :file) root)
+                  (file-name-concat (plist-get config :packages-install-path) package
+                                    (file-relative-name (plist-get resource :file)
+                                                        (nth 1 (assoc package (dbt-project-packages root))))))
+                (expand-file-name (concat directory "/" package)
+                                  (expand-file-name (plist-get config :target-path) root))))
          ;; dbt 2 writes that of a snapshot in a directory of that path,
          ;; named after the snapshot.
          (file (if (file-directory-p file)

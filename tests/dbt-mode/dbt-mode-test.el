@@ -454,17 +454,24 @@
         (should buffer-read-only)))))
 
 (ert-deftest dbt-mode-visits-the-compiled-sql-of-snapshots-and-packages ()
-  "C-c C-v finds where dbt 2 compiles a snapshot, and a package's model."
+  "C-c C-v finds where dbt 2 compiles a snapshot, and a package's model.
+dbt compiles a local package in the copy it installs."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (write-region "select 1 as one" nil (expand-file-name "dbt_packages/shop_utils/models/util_one.sql" root))
+    (make-directory (expand-file-name "local_pkgs/util/models" root) t)
+    (write-region "name: 'util'\nconfig-version: 2\n" nil (expand-file-name "local_pkgs/util/dbt_project.yml" root))
+    (write-region "select 2 as two" nil (expand-file-name "local_pkgs/util/models/util_two.sql" root))
+    (write-region "  - local: local_pkgs/util\n" nil (expand-file-name "packages.yml" root) 'append)
     (with-temp-file (expand-file-name "snapshots/orders_snapshot.sql" root)
       (insert "{% snapshot snap_orders %}\nselect * from {{ ref('stg_orders') }}\n{% endsnapshot %}\n"))
     ;; Where dbt 2.0.9 wrote them.
     (dolist (case '(("snapshots/orders_snapshot.sql"
                      . "target/compiled/shop/snapshots/orders_snapshot.sql/snap_orders.sql")
                     ("dbt_packages/shop_utils/models/util_one.sql"
-                     . "target/compiled/shop_utils/dbt_packages/shop_utils/models/util_one.sql")))
+                     . "target/compiled/shop_utils/dbt_packages/shop_utils/models/util_one.sql")
+                    ("local_pkgs/util/models/util_two.sql"
+                     . "target/compiled/util/dbt_packages/util/models/util_two.sql")))
       (let ((compiled (expand-file-name (cdr case) root)))
         (make-directory (file-name-directory compiled) t)
         (write-region "select 1" nil compiled)
