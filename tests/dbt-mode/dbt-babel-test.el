@@ -35,13 +35,13 @@ The limit, the target and the variables of the block reach dbt."
       (should (eq (nth 1 table) 'hline))
       (should (equal (cadr (nth 2 table)) "NULL"))
       (should (equal (car (nth 2 table))
-                     "show --quiet --output json --limit 3 --inline select {{ var('x') }} as x --target dev --vars {\"x\":1}")))))
+                     "show --quiet --no-write-json --output json --limit 3 --inline select {{ var('x') }} as x --target dev --vars {\"x\":1}")))))
 
 (ert-deftest dbt-babel-gives-the-compiled-sql-of-a-block ()
   "With :compile yes, a block gives its compiled SQL."
   (dbt-test-with-project root
     (should (equal (dbt-test-babel root ":compile yes" "select 1")
-                   "compile --log-format json --inline select 1"))))
+                   "compile --no-write-json --log-format json --inline select 1"))))
 
 (ert-deftest dbt-babel-asks-before-a-protected-target ()
   "On a protected target, a block runs only once the user says yes.

@@ -120,7 +120,8 @@ query."
     (message "dbt show runs for %s..." name)
     (make-process
      :name "dbt show" :buffer output :stderr errors :noquery t :connection-type 'pipe
-     :command `(,executable "show" "--quiet" "--output" "json" "--limit" ,(number-to-string limit)
+     ;; The artifacts of a preview would take the place of a build's.
+     :command `(,executable "show" "--quiet" "--no-write-json" "--output" "json" "--limit" ,(number-to-string limit)
                 ,@(if sql (list "--inline" sql) (list "--select" name)))
      :sentinel
      (lambda (process _event)

@@ -191,7 +191,7 @@ quote counts as it is; a commit on main after the branch does not."
       (dbt-cli-show "orders" nil)
       (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt show: orders*")))
         (should (equal default-directory root))
-        (should (string-match-p "^arguments: show --quiet --output json --limit 7 --select orders$"
+        (should (string-match-p "^arguments: show --quiet --no-write-json --output json --limit 7 --select orders$"
                                 (buffer-string)))
         (goto-char (point-min))
         (compilation-next-error 1)
@@ -212,7 +212,7 @@ In the grid, + runs dbt show again with twice the limit."
       (dbt-cli-show "a_cte" "select 1 as one")
       (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: a_cte*")))
         (should (equal (append (cadr (car tabulated-list-entries)) nil)
-                       '("show --quiet --output json --limit 7 --inline select 1 as one" "NULL")))
+                       '("show --quiet --no-write-json --output json --limit 7 --inline select 1 as one" "NULL")))
         (dbt-rows-more)
         (dbt-test-wait (lambda () (string-search "--limit 14 " (aref (cadr (car tabulated-list-entries)) 0))))
         (kill-buffer)))))
