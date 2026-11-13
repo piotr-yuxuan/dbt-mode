@@ -26,7 +26,7 @@
 
 (defvar-local dbt-rows--rows nil
   "The rows of this buffer, a vector of vectors of cells.
-A cell is a string, the raw text of its value, or nil for NULL.")
+A cell is a string, the text of its value, or nil for NULL.")
 
 (defvar-local dbt-rows--entries nil
   "The entries of every row of this buffer, as `tabulated-list-entries'.
@@ -121,7 +121,7 @@ either: (nil).  Return nil when JSON is not such an array."
 (defun dbt-rows-show (title columns rows limit rerun)
   "Show ROWS of COLUMNS in the buffer *dbt rows: TITLE*, and return it.
 COLUMNS lists the names of the columns, and ROWS the rows, each a list
-of cells: a string, the raw text of the value, or nil for NULL.  LIMIT
+of cells: a string, the text of the value, or nil for NULL.  LIMIT
 is the number of rows asked for, and RERUN a function of a limit that
 asks for the rows again.  A buffer that shows rows already keeps its
 filter and its order."
@@ -194,7 +194,7 @@ in `occur', an upper-case letter in REGEXP makes the case matter."
 
 (defun dbt-rows-copy (format)
   "Copy the rows shown, in their order, as FORMAT, with their header.
-FORMAT is \"CSV\", \"Markdown\" or \"Org\".  The CSV holds the raw value
+FORMAT is \"CSV\", \"Markdown\" or \"Org\".  The CSV holds the text
 of each cell, NULL as an empty field, quoted as RFC 4180 says; the
 tables show each row on one line, as the grid does."
   (interactive (list (completing-read "Copy as: " '("CSV" "Markdown" "Org") nil t)))

@@ -62,8 +62,13 @@ Rows and compiled SQL:
   sorted as numbers. `/` keeps the rows with a cell that matches a regexp
   (with `C-u`, in one column), `w` copies the rows shown as CSV, Markdown
   or Org, `+` asks again with twice the limit, or a numeric prefix's, as
-  dbt has no offset, `g` asks again, and `RET` shows a cell's whole value.
-  Asked again, a CTE is taken from the model as it is now;
+  dbt has no offset, `g` asks again, and `RET` shows a cell's whole value,
+  in a buffer of its own when it is long or holds a newline. The grid of a
+  CTE or a region is named after its file, as `*dbt rows: orders/final*`.
+  Two columns of one name, as a join gives, show apart, the second renamed
+  `id_1` as dbt lsp does. Without a server, a number shows as JSON reads
+  it: `12.30` as `12.3`. Asked again, a CTE is taken from the model as it
+  is now;
 - `C-c C-v` shows the compiled SQL beside the model and keeps it there:
   point's line in it faces point's line in the model, CTE by CTE, and
   saving compiles it again with dbt lsp; without a server, it is read again
@@ -72,9 +77,12 @@ Rows and compiled SQL:
   STATE` on main, or production's artifacts;
 - in Org, `C-c C-c` on a `#+begin_src dbt` block gives its rows as a table,
   or its compiled SQL with `:compile yes`; `:limit`, `:target`, `:var`,
-  passed as dbt's `--vars`, and Babel's `:dir` apply. A block on a target of
-  `dbt-protected-targets`, `prod` by default, asks first: the target is
-  `:target`, else `DBT_TARGET`, else the profile's default.
+  passed as dbt's `--vars`, and Babel's `:dir` apply; each cell is on one
+  line of the table. A block on a target of `dbt-protected-targets`, `prod`
+  by default, asks first: the target is `:target`, else `DBT_TARGET`, else
+  the profile's default, read from a call of `env_var` as dbt reads it. A
+  default that dbt-mode cannot read, such as other Jinja, asks too while a
+  target is protected.
 
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
@@ -183,7 +191,7 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 | `dbt-lsp-arguments`            | `nil`   | More arguments of `dbt lsp`, such as `("--profiles-dir" "dir")` |
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
-| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block asks before it runs        |
+| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block asks before it runs; an unread default asks too |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
 | `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
 
