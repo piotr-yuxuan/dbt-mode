@@ -375,6 +375,9 @@ Its text is left as it is."
                       "-- logical CTEs\n{# the final CTE #}\nfinal as (\n    select * from orders\n)\n\n"
                       "-- simple select statement\nselect * from final\n")))
     (should (equal (dbt-test-indented text) text))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text)))
+  ;; Before a closer or at the end, a comment is one of the lines above.
+  (let ((text "with a as (\n    select\n        id\n        -- more to come\n)\nselect\n    id\n    -- last\n"))
     (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
 
 (ert-deftest dbt-edit-indents-an-else-branch-by-itself ()
@@ -385,7 +388,7 @@ Its text is left as it is."
 
 (ert-deftest dbt-edit-indents-a-window-frame-with-its-order-by ()
   "A window's partition and frame are at the level of its order by; a column named range is a column."
-  (let ((text (concat "select\n    sum(amount) over (\n        partition by customer_id\n        order by order_date\n"
+  (let ((text (concat "select\n    sum(amount) over (\n        partition by customer_id,\n            region\n        order by order_date\n"
                       "        rows between unbounded preceding and current row\n    ) as running_total,\n    range\n"
                       "from payments\n")))
     (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
@@ -405,7 +408,20 @@ Its text is left as it is."
   (dbt-test-with-window "with a as (\n    select 1\n    "
     (electric-indent-local-mode 1)
     (dbt-test-type "),")
-    (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-"))))
+    (should (equal (dbt-test-around-point) "with a as (\n    select 1\n),-!-")))
+  (dbt-test-with-window "{% if x %}\n    select 1\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% else")
+    (should (equal (dbt-test-around-point) "{% if x %}\n    select 1\n{% else-!- %}")))
+  (dbt-test-with-window "{% set xs = [\n    1,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "]")
+    (should (equal (dbt-test-around-point) "{% set xs = [\n    1,\n]-!-")))
+  ;; At the end of the buffer, a tag leads to what is typed next: a clause.
+  (dbt-test-with-window "select *\nfrom t\n"
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{% if is_incremental() %}")
+    (should (equal (dbt-test-around-point) "select *\nfrom t\n{% if is_incremental() %}-!-"))))
 
 (ert-deftest dbt-edit-keeps-the-states-of-its-scan ()
   "The Jinja blocks read from the states kept are those of a scan from the start; a scan near the start keeps the states further on."
