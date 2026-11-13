@@ -733,9 +733,13 @@ project's index no more, as the opening found the buffer's node."
       (save-buffer)
       (should (equal dbt-mode--status "dev incremental"))
       (should-not (gethash (cons root 'index) dbt-project--cache)))
+    ;; config() names the materialization of orders: no manifest is read.
+    (when (get-buffer " *dbt manifest*")
+      (kill-buffer " *dbt manifest*"))
     (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
       (ert-run-idle-timers)
-      (should (equal dbt-mode--status "dev table")))))
+      (should (equal dbt-mode--status "dev table"))
+      (should-not (get-buffer " *dbt manifest*")))))
 
 (ert-deftest dbt-mode-copies-the-build-command ()
   "The build command selects the model, or with a prefix its family.
