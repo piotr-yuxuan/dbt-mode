@@ -7,7 +7,7 @@
 ;; Maintainer: piotr-yuxuan <piotr-yuxuan@users.noreply.github.com>
 ;; URL: https://github.com/piotr-yuxuan/dbt-mode
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (lsp-mode "9.0.0"))
+;; Package-Requires: ((emacs "31.1") (lsp-mode "9.0.0"))
 ;; Keywords: languages, sql, tools
 
 ;; This file is not part of GNU Emacs.
@@ -29,7 +29,8 @@
 ;; project.  It is `sql-mode' that also reads Jinja: `{# #}' comments are
 ;; comments, and the tags `{{ }}' and `{% %}' show their keywords, dbt's
 ;; functions and the macros they call.  A `.sql' file below a
-;; dbt_project.yml opens in it, unless it lies in target or logs.
+;; dbt_project.yml opens in it, unless it lies under the target-path of
+;; the project, target by default.
 ;;
 ;; Without any dbt executable, it reads the project itself (see
 ;; dbt-project.el) for:
@@ -110,26 +111,55 @@ finds the tag around point, within this many characters."
   :type 'natnum
   :group 'dbt)
 
+(defun dbt-mode--tag-end (limit &optional mark)
+  "Return the end of the Jinja tag whose opener ends at point, or nil.
+The closer `}}' or `%}' ends the tag, outside its strings and the braces
+of its dict literals.  When another opener, or LIMIT, comes first, the
+tag is not closed: return nil, with point at that opener or at LIMIT.
+With MARK, give the quotes of each string of the tag the syntax of
+string fences, for `syntax-propertize-function'."
+  (let ((depth 0))
+    (catch 'end
+      (while (re-search-forward
+              (concat "{[{%#]\\|[{}]\\|%}\\|\\("
+                      "\"[^\"\\]*\\(?:\\\\\\(?:.\\|\n\\)[^\"\\]*\\)*\""
+                      "\\|'[^'\\]*\\(?:\\\\\\(?:.\\|\n\\)[^'\\]*\\)*'\\)")
+              limit 'move)
+        (cond ((match-beginning 1)
+               (when mark
+                 (put-text-property (match-beginning 1) (1+ (match-beginning 1))
+                                    'syntax-table (string-to-syntax "|"))
+                 (put-text-property (1- (match-end 1)) (match-end 1) 'syntax-table (string-to-syntax "|"))))
+              ((equal (match-string 0) "{") (setq depth (1+ depth)))
+              ((equal (match-string 0) "}")
+               (if (and (zerop depth) (eq (char-after) ?}))
+                   (throw 'end (1+ (point)))
+                 (setq depth (max 0 (1- depth)))))
+              ((equal (match-string 0) "%}") (when (zerop depth) (throw 'end (point))))
+              (t (goto-char (match-beginning 0))
+                 (throw 'end nil)))))))
+
 (defun dbt-mode-jinja-bounds (&optional position)
   "Return (START . END) of the Jinja tag `{{ }}' or `{% %}' around POSITION.
 POSITION defaults to point.  Return nil outside a tag, or when the tag
 is longer than `dbt-mode-jinja-max-tag-length'.  END is after the
 closing delimiter, or nil when the tag is not closed yet."
   (save-excursion
-    (let ((position (or position (point)))
-          (limit dbt-mode-jinja-max-tag-length))
+    (let* ((position (or position (point)))
+           (limit dbt-mode-jinja-max-tag-length)
+           bounds)
       (goto-char position)
-      ;; Stepping back two characters finds the opening delimiter of a tag
-      ;; that starts at POSITION.
-      (when (and (re-search-backward "{[{%]\\|[}%]}" (max (point-min) (- position limit)) t)
-                 (eq (char-after) ?{)
-                 (not (nth 4 (syntax-ppss))))
+      ;; The nearest opener may be that of a tag in a string of the tag
+      ;; around POSITION, which ends before it.
+      (while (and (not bounds) (re-search-backward "{[{%]" (max (point-min) (- position limit)) t))
         (let ((start (point)))
-          (goto-char (+ start 2))
-          (cons start
-                (and (re-search-forward "[}%]}\\|{[{%]" (min (point-max) (+ position limit)) t)
-                     (eq (char-before) ?})
-                     (point))))))))
+          (unless (nth 4 (syntax-ppss))
+            (forward-char 2)
+            (let ((end (dbt-mode--tag-end (min (point-max) (+ position limit)))))
+              (when (if end (> end position) (>= (point) position))
+                (setq bounds (cons start end)))))
+          (goto-char start)))
+      bounds)))
 
 (defun dbt-mode-cte-regexp (&optional name)
   "Return the regexp of the start of a CTE, up to its parenthesis.
@@ -152,18 +182,20 @@ For `font-lock-extend-region-functions'."
 (defun dbt-mode--match-tag (limit)
   "Find the next Jinja tag before LIMIT, outside a comment, for font lock.
 Group 1 matches its contents, and groups 2 and 3 its delimiters.  An
-opener that meets another before any closer is still being typed: it
+opener that meets another before its closer is still being typed: it
 makes no tag, so that it does not swallow the next tag's closer."
-  (let (found)
-    (while (and (not found)
-                (re-search-forward "\\({[{%]-?\\)\\(\\(?:[^{]\\|{[^{%]\\)*?\\)\\(-?[}%]}\\)" limit t))
-      (setq found (not (nth 4 (save-excursion (syntax-ppss (match-beginning 0))))))
-      (unless found
-        (goto-char (1+ (match-beginning 0)))))
-    (when found
-      (set-match-data (list (match-beginning 0) (match-end 0) (match-beginning 2) (match-end 2)
-                            (match-beginning 1) (match-end 1) (match-beginning 3) (match-end 3))))
-    found))
+  (let (end)
+    (while (and (not end) (re-search-forward "{[{%]-?" limit t))
+      (let ((start (match-beginning 0))
+            (open (match-end 0)))
+        (setq end (and (not (nth 4 (save-excursion (syntax-ppss start))))
+                       (dbt-mode--tag-end limit)))
+        (if (not end)
+            (goto-char (1+ start))
+          (let ((close (- end (if (eq (char-before (- end 2)) ?-) 3 2))))
+            (goto-char end)
+            (set-match-data (list start end open (max open close) start open close end))))))
+    end))
 
 (defconst dbt-mode--font-lock-keywords
   (let ((within '(progn (goto-char (match-beginning 1)) (match-end 1)))
@@ -190,11 +222,31 @@ makes no tag, so that it does not swallow the next tag's closer."
 
 (defconst dbt-mode--syntax-propertize
   (syntax-propertize-rules
-   ("\\({\\)#\\(?:.\\|\n\\)*?#\\(}\\)"
-    (0 (ignore (put-text-property (match-beginning 0) (match-end 0) 'syntax-multiline t)))
-    (1 "!")
-    (2 "!")))
-  "Make each Jinja comment `{# #}' a comment, as generic comment fences.")
+   ("\\({\\)#"
+    (1 (unless (nth 8 (save-excursion (syntax-ppss (match-beginning 1))))
+         (string-to-syntax "!"))))
+   ("#\\(}\\)"
+    (1 (when (eq (nth 7 (save-excursion (syntax-ppss (match-beginning 1)))) 'syntax-table)
+         (string-to-syntax "!"))))
+   ("{[{%]"
+    (0 (ignore
+        (let ((start (match-beginning 0))
+              (state (save-excursion (syntax-ppss (match-beginning 0)))))
+          (unless (or (nth 4 state) (eq (nth 3 state) t))
+            (save-excursion
+              (put-text-property start (or (dbt-mode--tag-end (min (point-max) (+ (point) dbt-mode-jinja-max-tag-length))
+                                                              t)
+                                           (point))
+                                 'syntax-multiline t))))))))
+  "Make each Jinja comment `{# #}' a comment, and the strings of a tag strings.
+A comment is fenced by generic comment fences, each decided alone, from
+the state before it: `{#' opens a comment outside a string or a comment,
+and `#}' closes the comment that a fence opened.  So the comment is one
+whatever the chunks that `syntax-propertize' reads, and when its closer
+is typed after.  The quotes of a string of a tag are string fences, so
+that a quote of the other kind, or one that a backslash escapes, ends
+nothing; a tag within a SQL string stays in it.  A tag is marked as one
+multiline construct, read again whole after a change within it.")
 
 ;;;; What point is on
 
@@ -219,71 +271,82 @@ of that CTE, then a select from it; Jinja stays as it is."
                       (or (> (car state) 0) (nth 8 state)))))
         (cons name (format "%s\nselect * from %s" (buffer-substring-no-properties (point) end) name))))))
 
+(defconst dbt-mode-macro-call-regexp
+  "\\_<\\(?:\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\)?\\(?1:[A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*("
+  "The regexp of a macro call, up to its parenthesis.
+Group 1 matches the name of the macro, and group 2 its package, when the
+call gives one.")
+
 (defun dbt-mode-target-at-point ()
   "Return what point is on, as a target plist, or nil.
-The plist is (:kind KIND :qualifier QUALIFIER :name NAME), as
-`dbt-project-resolve' reads it: a call of `ref', `source' or `doc', or
-of a macro.  In a YAML file, the `name' of an entry stands for what it
-describes: a model for an entry of models, a source or a table, a
-macro."
+The plist is (:kind KIND :qualifier QUALIFIER :name NAME :version
+VERSION), as `dbt-project-resolve' reads it: a call of `ref', `source'
+or `doc', or, within a Jinja tag, of a macro.  In a YAML file, the
+`name' of an entry stands for what it describes, as
+`dbt-mode-entity-target' tells: the index of the project gives the entry
+of the line, as last saved."
   (let ((position (point))
+        (line (line-number-at-pos))
         (limit dbt-mode-jinja-max-tag-length))
     (save-excursion
       (or (seq-some
            (pcase-lambda (`(,kind . ,regexp))
-             (goto-char (max (point-min) (- position limit)))
-             (let (found)
-               (while (and (not found) (re-search-forward regexp (min (point-max) (+ position limit)) t)
-                           (<= (match-beginning 0) position))
-                 (when (<= position (match-end 0))
-                   (setq found (list :kind kind :qualifier (match-string-no-properties 2)
-                                     :name (match-string-no-properties 1)))))
-               found))
-           dbt-project-call-regexps)
-          (when-let* ((symbol (progn (goto-char position) (bounds-of-thing-at-point 'symbol)))
-                      ((dbt-mode-jinja-bounds))
-                      ((progn (goto-char (cdr symbol)) (looking-at-p "[ \t\n]*("))))
-            (goto-char (car symbol))
-            (list :kind 'macro
-                  :qualifier (when (looking-back "\\_<\\([A-Za-z_][A-Za-z0-9_]*\\)\\." (line-beginning-position))
-                               (match-string-no-properties 1))
-                  :name (buffer-substring-no-properties (car symbol) (cdr symbol))))
-          (when-let* (((member (file-name-extension (format "%s" buffer-file-name)) '("yml" "yaml")))
-                      (entry (seq-find (lambda (entry) (= (plist-get entry :line) (line-number-at-pos position)))
-                                       (dbt-project-yaml-entries (buffer-string)))))
-            (list :kind (alist-get (plist-get entry :section)
-                                   '(("sources" . source) ("tables" . source) ("macros" . macro))
-                                   'ref nil #'equal)
-                  :qualifier (plist-get entry :source)
-                  :name (plist-get entry :name)))))))
+             (let ((bound (min (point-max) (+ position limit)))
+                   matched)
+               (goto-char (max (point-min) (- position limit)))
+               (while (and (setq matched (re-search-forward regexp bound t)) (< (match-end 0) position)))
+               (and matched (<= (match-beginning 0) position)
+                    (list :kind kind :qualifier (match-string-no-properties 2)
+                          :name (match-string-no-properties 1) :version (match-string-no-properties 3)))))
+           (append dbt-project-call-regexps
+                   (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp)))))
+          (when-let* ((root (dbt-project-root))
+                      (entity (seq-find (lambda (entity)
+                                          (and (equal (plist-get entity :file) buffer-file-name)
+                                               (eql (plist-get entity :line) line)))
+                                        (dbt-project-entities root '(properties source table exposure snapshot)))))
+            (dbt-mode-entity-target entity (dbt-project-name root)))))))
 
 ;;;; Cross-references
 
 (defun dbt-mode-identifier (target)
   "Return the xref identifier of TARGET, a plist of `dbt-mode-target-at-point'.
-It reads KIND:NAME, or KIND:QUALIFIER/NAME."
-  (format "%s:%s%s" (plist-get target :kind)
+It reads KIND:NAME, or KIND:QUALIFIER/NAME, then @VERSION when TARGET
+names a version of a model."
+  (format "%s:%s%s%s" (plist-get target :kind)
           (if (plist-get target :qualifier) (concat (plist-get target :qualifier) "/") "")
-          (plist-get target :name)))
+          (plist-get target :name)
+          (if (plist-get target :version) (concat "@" (plist-get target :version)) "")))
 
 (defun dbt-mode-parse-identifier (identifier)
   "Return the target plist of IDENTIFIER, as `dbt-mode-identifier' writes it.
 Return nil when IDENTIFIER is not one."
-  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\):\\(?:\\([^/]+\\)/\\)?\\(.+\\)\\'" identifier)
+  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\([^@]+\\)\\(?:@\\(.+\\)\\)?\\'"
+                      identifier)
     (list :kind (intern (match-string 1 identifier))
           :qualifier (match-string 2 identifier)
-          :name (match-string 3 identifier))))
+          :name (match-string 3 identifier)
+          :version (match-string 4 identifier))))
 
 (defun dbt-mode-entity-target (entity project)
   "Return the target that names ENTITY, an entity of the PROJECT's index.
-A resource of a package other than PROJECT is qualified by its package."
-  (let ((package (and (not (equal (plist-get entity :package) project)) (plist-get entity :package))))
-    (pcase (plist-get entity :kind)
-      ('table (list :kind 'source :qualifier (plist-get entity :source) :name (plist-get entity :name)))
-      ('source (list :kind 'source :name (plist-get entity :name)))
-      ('doc (list :kind 'doc :qualifier package :name (plist-get entity :name)))
-      ((or 'macro 'test) (list :kind 'macro :qualifier package :name (plist-get entity :name)))
-      (_ (list :kind 'ref :qualifier package :name (plist-get entity :name))))))
+An entry of the properties of a resource names what its section holds,
+as `dbt-project-section-kinds' tells.  A resource of a package other
+than PROJECT is qualified by its package, and a version of a model by
+its version."
+  (let ((kind (if (eq (plist-get entity :kind) 'properties)
+                  (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
+                (plist-get entity :kind)))
+        (package (and (not (equal (plist-get entity :package) project)) (plist-get entity :package))))
+    (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
+                                  (doc . doc) (analysis . analysis))
+                           'ref)
+          :qualifier (pcase kind
+                       ('table (plist-get entity :source))
+                       ('source nil)
+                       (_ package))
+          :name (plist-get entity :name)
+          :version (plist-get entity :version))))
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.
@@ -322,25 +385,46 @@ For `xref-backend-functions'."
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
-The YAML entries of a resource count as uses."
+A use is a call that resolves, from the package of its file, to what
+IDENTIFIER resolves to from the current buffer; a call of any table of
+a source uses that source.  The definition of a macro is not a use of
+it.  The YAML entries of what IDENTIFIER resolves to count as uses."
   (let* ((root (dbt-project-root))
          (target (dbt-mode-parse-identifier identifier))
-         (name (concat "['\"]" (regexp-quote (plist-get target :name)) "['\"]"))
-         (qualifier (and (plist-get target :qualifier)
-                         (concat "['\"]" (regexp-quote (plist-get target :qualifier)) "['\"] *, *"))))
-    (append
-     (xref-matches-in-files
-      (pcase (plist-get target :kind)
-        ('source (concat "source *( *" qualifier name))
-        ('macro (concat "\\(^\\|[^A-Za-z0-9_]\\)" (regexp-quote (plist-get target :name)) " *("))
-        (kind (format "%s *([^)]*%s" kind name)))
-      (mapcan (lambda (package) (dbt-project-source-files (nth 1 package)))
-              (dbt-project-packages root)))
-     (and (eq (plist-get target :kind) 'ref)
-          (mapcar #'dbt-mode--xref
-                  (seq-filter (lambda (entity)
-                                (member (plist-get entity :section) '("models" "seeds" "snapshots" "analyses")))
-                              (dbt-project-entities root '(properties) (plist-get target :name))))))))
+         (kind (plist-get target :kind))
+         (definition (car (dbt-mode-definitions target)))
+         ;; A definition of a macro matches the first pattern, which gives
+         ;; no name, rather than the pattern of a call.
+         (regexp (alist-get kind `((macro . ,(concat "\\_<\\(?:macro\\|test\\|materialization\\)[ \t\n]+"
+                                                     "[A-Za-z_][A-Za-z0-9_]*\\|" dbt-mode-macro-call-regexp))
+                                   ,@dbt-project-call-regexps)
+                            regexp-unmatchable))
+         (source (and (eq kind 'source) (null (plist-get target :qualifier))))
+         uses)
+    (pcase-dolist (`(,package ,directory) (dbt-project-packages root))
+      (dolist (file (seq-remove (lambda (file) (string-suffix-p ".csv" file)) (dbt-project-source-files directory)))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (while (re-search-forward regexp nil t)
+            (let ((call (if source
+                            (list :kind kind :name (match-string 2))
+                          (list :kind kind :qualifier (match-string 2) :name (match-string 1)
+                                :version (match-string 3)))))
+              (when (and (equal (plist-get call :name) (plist-get target :name))
+                         (equal (car (dbt-project-resolve root call package)) definition))
+                (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
+                                 (xref-make-file-location file (line-number-at-pos (match-beginning 0))
+                                                          (- (match-beginning 0) (line-beginning-position))))
+                      uses)))))))
+    (append (nreverse uses)
+            (and definition
+                 (mapcar #'dbt-mode--xref
+                         (seq-filter (lambda (entry)
+                                       (eq (alist-get (plist-get entry :section) dbt-project-section-kinds
+                                                      nil nil #'equal)
+                                           (plist-get definition :kind)))
+                                     (dbt-project-entities root '(properties) (plist-get definition :name)
+                                                           (plist-get definition :package))))))))
 
 ;;;; Completion
 
@@ -366,16 +450,16 @@ that other functions, such as those of a language server, still run."
                 (pcase-lambda (`(,regexp . ,candidates))
                   (when (looking-back regexp (max (point-min) (- (point) 300)))
                     (cons (match-beginning 1) (funcall candidates (match-string-no-properties 2)))))
-                `(("ref[ \t\n]*([ \t\n]*['\"]\\(?2:[^'\"]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                `((,(dbt-project-call-regexp 'ref 'required t)
                    . ,(lambda (package) (dbt-project-entities root '(model seed snapshot) nil package)))
-                  ("ref[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'ref nil t)
                    . ,(lambda (_) (dbt-project-entities root '(model seed snapshot))))
-                  ("source[ \t\n]*([ \t\n]*['\"]\\(?2:[^'\"]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'source 'required t)
                    . ,(lambda (source) (seq-filter (lambda (table) (equal source (plist-get table :source)))
                                                    (dbt-project-entities root '(table)))))
-                  ("source[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'source nil t)
                    . ,(lambda (_) (dbt-project-entities root '(source))))
-                  ("doc[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'doc nil t)
                    . ,(lambda (_) (dbt-project-entities root '(doc))))
                   ("\\_<\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\(?1:[A-Za-z0-9_]*\\)"
                    . ,(lambda (package) (and (dbt-mode-jinja-bounds)
@@ -394,6 +478,10 @@ that other functions, such as those of a language server, still run."
 
 ;;;; Commands
 
+(defun dbt-mode-server-p ()
+  "Return non-nil when dbt lsp serves the current buffer."
+  (and (featurep 'dbt-lsp) (dbt-lsp-workspace)))
+
 (defun dbt-mode--root ()
   "Return the root of the current project, or signal a `user-error'."
   (or (dbt-project-root) (user-error "Not in a dbt project: no dbt_project.yml above")))
@@ -404,14 +492,14 @@ In a YAML file, it is the resource whose entry holds point."
   (let ((root (dbt-mode--root)))
     (or (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
         (when-let* ((target (dbt-mode-target-at-point))
-                    ((eq (plist-get target :kind) 'ref)))
+                    ((memq (plist-get target :kind) '(ref analysis))))
           (car (dbt-mode-definitions target))))))
 
-(defun dbt-mode-read-resource (prompt)
+(defun dbt-mode-read-resource (prompt &optional no-default)
   "Read the name of a model, seed or snapshot with PROMPT.
-The default is that of the current buffer."
+The default is that of the current buffer, unless NO-DEFAULT."
   (completing-read prompt (dbt-mode--candidates (dbt-project-entities (dbt-mode--root) '(model seed snapshot)))
-                   nil t nil nil (plist-get (dbt-mode-current-resource) :name)))
+                   nil t nil nil (unless no-default (plist-get (dbt-mode-current-resource) :name))))
 
 (defun dbt-find-resource (identifier)
   "Visit the definition of IDENTIFIER, read with completion.
@@ -430,7 +518,7 @@ or not a language server runs."
   (interactive)
   (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (entries (seq-filter (lambda (entity)
-                                (member (plist-get entity :section) '("models" "seeds" "snapshots" "analyses")))
+                                (member (plist-get entity :section) dbt-project-resource-sections))
                               (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)))))
     (unless entries
       (user-error "No YAML entry names %s" (plist-get resource :name)))
@@ -444,16 +532,22 @@ or not a language server runs."
 With dbt lsp, the server compiles it, unsaved changes included.
 Otherwise, show what the last `dbt compile' or `dbt run' wrote."
   (interactive)
-  (if (and (featurep 'dbt-lsp) (dbt-lsp-workspace))
+  (if (dbt-mode-server-p)
       (dbt-lsp-compile-file)
     (let* ((root (dbt-mode--root))
            (resource (or (dbt-mode-current-resource) (user-error "No model here")))
-           (package (assoc (plist-get resource :package) (dbt-project-packages root)))
+           ;; dbt writes the SQL of a file under the directory of its
+           ;; package, at its path from the root of the project.
            (file (expand-file-name
-                  (file-relative-name (plist-get resource :file) (nth 1 package))
-                  (expand-file-name (concat "compiled/" (car package))
-                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))))
-      (unless (file-exists-p file)
+                  (file-relative-name (plist-get resource :file) root)
+                  (expand-file-name (concat "compiled/" (plist-get resource :package))
+                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
+           ;; dbt 2 writes that of a snapshot in a directory of that path,
+           ;; named after the snapshot.
+           (file (if (file-directory-p file)
+                     (expand-file-name (concat (plist-get resource :name) ".sql") file)
+                   file)))
+      (unless (file-regular-p file)
         (user-error "Not compiled yet: run dbt compile, or start dbt lsp"))
       (with-current-buffer (find-file-noselect file)
         (read-only-mode 1)
@@ -470,7 +564,7 @@ show' runs it, on the Jinja of the CTE."
                      ((use-region-p) (list (region-beginning) (region-end)))))
   (let ((query (cond (cte (dbt-mode-cte-query))
                      (start (cons "query" (buffer-substring-no-properties start end))))))
-    (cond ((not (and (featurep 'dbt-lsp) (dbt-lsp-workspace)))
+    (cond ((not (dbt-mode-server-p))
            (require 'dbt-cli)
            (dbt-cli-show (cdr query)
                          (unless query (plist-get (or (dbt-mode-current-resource) (user-error "No model here"))
@@ -481,21 +575,28 @@ show' runs it, on the Jinja of the CTE."
 (defun dbt-lineage (name)
   "Show the upstream and downstream of the model, seed or snapshot NAME.
 With dbt lsp, the server gives the lineage; otherwise the `ref' and
-`source' calls of the project's files give it."
+`source' calls of the project's files give it, read again when the
+lineage is asked for again."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
-  (if (and (featurep 'dbt-lsp) (dbt-lsp-workspace))
+  (if (dbt-mode-server-p)
       (dbt-lsp-lineage name)
-    (let ((root (dbt-mode--root)))
-      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls"))))
+    (let ((root (dbt-mode--root))
+          refresh)
+      (setq refresh (lambda ()
+                      (dbt-project-forget root)
+                      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh)))
+      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh))))
 
 (defun dbt-insert-ref (name)
   "Insert a call of `ref' to NAME, read with completion.
 Outside a Jinja tag, the call comes within `{{ }}'.  A resource of an
-installed package is called with its package."
-  (interactive (list (dbt-mode-read-resource "ref: ")))
+installed package is called with its package.  The current resource is
+not the default: a model that refers to itself is a cycle."
+  (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
-         (entity (car (dbt-project-resolve-ref root nil name)))
+         (entity (or (car (dbt-project-resolve-ref root nil name))
+                     (user-error "No model, seed or snapshot named `%s'" name)))
          (call (if (equal (plist-get entity :package) (dbt-project-name root))
                    (format "ref('%s')" name)
                  (format "ref('%s', '%s')" (plist-get entity :package) name))))
@@ -530,16 +631,14 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
     "---"
-    ["Rename model..." dbt-lsp-rename-model :active (and (featurep 'dbt-lsp) (dbt-lsp-workspace))]
-    ["Format buffer" dbt-lsp-format-buffer :active (and (featurep 'dbt-lsp) (dbt-lsp-workspace))]
+    ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
+    ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression
-  `(("Macros" "{%-?[ \t\n]*macro[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Tests" "{%-?[ \t\n]*test[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Snapshots" "{%-?[ \t\n]*snapshot[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Docs" "{%-?[ \t\n]*docs[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    (nil ,(dbt-mode-cte-regexp) 1))
+  (append (mapcar (pcase-lambda (`(,title . ,kind)) (list title (alist-get kind dbt-project-block-regexps) 1))
+                  '(("Macros" . macro) ("Tests" . test) ("Snapshots" . snapshot) ("Docs" . doc)))
+          `((nil ,(dbt-mode-cte-regexp) 1)))
   "The entries of `imenu' in `dbt-mode': CTEs at top, then Jinja blocks.")
 
 ;;;###autoload
@@ -551,7 +650,15 @@ the project defines for `xref', completion and `imenu'.  See the
 commentary of dbt-mode.el for the rest.
 
 \\{dbt-mode-map}"
-  (setq-local syntax-propertize-function dbt-mode--syntax-propertize)
+  (let ((sql-propertize syntax-propertize-function))
+    ;; Jinja first, as dbt renders it before SQL is read; then the rules
+    ;; of `sql-mode', which must not meet the states that `syntax-ppss'
+    ;; cached without their own properties.
+    (setq-local syntax-propertize-function
+                (lambda (start end)
+                  (funcall dbt-mode--syntax-propertize start end)
+                  (syntax-ppss-flush-cache start)
+                  (funcall sql-propertize start end))))
   (add-hook 'syntax-propertize-extend-region-functions #'syntax-propertize-multiline 'append 'local)
   (add-hook 'font-lock-extend-region-functions #'dbt-mode--extend-region 'append 'local)
   (setq-local imenu-generic-expression dbt-mode-imenu-generic-expression
@@ -589,12 +696,15 @@ For `yaml-mode-hook' and `yaml-ts-mode-hook'."
 ;;;###autoload
 (defun dbt-mode-file-p ()
   "Return non-nil when the buffer visits the SQL of a dbt project.
-That is a `.sql' file below a dbt_project.yml, but not in target or
-logs, where dbt writes plain SQL.  For `magic-mode-alist'."
-  (and buffer-file-name
-       (string-match-p "\\.sql\\'" buffer-file-name)
-       (when-let* ((root (locate-dominating-file buffer-file-name "dbt_project.yml")))
-         (not (string-match-p "\\`\\(?:target\\|logs\\)/" (file-relative-name buffer-file-name root))))))
+That is a `.sql' file of the project that `dbt-project-root' finds, but
+not under its target-path, where dbt writes plain SQL.  For
+`magic-mode-alist'."
+  (when-let* ((file buffer-file-name)
+              ((string-match-p "\\.sql\\'" file))
+              (root (dbt-project-root file)))
+    (not (string-prefix-p (file-name-as-directory
+                           (expand-file-name (plist-get (dbt-project-config root) :target-path) root))
+                          (expand-file-name file)))))
 
 ;;;###autoload
 (add-to-list 'magic-mode-alist '(dbt-mode-file-p . dbt-mode))
