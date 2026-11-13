@@ -78,12 +78,35 @@ The snapshot path is made when it does not exist; a name is used once."
     (should-error (dbt-new-snapshot "../../escape" "ref('orders')") :type 'user-error)))
 
 (ert-deftest dbt-new-refuses-names-that-are-paths ()
-  "A source, a table or a name read from YAML never steers a file elsewhere."
+  "A source, a table or a name read from YAML never steers a file elsewhere.
+A hyphen, as in google-ads, is part of a name."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (should-error (dbt-new-staging-model "../../../escape" "t") :type 'user-error)
     (should-error (dbt-new-staging-model "raw" "a/b") :type 'user-error)
-    (should-not (file-exists-p (expand-file-name "../escape__t.sql" root)))))
+    (should-error (dbt-new-staging-model "-raw" "t") :type 'user-error)
+    (should-not (file-exists-p (expand-file-name "../escape__t.sql" root)))
+    (dbt-new-staging-model "google-ads" "campaigns")
+    (should (equal (file-relative-name buffer-file-name root)
+                   "models/staging/google-ads/stg_google-ads__campaigns.sql"))))
+
+(ert-deftest dbt-new-writes-no-entry-for-a-model-that-exists ()
+  "A staging model that exists already gets no entry: its YAML file is left alone."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "models/staging/raw" root) t)
+    (write-region "select 1\n" nil (expand-file-name "models/staging/raw/stg_raw__raw_orders.sql" root))
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-new-staging-model "raw" "raw_orders") :type 'user-error)
+    (should-not (file-exists-p (expand-file-name "models/staging/raw/_raw__models.yml" root)))))
+
+(ert-deftest dbt-new-writes-no-model-when-its-entry-is-refused ()
+  "A staging model whose YAML file refuses its entry is not written either."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "models/staging/raw" root) t)
+    (write-region "models: []\n" nil (expand-file-name "models/staging/raw/_raw__models.yml" root))
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-new-staging-model "raw" "raw_orders") :type 'user-error)
+    (should-not (file-exists-p (expand-file-name "models/staging/raw/stg_raw__raw_orders.sql" root)))))
 
 (ert-deftest dbt-new-adds-the-entry-of-a-model ()
   "A model without entry gets one in its directory; one with an entry visits it."

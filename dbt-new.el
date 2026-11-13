@@ -41,9 +41,10 @@ Refuse a FILE that exists."
   (save-buffer))
 
 (defun dbt-new--check-name (name what)
-  "Refuse NAME, the name of WHAT, unless it is made of letters, digits and _.
-It becomes the name of a file, which YAML must not steer elsewhere."
-  (unless (string-match-p "\\`[A-Za-z0-9_]+\\'" name)
+  "Refuse NAME, the name of WHAT, unless it is made of letters, digits, _ and -.
+It becomes the name of a file, which YAML must not steer elsewhere: a
+separator, a dot or a leading - are refused."
+  (unless (string-match-p "\\`[A-Za-z0-9_][A-Za-z0-9_-]*\\'" name)
     (user-error "Not a name for %s: %s" what name)))
 
 (defun dbt-new--append-yaml (file section name entry)
@@ -144,12 +145,16 @@ them out."
                                               source)
                                       root))
          (name (format "stg_%s__%s" source table)))
+    ;; Both refusals before either write: a model that exists, then the
+    ;; YAML file's, so that neither file is left changed alone.
+    (when (file-exists-p (expand-file-name (concat name ".sql") directory))
+      (user-error "%s exists already" (expand-file-name (concat name ".sql") directory)))
+    (dbt-new--append-yaml (expand-file-name (format "_%s__models.yml" source) directory) "models" name
+                          (format "  - name: %s\n    description: \"\"\n" name))
     (dbt-new--write-file (expand-file-name (concat name ".sql") directory)
                          (format "with\n\nsource as (\n\n    select * from {{ source('%s', '%s') }}\n\n),\n\nrenamed as (\n\n    select\n        "
                                  source table)
-                         "*\n\n    from source\n\n)\n\nselect * from renamed\n")
-    (dbt-new--append-yaml (expand-file-name (format "_%s__models.yml" source) directory) "models" name
-                          (format "  - name: %s\n    description: \"\"\n" name))))
+                         "*\n\n    from source\n\n)\n\nselect * from renamed\n")))
 
 (defun dbt-new-model (file)
   "Write the new model FILE, a select from a `ref' to fill in.
@@ -203,8 +208,8 @@ the timestamp strategy to adjust."
 
 (defun dbt-add-properties ()
   "Visit the YAML entry of the current resource, adding one if it has none.
-The entry goes under the section of its kind: models, seeds, snapshots,
-analyses or macros."
+The entry goes under the section of its kind: models, seeds, snapshots
+or analyses."
   (interactive)
   (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (section (or (car (rassq (plist-get resource :kind) dbt-project-section-kinds))
