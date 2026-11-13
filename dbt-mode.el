@@ -227,8 +227,9 @@ call gives one.")
 
 (defun dbt-mode-target-at-point ()
   "Return what point is on, as a target plist, or nil.
-The plist is (:kind KIND :qualifier QUALIFIER :name NAME), as
-`dbt-project-resolve' reads it: a call of `ref', `source' or `doc', or,
+The plist is (:kind KIND :qualifier QUALIFIER :name NAME :version
+VERSION), as `dbt-project-resolve' reads it: a call of `ref', `source'
+or `doc', or,
 within a Jinja tag, of a macro.  In a YAML file, the `name' of an entry
 stands for what it describes, as `dbt-mode-entity-target' tells: the
 index of the project gives the entry of the line, as last saved."
@@ -244,7 +245,7 @@ index of the project gives the entry of the line, as last saved."
                (while (and (setq matched (re-search-forward regexp bound t)) (< (match-end 0) position)))
                (and matched (<= (match-beginning 0) position)
                     (list :kind kind :qualifier (match-string-no-properties 2)
-                          :name (match-string-no-properties 1)))))
+                          :name (match-string-no-properties 1) :version (match-string-no-properties 3)))))
            (append dbt-project-call-regexps
                    (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp)))))
           (when-let* ((root (dbt-project-root))
@@ -258,24 +259,29 @@ index of the project gives the entry of the line, as last saved."
 
 (defun dbt-mode-identifier (target)
   "Return the xref identifier of TARGET, a plist of `dbt-mode-target-at-point'.
-It reads KIND:NAME, or KIND:QUALIFIER/NAME."
-  (format "%s:%s%s" (plist-get target :kind)
+It reads KIND:NAME, or KIND:QUALIFIER/NAME, then @VERSION when TARGET
+names a version of a model."
+  (format "%s:%s%s%s" (plist-get target :kind)
           (if (plist-get target :qualifier) (concat (plist-get target :qualifier) "/") "")
-          (plist-get target :name)))
+          (plist-get target :name)
+          (if (plist-get target :version) (concat "@" (plist-get target :version)) "")))
 
 (defun dbt-mode-parse-identifier (identifier)
   "Return the target plist of IDENTIFIER, as `dbt-mode-identifier' writes it.
 Return nil when IDENTIFIER is not one."
-  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\(.+\\)\\'" identifier)
+  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\([^@]+\\)\\(?:@\\(.+\\)\\)?\\'"
+                      identifier)
     (list :kind (intern (match-string 1 identifier))
           :qualifier (match-string 2 identifier)
-          :name (match-string 3 identifier))))
+          :name (match-string 3 identifier)
+          :version (match-string 4 identifier))))
 
 (defun dbt-mode-entity-target (entity project)
   "Return the target that names ENTITY, an entity of the PROJECT's index.
 An entry of the properties of a resource names what its section holds,
 as `dbt-project-section-kinds' tells.  A resource of a package other
-than PROJECT is qualified by its package."
+than PROJECT is qualified by its package, and a version of a model by
+its version."
   (let ((kind (if (eq (plist-get entity :kind) 'properties)
                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
                 (plist-get entity :kind)))
@@ -287,7 +293,8 @@ than PROJECT is qualified by its package."
                        ('table (plist-get entity :source))
                        ('source nil)
                        (_ package))
-          :name (plist-get entity :name))))
+          :name (plist-get entity :name)
+          :version (plist-get entity :version))))
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.

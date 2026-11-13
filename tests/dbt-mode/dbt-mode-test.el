@@ -112,22 +112,22 @@
   (with-temp-buffer
     (insert "{{ ref('pkg', 'm') }} {{ source('raw', 'orders') }} {{ ref('n', v=2) }} {{ pkg.mac(1) }} x\n")
     (dbt-mode)
-    (dolist (case '(("'m'" 1 (:kind ref :qualifier "pkg" :name "m"))
-                    ("orders" 1 (:kind source :qualifier "raw" :name "orders"))
-                    ("'n'" 1 (:kind ref :qualifier nil :name "n"))
-                    ("mac" 1 (:kind macro :qualifier "pkg" :name "mac"))
+    (dolist (case '(("'m'" 1 (:kind ref :qualifier "pkg" :name "m" :version nil))
+                    ("orders" 1 (:kind source :qualifier "raw" :name "orders" :version nil))
+                    ("'n'" 1 (:kind ref :qualifier nil :name "n" :version "2"))
+                    ("mac" 1 (:kind macro :qualifier "pkg" :name "mac" :version nil))
                     (" x" 1 nil)))
       (dbt-test-goto (car case) (nth 1 case))
       (should (equal (dbt-mode-target-at-point) (nth 2 case)))))
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/_sources.yml")
     (dbt-test-goto "raw_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind source :qualifier "raw" :name "raw_orders")))
+    (should (equal (dbt-mode-target-at-point) '(:kind source :qualifier "raw" :name "raw_orders" :version nil)))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "stg_orders")))
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "stg_orders" :version nil)))
     (dbt-test-goto "order_status")
-    (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status")))))
+    (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status" :version nil)))))
 
 (ert-deftest dbt-mode-target-at-point-qualifies-the-entries-of-a-package ()
   "The YAML entry of a package's model names that model, not the project's."
@@ -138,16 +138,17 @@
                   (expand-file-name "dbt_packages/shop_utils/models/_utils.yml" root))
     (dbt-test-visit root "dbt_packages/shop_utils/models/_utils.yml")
     (dbt-test-goto "orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders")))
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders" :version nil)))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
 
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
-  (dolist (target '((:kind ref :qualifier nil :name "orders")
-                    (:kind ref :qualifier "pkg" :name "orders")
-                    (:kind source :qualifier "raw" :name "orders")
-                    (:kind macro :qualifier nil :name "m")))
+  (dolist (target '((:kind ref :qualifier nil :name "orders" :version nil)
+                    (:kind ref :qualifier "pkg" :name "orders" :version "2")
+                    (:kind source :qualifier "raw" :name "orders" :version nil)
+                    (:kind macro :qualifier nil :name "m" :version nil)
+                    (:kind analysis :qualifier nil :name "counts" :version nil)))
     (should (equal (dbt-mode-parse-identifier (dbt-mode-identifier target)) target)))
   (should-not (dbt-mode-parse-identifier "model:orders")))
 
@@ -201,6 +202,31 @@
                    '(("macros/cents_to_dollars.sql" . 1) ("models/staging/stg_orders.sql" . 13))))
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt "doc:order_status") root)
                    '(("models/staging/_staging.yml" . 5))))))
+
+;; A model with versions, as dbt documents them: one file per version,
+;; NAME_vVERSION, and the latest version given in its YAML entry.
+(defconst dbt-test-versioned-model
+  '(("models/marts/dim_customers_v1.sql" . "select 1 as id")
+    ("models/marts/dim_customers_v2.sql" . "select 2 as id")
+    ("models/marts/_dim_customers.yml"
+     . "models:\n  - name: dim_customers\n    latest_version: 2\n    versions:\n      - v: 1\n      - v: 2\n"))
+  "The files of a model with two versions, relative to the root.")
+
+(ert-deftest dbt-mode-xref-goes-to-the-version-a-ref-names ()
+  "M-. on a ref with a version goes to that version; without one, to the latest."
+  (dbt-test-with-project root
+    (pcase-dolist (`(,file . ,text) dbt-test-versioned-model)
+      (write-region text nil (expand-file-name file root)))
+    (dbt-test-visit root "models/marts/customers.sql")
+    (goto-char (point-max))
+    (insert "{{ ref('dim_customers', v=1) }} {{ ref('dim_customers') }}")
+    (dolist (case '(("dim_customers', v" . "models/marts/dim_customers_v1.sql")
+                    ("dim_customers')" . "models/marts/dim_customers_v2.sql")))
+      (dbt-test-goto (car case))
+      (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                     (list (cons (cdr case) 1)))))
+    (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt "ref:dim_customers@1") root)
+                   '(("models/marts/dim_customers_v1.sql" . 1))))))
 
 (defun dbt-test-completions (text)
   "Insert TEXT at the end of the buffer, and return what completes there."
