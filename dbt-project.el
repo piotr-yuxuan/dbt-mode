@@ -56,9 +56,11 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   :type 'natnum)
 
 (defcustom dbt-protected-targets '("prod")
-  "The targets on which an Org Babel block of dbt asks before it runs.
-While any target is protected, a block whose default target dbt-mode
-cannot read asks too."
+  "The targets on which a Babel block, the data diff and freshness ask first.
+That is an Org Babel block of dbt, `dbt-data-diff' and
+`dbt-dashboard-freshness', which run SQL on the warehouse; dbt-dispatch
+and previews do not ask.  While any target is protected, a default
+target that dbt-mode cannot read asks too."
   :type '(repeat string))
 
 (defun dbt-project-executable ()
@@ -219,6 +221,10 @@ in any order, give the other properties."
   "The keys of dbt_project.yml that the configuration keeps.
 Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
 list of paths.")
+
+(defun dbt-project-target (root)
+  "Return the directory where dbt writes the artifacts of the project at ROOT."
+  (expand-file-name (plist-get (dbt-project-config root) :target-path) root))
 
 (defun dbt-project-config (root)
   "Return the configuration of the project at ROOT as a plist.

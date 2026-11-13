@@ -191,7 +191,7 @@ quote counts as it is; a commit on main after the branch does not."
       (dbt-cli-show "orders" nil)
       (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt show: orders*")))
         (should (equal default-directory root))
-        (should (string-match-p "^arguments: show --quiet --output json --limit 7 --select orders$"
+        (should (string-match-p "^arguments: show --quiet --no-write-json --output json --limit 7 --select orders$"
                                 (buffer-string)))
         (goto-char (point-min))
         (compilation-next-error 1)
@@ -212,7 +212,7 @@ In the grid, + runs dbt show again with twice the limit."
       (dbt-cli-show "a_cte" "select 1 as one")
       (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: a_cte*")))
         (should (equal (append (cadr (car tabulated-list-entries)) nil)
-                       '("show --quiet --output json --limit 7 --inline select 1 as one" "NULL")))
+                       '("show --quiet --no-write-json --output json --limit 7 --inline select 1 as one" "NULL")))
         (dbt-rows-more)
         (dbt-test-wait (lambda () (string-search "--limit 14 " (aref (cadr (car tabulated-list-entries)) 0))))
         (kill-buffer)))))
@@ -293,6 +293,55 @@ another dbt holds the project."
         (dbt-preview (point-min) (+ (point-min) 10)))
       (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/query*"))))))
 
+(ert-deftest dbt-cli-diffs-the-rows-of-a-model-with-a-state ()
+  "The data diff runs one query on the default target, of the rows that each side lacks.
+The columns are the model's, by name, from its relation; the state's
+relation is the relation_name of its manifest; each side is named after
+its target and its state, in plain characters; a model the state lacks,
+or a relation that is no name, says so; a protected default target asks
+first, and runs nothing on a no."
+  (dbt-test-with-project root
+    (let ((state (dbt-test-write-state root))
+          (dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (dbt-data-diff state)
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/diff*")))
+          (let ((arguments (aref (aref dbt-rows--rows 0) 0)))
+            (should (string-search (concat "--inline {% set dbt_diff_columns %}{% for column in "
+                                           "adapter.get_columns_in_relation(ref('shop', 'orders')) %}")
+                                   arguments))
+            (should (string-search "with dbt_diff_here as (select {{ dbt_diff_columns }} from {{ ref('shop', 'orders') }})"
+                                   arguments))
+            (should (string-search "dbt_diff_there as (select {{ dbt_diff_columns }} from \"db\".\"prod\".\"orders\")"
+                                   arguments))
+            (should (string-search "select 'only in dev' as dbt_diff, a.* from (select * from dbt_diff_here" arguments))
+            (should (string-search "select 'only in prod-state' as dbt_diff, b.* from (select * from dbt_diff_there"
+                                   arguments)))
+          (kill-buffer))
+        (let ((process-environment (cons "DBT_TARGET=prod" process-environment))
+              (processes (process-list))
+              (asked nil))
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil)))
+            (should-error (dbt-data-diff state) :type 'user-error))
+          (should (string-match-p "Run on target prod" asked))
+          (should (equal (process-list) processes))
+          (should-not (get-buffer "*dbt rows: orders/diff*")))
+        ;; A state whose name holds a quote and Jinja is named plainly.
+        (let ((other (expand-file-name "it's {{ x }}/" root)))
+          (make-directory other)
+          (copy-file (expand-file-name "manifest.json" state) (expand-file-name "manifest.json" other))
+          (dbt-data-diff other)
+          (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/diff*")))
+            (should (string-search "select 'only in it_s __ x __' as dbt_diff" (aref (aref dbt-rows--rows 0) 0)))
+            (kill-buffer)))
+        ;; A relation_name with Jinja, which dbt would run, is no name.
+        (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"{{ run_query('drop table x') }}\"}}}"
+                      nil (expand-file-name "manifest.json" state))
+        (should-error (dbt-data-diff state) :type 'user-error))
+      (with-current-buffer (dbt-test-visit root "models/marts/customers.sql")
+        (should-error (dbt-data-diff state) :type 'user-error)))))
+
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
 Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and
@@ -337,6 +386,37 @@ The output is that of dbt 2.0.9 on a model that selects a missing column."
             "==================== Execution Summary =====================\n")
     (dbt-compilation-mode)
     (should (equal (dbt-test-compilation-messages) '(("target/run/shop/models/marts/badcol.sql" nil nil 2))))))
+
+(ert-deftest dbt-cli-diffs-the-rows-of-a-model-by-the-names-of-its-columns ()
+  "With the real dbt on DuckDB, the data diff shows only the rows that differ, under the model's columns.
+The state's relation has the same columns in another order."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (let ((dbt-executable (getenv "DBT_MODE_TEST_DBT"))
+          (state (expand-file-name "prod-state/" root)))
+      (write-region "select 1 as id, 'a' as name union all select 2, 'b'\n" nil
+                    (expand-file-name "models/diff_here.sql" root))
+      (write-region "select 'a' as name, 1 as id union all select 'c', 3\n" nil
+                    (expand-file-name "models/diff_there.sql" root))
+      (let ((default-directory root))
+        (should (eq 0 (call-process dbt-executable nil nil nil "run" "--profiles-dir" root
+                                    "--select" "diff_here" "diff_there"))))
+      (make-directory state)
+      (write-region (json-encode
+                     `((nodes (model.shop.diff_here
+                               (relation_name
+                                . ,(gethash "relation_name"
+                                            (dbt-project-manifest-node (expand-file-name "target/manifest.json" root)
+                                                                       "model.shop.diff_there")))))))
+                    nil (expand-file-name "manifest.json" state))
+      (with-current-buffer (dbt-test-visit root "models/diff_here.sql")
+        (dbt-data-diff state)
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: diff_here/diff*")) 60)
+          (should (equal (mapcar #'car tabulated-list-format) '("dbt_diff" "id" "name")))
+          (should (equal (sort (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
+                               (lambda (a b) (string< (car a) (car b))))
+                         '(("only in dev" "2" "b") ("only in prod-state" "3" "c"))))
+          (kill-buffer))))))
 
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
   "With TERM naming a colour terminal, dbt's JSON reads and its output links.
@@ -384,6 +464,211 @@ A buffer outside the project is left alone."
             (should (buffer-modified-p other))
             (with-current-buffer other (set-buffer-modified-p nil) (kill-buffer)))
         (delete-file outside)))))
+
+(defun dbt-test-formatted ()
+  "Wait until no `dbt format' runs, its sentinel included."
+  (dbt-test-wait (lambda () (not (seq-some (lambda (process) (string-prefix-p "dbt format" (process-name process)))
+                                           (process-list))))))
+
+(defun dbt-test-message-since (start regexp)
+  "Wait until a message after the position START of *Messages* matches REGEXP."
+  (dbt-test-wait (lambda ()
+                   (with-current-buffer (messages-buffer)
+                     (save-excursion
+                       (goto-char start)
+                       (re-search-forward regexp nil t))))))
+
+(ert-deftest dbt-cli-formats-the-saved-file ()
+  "Without a server, C-c C-q saves, then the buffer shows what dbt format made of the file.
+Text typed while dbt runs wins the next save, which asks nothing; a
+failure of dbt that formatted nothing is a message, the buffer as
+saved; dbt's runs leave no buffer behind."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (buffers (buffer-list)))
+        (let ((process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+          (goto-char (point-min))
+          (insert "-- edited\n")
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
+          (should-not (buffer-modified-p))
+          ;; The artifacts of the last build stay the dashboard's.
+          (should-not (file-exists-p (expand-file-name "target/run_results.json" root)))
+          (let ((start (with-current-buffer (messages-buffer) (point-max))))
+            (execute-kbd-macro (kbd "C-c C-q"))
+            (insert "-- typed meanwhile\n")
+            (dbt-test-message-since start "dbt formatted orders\\.sql on disk; your edits since win the next save"))
+          (dbt-test-formatted)
+          (should (buffer-modified-p))
+          (should (verify-visited-file-modtime))
+          (should (string-prefix-p "-- formatted\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql"))))
+        (let ((start (with-current-buffer (messages-buffer) (point-max))))
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-message-since
+           start "dbt format orders\\.sql failed: \\[error\\] \\[DependencyNotFound (dbt1048)\\].* --> models/marts/orders\\.sql:12:19")
+          (dbt-test-formatted)
+          (should-not (buffer-modified-p))
+          (should (string-search "-- typed meanwhile\n" (buffer-string)))
+          (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql"))))
+        (should-not (seq-difference (buffer-list) buffers))))))
+
+(ert-deftest dbt-cli-formats-the-file-that-dbt-formats-despite-another-file ()
+  "dbt formats the file and fails on another file's error: the buffer shows the file, the message names the other.
+So it does when the file was formatted already, which dbt 2.0.9 leaves
+as it is."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_EXIT=1") process-environment))
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-message-since start "dbt format orders\\.sql failed: \\[error\\] .* --> models/wip\\.sql")
+        (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+        (should-not (buffer-modified-p))
+        (should (verify-visited-file-modtime))
+        ;; Emacs folds a message that repeats the last into its line.
+        (message "Formatted already:")
+        (let ((process-environment (cons "FAKE_DBT_FORMATTED=1" process-environment))
+              (start (with-current-buffer (messages-buffer) (point-max))))
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-message-since start "dbt format orders\\.sql failed: \\[error\\] .* --> models/wip\\.sql")
+          (should (string-prefix-p "-- formatted\n-- edited\n" (buffer-string)))
+          (should-not (buffer-modified-p)))))))
+
+(ert-deftest dbt-cli-formats-twice-in-a-row ()
+  "C-c C-q twice in a row: the buffer shows the file as both formats left it, and no edit is said to win."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.3") process-environment))
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- formatted\n" (buffer-string)))
+        (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql")))
+        (should-not (buffer-modified-p))
+        (should-not (with-current-buffer (messages-buffer)
+                      (string-search "your edits since" (buffer-substring start (point-max)))))))))
+
+(ert-deftest dbt-cli-formats-a-buffer-saved-while-another-formats ()
+  "A buffer saved while another one formats, as by a timer, is formatted after its save."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.5") process-environment))
+            (other (dbt-test-visit root "models/marts/customers.sql")))
+        (with-current-buffer other
+          (dbt-format-on-save-mode 1)
+          (goto-char (point-min))
+          (insert "-- other\n"))
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        ;; The second C-c C-q waits for the first, while the timer saves.
+        (run-with-timer 0.1 nil (lambda () (with-current-buffer other (save-buffer))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- other\n" (dbt-test-file-text root "models/marts/customers.sql")))))))
+
+(ert-deftest dbt-cli-stops-a-format-that-runs-too-long ()
+  "A save waits for a running dbt format `dbt-cli-format-deadline' seconds at most, then stops it; the save stands."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=30") process-environment))
+            (dbt-cli-format-deadline 0.5)
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (goto-char (point-min))
+        (insert "-- typed\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (should-not (seq-some (lambda (process) (and (string-prefix-p "dbt format" (process-name process))
+                                                     (process-live-p process)))
+                              (process-list)))
+        (dbt-test-message-since start "dbt format ran over 0\\.5 seconds: stopped")
+        (should-not (buffer-modified-p))
+        (should (string-prefix-p "-- typed\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
+
+(ert-deftest dbt-cli-formats-each-save-after-the-one-before ()
+  "A save waits for the format that runs: an older format never writes over a newer save.
+C-c C-q with the mode on formats once."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.5") process-environment)))
+        (dbt-format-on-save-mode 1)
+        (goto-char (point-min))
+        (insert "-- first\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (goto-char (point-max))
+        (insert "-- second\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (dbt-test-formatted)
+        (let ((text (dbt-test-file-text root "models/marts/orders.sql")))
+          (should (string-prefix-p "-- formatted\n-- first\n" text))
+          (should (string-suffix-p "-- second\n" text)))
+        ;; Read again with its modes, the mode on save among them.
+        (revert-buffer t t t)
+        (should dbt-format-on-save-mode)
+        (goto-char (point-min))
+        (insert "-- third\n")
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- third\n-- formatted\n" (dbt-test-file-text root "models/marts/orders.sql")))))))
+
+(ert-deftest dbt-format-buffer-refuses-a-buffer-without-a-file ()
+  "C-c C-q in a buffer that visits no file, as an Org source buffer, says so."
+  (save-window-excursion
+    (with-temp-buffer
+      (switch-to-buffer (current-buffer))
+      (dbt-mode)
+      (insert "select 1")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
+                     (format "%s visits no file for dbt to format" (buffer-name))))
+      (should (equal (buffer-string) "select 1")))))
+
+(ert-deftest dbt-cli-format-leaves-nothing-behind-without-dbt ()
+  "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "no-dbt-here" root))
+            (buffers (buffer-list))
+            (processes (process-list)))
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+        (should-not (buffer-modified-p))
+        (should (equal (process-list) processes))
+        (should-not (seq-difference (buffer-list) buffers))))))
+
+(ert-deftest dbt-cli-formats-after-each-save ()
+  "In `dbt-format-on-save-mode', without a server, each save has dbt format the file."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+        (dbt-format-on-save-mode 1)
+        (goto-char (point-min))
+        (insert "-- edited\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
+        (dbt-test-formatted)
+        (should-not (buffer-modified-p))
+        (dbt-format-on-save-mode -1)
+        (insert "-- again\n")
+        (execute-kbd-macro (kbd "C-x C-s"))
+        (should-not (seq-some (lambda (process) (string-prefix-p "dbt format" (process-name process)))
+                              (process-list)))))))
 
 (provide 'dbt-cli-test)
 ;;; dbt-cli-test.el ends here

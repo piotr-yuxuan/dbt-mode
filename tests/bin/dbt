@@ -4,12 +4,18 @@
 # A stand-in for dbt.  `dbt lsp --help' succeeds, as dbt 2's does, and
 # `dbt lsp ...' runs the scripted server fake_dbt_lsp.py.  With
 # FAKE_DBT_SUCCEED set, `dbt compile' prints JSON log lines, as with
-# --log-format json, one a CompiledNode whose SQL is its arguments, and
-# any other command prints one row of JSON, as `dbt show -q --output
-# json' does, holding its arguments and a null, or else FAKE_DBT_OUTPUT
-# when it is set; each writes a warning on stderr, and succeeds.
-# Otherwise it prints its arguments, then an error as dbt 2 prints one,
-# and fails.
+# --log-format json, one a CompiledNode whose SQL is its arguments;
+# `dbt format ... FILE' writes a first line "-- formatted" into FILE,
+# unless FAKE_DBT_FORMATTED says it is formatted already, then fails
+# with FAKE_DBT_EXIT when that is set, as dbt does on another file's
+# error; any other command prints one row of JSON, as `dbt show -q
+# --output json' does, holding its arguments and a null, or else
+# FAKE_DBT_OUTPUT when it is set; each writes a warning on stderr, and
+# target/run_results.json unless given --no-write-json, as dbt does,
+# and succeeds.  Otherwise it prints its arguments, then an error as dbt 2
+# prints one, and fails.  Either way, it first waits FAKE_DBT_SLEEP
+# seconds when that is set.
+[ -n "$FAKE_DBT_SLEEP" ] && sleep "$FAKE_DBT_SLEEP"
 case "$1 $2" in
   "lsp --help") exit 0 ;;
   "lsp "*) exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@" ;;
@@ -17,9 +23,23 @@ esac
 if [ -n "$FAKE_DBT_SUCCEED" ]; then
   exec python3 -I -c 'import json, os, sys
 arguments = " ".join(sys.argv[1:])
+if "--no-write-json" not in sys.argv:
+    os.makedirs("target", exist_ok=True)
+    with open("target/run_results.json", "w", encoding="utf-8") as file:
+        json.dump({"args": {"which": sys.argv[1]}, "results": []}, file)
 if sys.argv[1] == "compile":
     print(json.dumps({"info": {"name": "MainReportVersion"}, "data": {}}))
     print(json.dumps({"info": {"name": "CompiledNode"}, "data": {"compiled": arguments}}))
+elif sys.argv[1] == "format":
+    if not os.environ.get("FAKE_DBT_FORMATTED"):
+        with open(sys.argv[-1], encoding="utf-8") as file:
+            text = file.read()
+        with open(sys.argv[-1], "w", encoding="utf-8") as file:
+            file.write("-- formatted\n" + text)
+    if os.environ.get("FAKE_DBT_EXIT"):
+        print("[error] [MacroSyntaxInvalid (dbt1502)]: Failed to render SQL syntax error: unexpected end of input")
+        print("  --> models/wip.sql")
+        sys.exit(int(os.environ["FAKE_DBT_EXIT"]))
 else:
     print(os.environ.get("FAKE_DBT_OUTPUT", json.dumps([{"arguments": arguments, "nothing": None}])))
 print("[warning] a warning, on stderr", file=sys.stderr)' "$@"

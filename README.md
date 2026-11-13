@@ -75,6 +75,13 @@ Rows and compiled SQL:
   when dbt writes it. `dbt-compiled-diff` shows how it differs from the
   compiled SQL of another state, such as that of `dbt compile --target-path
   STATE` on main, or production's artifacts;
+- `dbt-data-diff` compares the rows of the model, as last built on the
+  default target, with those of its relation in another state, such as
+  production's artifacts: one query on the default target gives the rows
+  that each side lacks, `{{ dbt.except() }}` as dbt writes it for the
+  adapter, in a first column `dbt_diff` naming the side, in the grid of the
+  rows. The columns are the model's, by name, in any order on the other
+  side, which must have them all and be readable from the same connection;
 - in Org, `C-c C-c` on a `#+begin_src dbt` block gives its rows as a table,
   or its compiled SQL with `:compile yes`; `:limit`, `:target`, `:var`,
   passed as dbt's `--vars`, and Babel's `:dir` apply; each cell is on one
@@ -82,7 +89,19 @@ Rows and compiled SQL:
   by default, asks first: the target is `:target`, else `DBT_TARGET`, else
   the profile's default, read from a call of `env_var` as dbt reads it. A
   default that dbt-mode cannot read, such as other Jinja, asks too while a
-  target is protected.
+  target is protected. The data diff and the dashboard's freshness ask as
+  a block does.
+
+The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
+the project from the artifacts of your own runs, which it never writes, and
+which dbt-mode's previews, diffs and formats leave as they are: the nodes
+that errored, failed, warned or were skipped in `target/run_results.json`,
+the most severe first, with dbt's message to its cause and a test's
+failing rows, the ten slowest nodes, and the sources that
+`target/sources.json` says are stale or failed, each section saying which
+command wrote its file and how long ago. `RET` visits a node's file, `TAB`
+folds a section, `n` and `p` move by line, `g` reads the files again, and
+`f` runs `dbt source freshness`, then reads them again once it ends.
 
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
@@ -130,6 +149,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
 | `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |
 | `C-c %`       | `dbt-jump-to-matching-tag` | Move between a block's opening and closing tags              |
+| `C-c C-q`     | `dbt-format-buffer`    | Save, then format: with dbt lsp by the server, else by `dbt format` |
 | `M-.`, `M-?`  | `xref`                 | Definition and uses of what point is on                          |
 
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
@@ -214,7 +234,7 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
 | `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; a request on a source that it lists goes to it |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
-| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block asks before it runs; an unread default asks too |
+| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block, the data diff and the dashboard's freshness ask first; an unread default asks too |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
 | `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
 
@@ -231,6 +251,19 @@ whether or not `dbt-lsp-enable-linter` is on; `dbt-dispatch` runs `dbt
 format` and `dbt lint`. lsp-mode's `lsp-format-buffer-on-save` and
 `lsp-fix-all-on-save` are turned off in the buffers of dbt lsp, where they
 could only fail.
+
+`C-c C-q`, `dbt-format-buffer`, saves the buffer, then formats it while you
+go on: with dbt lsp by the server, whose edits leave the buffer modified;
+without one by `dbt format FILE`, which formats the saved file, the buffer
+then showing the result. Text you type meanwhile wins, unformatted, which
+a message says, and the next save asks nothing. A save waits for a
+format that runs, so that an older one never writes over it, and stops
+it after `dbt-cli-format-deadline`, 30 seconds. dbt may format the file
+and still fail on another file of the project: the buffer shows the
+file, and dbt's error, which names the file it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
+`dbt-mode-hook`, formats after each save, and with dbt lsp saves again
+when that changed the buffer; a failure to format is a message, and the
+save stands.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.

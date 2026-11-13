@@ -84,6 +84,8 @@
 (autoload 'dbt-compiled-diff "dbt-compiled" nil t)
 (autoload 'dbt-cli-show "dbt-cli")
 (autoload 'dbt-cli-preview-cte "dbt-cli")
+(autoload 'dbt-cli-format "dbt-cli")
+(autoload 'dbt-dashboard "dbt-dashboard" nil t)
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
 (declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
@@ -643,9 +645,7 @@ its node in the manifest of the user's runs, read only then.  For
                   (goto-char (point-min))
                   (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
                        (match-string-no-properties 1)))
-                (let* ((manifest (expand-file-name "manifest.json" (expand-file-name (plist-get (dbt-project-config root)
-                                                                                                :target-path)
-                                                                                      root)))
+                (let* ((manifest (expand-file-name "manifest.json" (dbt-project-target root)))
                        (node (and id (dbt-project-manifest-node manifest id)))
                        (config (and (hash-table-p node) (gethash "config" node))))
                   (and (hash-table-p config) (gethash "materialized" config))))))
@@ -736,8 +736,7 @@ included.  Return nil when dbt has not written it."
                   (file-name-concat (plist-get config :packages-install-path) package
                                     (file-relative-name (plist-get resource :file)
                                                         (nth 1 (assoc package (dbt-project-packages root))))))
-                (expand-file-name (concat directory "/" package)
-                                  (expand-file-name (plist-get config :target-path) root))))
+                (expand-file-name (concat directory "/" package) (dbt-project-target root))))
          ;; dbt 2 writes that of a snapshot in a directory of that path,
          ;; named after the snapshot.
          (file (if (file-directory-p file)
@@ -786,6 +785,54 @@ show' runs it, on the Jinja of the CTE."
                                (dbt-mode-resource-selector
                                 (or (dbt-mode-current-resource) (user-error "No model here"))))
                            (cdr query))))))
+
+(defun dbt-data-diff (state)
+  "Show the rows of the current model that differ from its relation in STATE.
+STATE is a directory of another target's artifacts, such as
+production's, as dbt's --state takes it: the model's relation there is
+the relation_name of its node in STATE's manifest.json, a name of
+identifiers and dots.  One query on the default target compares the
+model as last built there with that relation: the rows of each side
+that the other lacks, as `{{ dbt.except() }}' finds them, set
+difference, each in a first column dbt_diff that names its side.  The
+columns are the model's, by name, as its relation on the default target
+has them: the other relation must have them all, readable from the same
+connection, else the database's error shows.  A protected target asks
+first, as `dbt-project-confirm-target' says.  The rows show as a
+preview's do."
+  (interactive (list (read-directory-name "Compare with the state in: " nil nil t)))
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (selector (dbt-mode-resource-selector resource))
+         (node (dbt-project-manifest-node (expand-file-name "manifest.json" state) (dbt-project-node-id resource)))
+         (relation (and (hash-table-p node) (gethash "relation_name" node)))
+         ;; The manifest is dbt's: a relation is identifiers and dots, as
+         ;; quoted by its adapter, and no Jinja, which dbt would run.
+         (part "\\(?:\"[^\"{}%#\n]*\"\\|`[^`{}%#\n]*`\\|\\[[^]{}%#\n]*]\\|[A-Za-z0-9_$]+\\)")
+         (relation (if (and (stringp relation) (string-match-p (concat "\\`" part "\\(?:\\." part "\\)*\\'") relation))
+                       relation
+                     (user-error "No relation of %s in %s" selector (abbreviate-file-name state))))
+         (_ (dbt-project-confirm-target root nil))
+         ;; A side named in a string of SQL, with no quote nor Jinja.
+         (side (lambda (name) (format "'only in %s'" (replace-regexp-in-string "[^[:alnum:] ._/-]" "_" name))))
+         (call (format "ref('%s', '%s'%s)" (plist-get resource :package) (plist-get resource :name)
+                       (if (plist-get resource :version) (format ", v=%s" (plist-get resource :version)) "")))
+         (sql (format (concat "{%% set dbt_diff_columns %%}{%% for column in adapter.get_columns_in_relation(%s) %%}"
+                              "{{ adapter.quote(column.name) }}{%% if not loop.last %%}, {%% endif %%}"
+                              "{%% endfor %%}{%% endset %%}\n"
+                              "with dbt_diff_here as (select {{ dbt_diff_columns }} from {{ %s }}),\n"
+                              "dbt_diff_there as (select {{ dbt_diff_columns }} from %s)\n"
+                              "select %s as dbt_diff, a.* from (select * from dbt_diff_here {{ dbt.except() }} "
+                              "select * from dbt_diff_there) as a\nunion all\n"
+                              "select %s as dbt_diff, b.* from (select * from dbt_diff_there {{ dbt.except() }} "
+                              "select * from dbt_diff_here) as b")
+                      call call relation
+                      (funcall side (or (dbt-project-default-target root) "the default target"))
+                      (funcall side (file-name-nondirectory (directory-file-name state)))))
+         (title (format "%s/diff" selector)))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-show sql title)
+      (dbt-cli-show title sql))))
 
 (defun dbt-lineage (selector)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
@@ -841,8 +888,7 @@ write; the message says when it was written."
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
                      (dbt-mode-current-resource)
                      (user-error "No model or source here")))
-         (file (expand-file-name "manifest.json"
-                                 (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
+         (file (expand-file-name "manifest.json" (dbt-project-target root)))
          (id (dbt-project-node-id entity))
          (node (if (file-readable-p file)
                    (dbt-project-manifest-node file id)
@@ -904,6 +950,53 @@ listed: their `model' key is not a call."
       (user-error "No test reads %s" (plist-get resource :name)))
     (xref-show-xrefs (lambda () items) nil)))
 
+(defvar dbt-mode--formatting nil
+  "The buffer that a command or a save formats, while it does.
+A buffer saved meanwhile, as by a timer, is formatted as usual.")
+
+(defun dbt-format-buffer ()
+  "Save the buffer, then format it.
+With dbt lsp, the server formats it as it answers, as
+`dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
+format' formats the saved file, and the buffer shows the result once
+dbt ends, unless it was modified meanwhile."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "%s visits no file for dbt to format" (buffer-name)))
+  (let ((dbt-mode--formatting (current-buffer)))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-format-buffer)
+      (save-buffer)
+      (dbt-cli-format (current-buffer)))))
+
+(defun dbt-mode--format-after-save ()
+  "Format the buffer just saved, and save it again when that changed it.
+For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
+message: the save stands."
+  (unless (eq dbt-mode--formatting (current-buffer))
+    (let ((dbt-mode--formatting (current-buffer)))
+      (condition-case err
+          (if (not (dbt-mode-server-p))
+              (dbt-cli-format (current-buffer))
+            ;; The server answers later: the save that follows its edits
+            ;; formats nothing again.
+            (dbt-lsp-format-buffer (lambda ()
+                                     (when (buffer-modified-p)
+                                       (let ((dbt-mode--formatting (current-buffer)))
+                                         (save-buffer))))))
+        (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
+
+(define-minor-mode dbt-format-on-save-mode
+  "Format the buffer after each save, as `dbt-format-buffer' does.
+With dbt lsp, the formatted buffer is saved again when formatting
+changed it.  Without a server, `dbt format' formats the saved file
+while you go on, and the buffer shows the result unless you modified it
+meanwhile.  A failure to format is a message, and the save stands."
+  :lighter " Fmt"
+  (if dbt-format-on-save-mode
+      (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)
+    (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
+
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
 For `after-save-hook', so that the index sees what was just saved."
@@ -927,6 +1020,7 @@ CTE rather than by statement."
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
   "C-c C-a" #'dbt-new
+  "C-c C-q" #'dbt-format-buffer
   "C-c /" #'dbt-close-block
   "C-c %" #'dbt-jump-to-matching-tag
   ;; `sql-mode' remaps them to its statement motions.
@@ -947,15 +1041,18 @@ CTE rather than by statement."
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
     ["Compiled SQL against a state..." dbt-compiled-diff]
+    ["Data against a state..." dbt-data-diff]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
+    ["Dashboard of the project" dbt-dashboard]
     "---"
     ["New..." dbt-new]
     ["Close the Jinja block" dbt-close-block]
     ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
-    ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
+    ["Format buffer" dbt-format-buffer]
+    ["Format on save" dbt-format-on-save-mode :style toggle :selected dbt-format-on-save-mode]
     ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 

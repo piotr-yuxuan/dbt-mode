@@ -175,12 +175,6 @@ The rows of a model come from its buffer, unsaved changes included."
       (insert-file-contents (expand-file-name "models/staging/_staging.yml" root))
       (should (string-match-p "- name: stg_clients" (buffer-string))))))
 
-(defun dbt-test-file-text (root file)
-  "Return the text of FILE, relative to ROOT, as it is on disk."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file root))
-    (buffer-string)))
-
 (ert-deftest dbt-lsp-live-formats-and-reports-errors ()
   "Formatting and fixing save first, then format; an unknown ref is a diagnostic of its line."
   (let ((dbt-lsp-enable-linter t)
@@ -191,8 +185,16 @@ The rows of a model come from its buffer, unsaved changes included."
         (dbt-lsp)
         (erase-buffer)
         (insert "-- unsaved\n" unformatted)
-        ;; The server formats nothing until it has compiled the project.
-        (dbt-test-wait (lambda () (dbt-lsp-format-buffer) (buffer-modified-p)) 60)
+        ;; The server formats nothing until it has compiled the project:
+        ;; ask again, every two seconds, until its edits modify the
+        ;; buffer that the first request saved.
+        (let ((asked 0))
+          (dbt-test-wait (lambda ()
+                           (or (and (> asked 0) (buffer-modified-p))
+                               (when (> (- (float-time) asked) 2)
+                                 (setq asked (float-time))
+                                 (ignore (dbt-lsp-format-buffer)))))
+                         60))
         (should (equal (dbt-test-file-text root "models/staging/stg_customers.sql") (concat "-- unsaved\n" unformatted)))
         (should (equal (buffer-string) (concat "-- unsaved\n" formatted)))
         (erase-buffer)

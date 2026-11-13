@@ -45,6 +45,10 @@ dbt 2.0.9 rejects --full-refresh and --limit on any other command, and
 lists --defer, --state and --vars for every one but docs generate.  The
 other options, --target and --fail-fast, go to every command.")
 
+(defconst dbt-cli-environment '("NO_COLOR=1" "TERM=dumb")
+  "What dbt runs with, so that it draws no colours nor progress bars.
+It would otherwise, when Emacs passes on the TERM of a terminal.")
+
 (defvar dbt-cli--last (make-hash-table :test #'equal)
   "The last dbt command run in each project: its root, to (COMMAND . ARGUMENTS).")
 
@@ -85,7 +89,7 @@ terminal.  The project's modified buffers are offered for saving first,
 under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
-         (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
+         (compilation-environment (append dbt-cli-environment compilation-environment)))
     (dbt-cli--save-project root)
     (when (functionp arguments)
       (setq arguments (funcall arguments)))
@@ -107,7 +111,7 @@ query."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (limit (or limit dbt-preview-limit))
-         (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
+         (process-environment (append dbt-cli-environment process-environment))
          ;; Before any buffer or process exists, which a refusal would leave.
          (executable (progn (dbt-cli--save-project root) (dbt-project-executable)))
          (output (generate-new-buffer " *dbt show*"))
@@ -116,7 +120,8 @@ query."
     (message "dbt show runs for %s..." name)
     (make-process
      :name "dbt show" :buffer output :stderr errors :noquery t :connection-type 'pipe
-     :command `(,executable "show" "--quiet" "--output" "json" "--limit" ,(number-to-string limit)
+     ;; The artifacts of a preview would take the place of a build's.
+     :command `(,executable "show" "--quiet" "--no-write-json" "--output" "json" "--limit" ,(number-to-string limit)
                 ,@(if sql (list "--inline" sql) (list "--select" name)))
      :sentinel
      (lambda (process _event)
@@ -152,6 +157,69 @@ for again from its grid, the query is taken again from the model's file."
                   (lambda (limit)
                     (with-current-buffer (find-file-noselect file)
                       (dbt-cli-preview-cte name limit))))))
+
+(defvar-local dbt-cli--format-process nil
+  "The `dbt format' of this buffer while it runs, which a save waits for.")
+
+(defconst dbt-cli-format-deadline 30
+  "The seconds that a save waits for the `dbt format' of its buffer.")
+
+(defun dbt-cli--await-format ()
+  "Wait until the `dbt format' of the current buffer ends.
+For `before-save-hook': dbt writes the file once it ends, and would
+otherwise write over a later save.  After `dbt-cli-format-deadline'
+seconds, dbt is stopped instead."
+  (let ((deadline (+ (float-time) dbt-cli-format-deadline)))
+    (while (and (process-live-p dbt-cli--format-process) (< (float-time) deadline))
+      (accept-process-output dbt-cli--format-process 0.05))
+    (when (process-live-p dbt-cli--format-process)
+      (message "dbt format ran over %s seconds: stopped" dbt-cli-format-deadline)
+      (delete-process dbt-cli--format-process))))
+
+(defun dbt-cli-format (buffer)
+  "Have `dbt format' format the saved file of BUFFER, then read BUFFER again.
+BUFFER is saved: its file is what dbt formats.  Once dbt ends, BUFFER
+is read again when the file changed, unless its text changed meanwhile:
+then that text wins the next save, which a message says.  dbt may fail
+on another file of the project and still format this one; its error,
+which names its file, is the last message.  A save of BUFFER waits for
+its format to end."
+  (with-current-buffer buffer
+    (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
+           (default-directory root)
+           (process-environment (append dbt-cli-environment process-environment))
+           (command (list (dbt-project-executable) "format" "--no-write-json" (file-relative-name buffer-file-name root)))
+           (name (buffer-name)))
+      (dbt-cli--await-format)
+      (add-hook 'before-save-hook #'dbt-cli--await-format nil t)
+      ;; Read once the format before has ended, which may revert BUFFER.
+      (let ((tick (buffer-chars-modified-tick)))
+        (setq dbt-cli--format-process
+              (make-process
+               :name "dbt format" :buffer (generate-new-buffer " *dbt format*") :noquery t :connection-type 'pipe
+               :command command
+               :sentinel
+               (lambda (process event)
+                 (unless (process-live-p process)
+                   (unwind-protect
+                       (let ((failure (and (/= 0 (process-exit-status process))
+                                           (with-current-buffer (process-buffer process)
+                                             (goto-char (point-min))
+                                             ;; dbt names the file of its error on the next line.
+                                             (if (re-search-forward "^\\[error\\] .*\\(?:\n[ \t]*--> .*\\)?" nil t)
+                                                 (replace-regexp-in-string "\n[ \t]*" " " (match-string 0))
+                                               (string-trim event)))))
+                             (changed (and (buffer-live-p buffer) (not (verify-visited-file-modtime buffer)))))
+                         (when changed
+                           (with-current-buffer buffer
+                             (if (= tick (buffer-chars-modified-tick))
+                                 (revert-buffer t t t)
+                               ;; dbt's own write: the text typed since wins the next save.
+                               (set-visited-file-modtime)
+                               (message "dbt formatted %s on disk; your edits since win the next save" name))))
+                         (when failure
+                           (message "dbt format %s failed: %s" name failure)))
+                     (kill-buffer (process-buffer process)))))))))))
 
 (defun dbt-cli-arguments (arguments &optional changed)
   "Return the command-line arguments that the transient ARGUMENTS mean.
@@ -271,6 +339,7 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ("D" "debug" (lambda () (interactive) (dbt-cli-dispatch "debug")))
     ("R" "retry" (lambda () (interactive) (dbt-cli-dispatch "retry")))
     ("g" "docs generate" (lambda () (interactive) (dbt-cli-dispatch "docs generate")))
+    ("h" "dashboard" dbt-dashboard)
     ("." dbt-cli-again
      :description (lambda ()
                     (let ((last (gethash (dbt-project-root) dbt-cli--last)))

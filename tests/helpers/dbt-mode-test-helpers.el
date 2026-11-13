@@ -37,6 +37,21 @@ The copy and the buffers that visit it are removed afterwards."
   "Visit FILE, relative to ROOT, and make its buffer current."
   (set-buffer (find-file-noselect (expand-file-name file root))))
 
+(defun dbt-test-file-text (root file)
+  "Return the contents of FILE, relative to ROOT, as saved on disk."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file root))
+    (buffer-string)))
+
+(defun dbt-test-write-state (root)
+  "Write a state of ROOT's artifacts, and return its directory.
+Its manifest gives the model orders the relation \"db\".\"prod\".\"orders\"."
+  (let ((state (expand-file-name "prod-state/" root)))
+    (make-directory state)
+    (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"prod\\\".\\\"orders\\\"\"}}}"
+                  nil (expand-file-name "manifest.json" state))
+    state))
+
 (defun dbt-test-goto (text &optional offset)
   "Move point to the first occurrence of TEXT, then OFFSET characters on."
   (goto-char (point-min))

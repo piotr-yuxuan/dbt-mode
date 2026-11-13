@@ -99,12 +99,6 @@ The buffer is killed, so that the next preview makes a new one."
              (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries))
       (kill-buffer buffer))))
 
-(defun dbt-lsp-test-file-text (root file)
-  "Return the text of FILE, relative to ROOT, as it is on disk."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file root))
-    (buffer-string)))
-
 (ert-deftest dbt-lsp-loads-without-the-commands-of-dbt ()
   "The client of dbt lsp takes the preview limit from the project model.
 So it does not load dbt-cli, with transient and compile."
@@ -177,7 +171,7 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
     (let ((dbt-executable dbt))
       (should-not (dbt-lsp-server-p))
       (should-not (dbt-lsp-server-p)))
-    (should (equal (dbt-lsp-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
 
 (ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
@@ -486,7 +480,7 @@ for a CTE, the model is compiled again first."
     (dbt-lsp-show)
     (should (equal (dbt-lsp-test-rows "orders") '(("1"))))
     (should-not (buffer-modified-p))
-    (should (string-suffix-p "-- compiled\n-- shown\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-suffix-p "-- compiled\n-- shown\n" (dbt-test-file-text root "models/marts/orders.sql")))
     (should (member "workspace/executeCommand dbt.show"
                     (member "textDocument/didSave"
                             (member "workspace/executeCommand dbt.compileFile"
@@ -501,6 +495,19 @@ for a CTE, the model is compiled again first."
       (dbt-lsp)
       (execute-kbd-macro (kbd "C-c C-p"))
       (should (equal (dbt-lsp-test-rows "assert_positive_amount") '(("1")))))))
+
+(ert-deftest dbt-lsp-diffs-the-rows-of-a-model-with-a-state ()
+  "With the server, the data diff's query goes to dbt.show, as a preview's does."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show" :columns ["dbt_diff" "n"] :data [(:dbt_diff "only in target dev" :n "1")]
+         :error nil))
+    (dbt-data-diff (dbt-test-write-state root))
+    (should (equal (dbt-lsp-test-rows "orders/diff") '(("only in target dev" "1"))))
+    (should (string-search "dbt_diff_there as (select {{ dbt_diff_columns }} from \"db\".\"prod\".\"orders\")"
+                           (plist-get (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params)
+                                                       :arguments)
+                                            0)
+                                      :inline)))))
 
 (ert-deftest dbt-lsp-preview-cte-shows-the-rows-of-a-lens ()
   "The code lens of a CTE shows the rows of that CTE of the compiled SQL."
@@ -623,6 +630,46 @@ are, in a visited buffer or a file, the renamed file included."
       (should-error (dbt-lsp-rename-model "dim_clients") :type 'user-error)
       (should (file-exists-p (expand-file-name "models/marts/dim_v2.sql" root))))))
 
+(ert-deftest dbt-lsp-formats-on-c-c-c-q-and-after-each-save ()
+  "With the server, C-c C-q saves, then formats; on save, the formatted buffer is saved too.
+In `dbt-format-on-save-mode', a save has the server format the file,
+and the buffer is saved again; a failure is a message, and the save
+stands."
+  (dbt-lsp-test-with-server root
+      '(("textDocument/formatting"
+         . [(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "-- formatted\n")]))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (should (string-prefix-p "-- edited\n" (dbt-test-file-text root "models/marts/orders.sql")))
+      ;; The server answers while Emacs goes on.
+      (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
+      (dbt-format-on-save-mode 1)
+      (execute-kbd-macro (kbd "C-x C-s"))
+      (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- formatted\n-- edited\n"
+                                                 (dbt-test-file-text root "models/marts/orders.sql"))))
+      (should-not (buffer-modified-p))
+      ;; C-c C-q formats once, its save included.
+      (goto-char (point-min))
+      (insert "-- again\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (dbt-test-wait (lambda () (not (string-prefix-p "-- again\n" (buffer-string)))))
+      ;; A second format would come within this time.
+      (accept-process-output nil 0.3)
+      (should (string-prefix-p "-- formatted\n-- again\n" (buffer-string)))))
+  (dbt-lsp-test-with-server root '(("textDocument/formatting" . "not edits"))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (dbt-format-on-save-mode 1)
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-x C-s"))
+      (should-not (buffer-modified-p))
+      (should (string-prefix-p "-- edited\n" (dbt-test-file-text root "models/marts/orders.sql")))
+      (dbt-lsp-test-message "dbt could not format orders\\.sql"))))
+
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
   "Formatting saves the buffer, then applies the edits of the server."
   (dbt-lsp-test-with-server root
@@ -631,12 +678,30 @@ are, in a visited buffer or a file, the renamed file included."
     (goto-char (point-min))
     (insert "-- unsaved\n")
     (dbt-lsp-format-buffer)
-    (should (string-prefix-p "-- unsaved\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
-    (should (string-prefix-p "-- formatted\n-- unsaved\n" (buffer-string)))
+    (should (string-prefix-p "-- unsaved\n" (dbt-test-file-text root "models/marts/orders.sql")))
+    (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- unsaved\n" (buffer-string))))
     (should (member "textDocument/didSave"
                     (member "textDocument/didChange" (dbt-lsp-test-methods))))
     (should (member "textDocument/formatting"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))
+
+(ert-deftest dbt-lsp-formats-while-emacs-goes-on ()
+  "C-c C-q returns before the server answers; text typed meanwhile wins, unformatted, which a message says."
+  (dbt-lsp-test-with-server root
+      '(("$delays" ("textDocument/formatting" . 1))
+        ("textDocument/formatting"
+         . [(:range (:start (:line 0 :character 0) :end (:line 0 :character 0)) :newText "-- formatted\n")]))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-min))
+      (insert "-- edited\n")
+      (execute-kbd-macro (kbd "C-c C-q"))
+      (should (string-prefix-p "-- edited\n" (buffer-string)))
+      (should-not (buffer-modified-p))
+      (execute-kbd-macro (kbd "x"))
+      (dbt-lsp-test-message "dbt formatted orders\\.sql as saved: your edits since win, unformatted")
+      (should (string-prefix-p "-- edited\nx" (buffer-string)))
+      (should (buffer-modified-p)))))
 
 (ert-deftest dbt-lsp-fix-all-saves-then-fixes ()
   "Fixing the lint issues saves the buffer, then applies the edits of the server."
@@ -649,7 +714,7 @@ are, in a visited buffer or a file, the renamed file included."
     (goto-char (point-min))
     (insert "-- unsaved\n")
     (dbt-lsp-fix-all)
-    (should (string-prefix-p "-- unsaved\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (string-prefix-p "-- unsaved\n" (dbt-test-file-text root "models/marts/orders.sql")))
     (should (string-prefix-p "-- fixed\n-- unsaved\n" (buffer-string)))
     (should (member "textDocument/codeAction"
                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))
@@ -670,8 +735,8 @@ are, in a visited buffer or a file, the renamed file included."
     (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (let ((text (buffer-string)))
-      (should (string-match-p "\\`dbt lsp: textDocument/formatting answered what dbt-mode cannot read"
-                              (error-message-string (should-error (dbt-lsp-format-buffer)))))
+      (dbt-lsp-format-buffer)
+      (dbt-lsp-test-message "dbt could not format orders\\.sql: dbt lsp: textDocument/formatting answered what dbt-mode cannot read")
       (should (equal (buffer-string) text)))
     (should-not (get-buffer "*dbt rows: orders*"))
     (should-not (get-buffer "*dbt lineage: orders*"))))

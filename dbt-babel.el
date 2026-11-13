@@ -71,11 +71,11 @@ table is on one line, as `dbt-rows-org-text' writes it.  For
                           (and (consp event)
                                (equal (alist-get 'name (alist-get 'info event)) "CompiledNode")
                                (alist-get 'compiled (alist-get 'data event)))))
-                      (split-string (dbt-babel--call params (list "compile" "--log-format" "json" "--inline" body))
+                      (split-string (dbt-babel--call params (list "compile" "--no-write-json" "--log-format" "json" "--inline" body))
                                     "\n" t))
             (user-error "No compiled SQL in what dbt compile told"))
       (let ((rows (dbt-rows-read-json
-                   (dbt-babel--call params (list "show" "--quiet" "--output" "json" "--limit"
+                   (dbt-babel--call params (list "show" "--quiet" "--no-write-json" "--output" "json" "--limit"
                                                  (format "%s" (or (cdr (assq :limit params)) dbt-preview-limit))
                                                  "--inline" body)))))
         (cond ((null rows) (user-error "No rows that dbt-mode can read in what dbt show told"))

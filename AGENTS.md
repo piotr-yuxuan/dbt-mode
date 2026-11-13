@@ -19,10 +19,11 @@ dbt-project.el             the project model: root, configuration, index, ref gr
 dbt-mode.el                the major mode: Jinja syntax and font lock, xref, completion, imenu, commands
 dbt-edit.el                typing and moving: Jinja pairs and blocks, CTEs as defuns, expreg's regions
 dbt-new.el                 new models, macros, snapshots, YAML entries and unit tests
-dbt-lineage.el             the table of a model's upstream and downstream
+dbt-lineage.el             the tree of a model's upstream and downstream
 dbt-rows.el                the grid of a query's rows, whoever ran the query
 dbt-compiled.el            the compiled SQL beside its model, and its diff with another state
 dbt-babel.el               Org Babel blocks of dbt
+dbt-dashboard.el           the state of a project, from the artifacts of its runs
 dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer
 dbt-lsp.el                 the lsp-mode client of dbt lsp and its custom commands
 tests/run-ert.el           strict ERT runner: a skip must have an allowed reason
