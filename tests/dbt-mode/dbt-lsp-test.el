@@ -114,6 +114,21 @@ The buffer is killed, so that the next preview makes a new one."
                      (vector "lsp" "--project-dir" (directory-file-name root)
                              "--lint-enabled" "true" "--profiles-dir" "/profiles"))))))
 
+(ert-deftest dbt-lsp-runs-a-server-for-each-project-of-a-repository ()
+  "Two dbt projects of a repository get a server each, though lsp-mode guesses roots."
+  (dbt-lsp-test-with-server root nil
+    (let ((default-directory root))
+      (should (eq 0 (call-process "git" nil nil nil "init" "-q"))))
+    (copy-directory dbt-test-fixture (expand-file-name "other/" root) nil nil t)
+    (let ((first (dbt-lsp-workspace))
+          (lsp-auto-guess-root t))
+      (with-current-buffer (dbt-test-visit root "other/models/marts/orders.sql")
+        (dbt-lsp)
+        (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
+        (should-not (eq (dbt-lsp-workspace) first))
+        (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
+                       (expand-file-name "other" root)))))))
+
 (ert-deftest dbt-lsp-hides-formatting-from-lsp-mode ()
   "lsp-mode does not format by itself, as the server formats the file on disk.
 Its one code action, which fixes and formats, is hidden too."
