@@ -72,8 +72,10 @@ lsp-mode, which then gives:
 - completion of models, macros and SQL functions;
 - diagnostics as you type, such as a `ref` to a model that does not exist;
 - semantic tokens, and a "Preview CTE" code lens above each CTE;
-- renaming a model renames every `ref` and YAML entry that names it, whether
-  by `dbt-lsp-rename-model`, Dired or `rename-visited-file`;
+- renaming a model, whether by `dbt-lsp-rename-model`, Dired or
+  `rename-visited-file`, renames its `ref` calls in models and its YAML
+  entry; dbt lsp 2.0.9 leaves those of analyses and YAML tests, which
+  `dbt-lsp-rename-model` then lists. A version of a model is not renamed;
 - the compiled SQL, the rows of a model, a region or a CTE, and the lineage
   as the server computes it. The server compiles and previews the file on
   disk, so these commands save the buffer first.

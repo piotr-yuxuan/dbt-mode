@@ -317,13 +317,15 @@ orders or orders.v2."
         (lambda () (let ((default-directory root)) (dbt-lsp-lineage selector id))))))))
 
 (defun dbt-lsp-rename-model (name)
-  "Rename the model of the current buffer to NAME, and every use of it.
+  "Rename the model of the current buffer to NAME, and the uses of it.
 lsp-mode asks the server what renaming the file changes, and the server
-edits each `ref' and YAML entry that names the model; the edited buffers
-are left unsaved.  Renaming the file otherwise, such as in Dired, does
-the same.  The current buffer is saved first.  NAME must not be that of
-another model, seed or snapshot of the package; a version of a model is
-not renamed, as the server would edit nothing."
+edits the `ref' calls of models and the YAML entry that name the model;
+the edited buffers are left unsaved.  dbt lsp 2.0.9 leaves those of
+analyses and YAML tests: the uses that still name the model are listed.
+Renaming the file otherwise, such as in Dired, has the server do the
+same, without the list.  The current buffer is saved first.  NAME must
+not be that of another model, seed or snapshot of the package; a version
+of a model is not renamed, as the server would edit nothing."
   (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
@@ -331,6 +333,7 @@ not renamed, as the server would edit nothing."
     (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
          (entity (dbt-project-file-entity root buffer-file-name))
+         (old (file-name-base buffer-file-name))
          (new (expand-file-name (concat name "." (file-name-extension buffer-file-name))
                                 (file-name-directory buffer-file-name))))
     (when (plist-get entity :version)
@@ -342,10 +345,26 @@ not renamed, as the server would edit nothing."
     (when (dbt-project-entities root '(model seed snapshot) name (plist-get entity :package))
       (user-error "A model, seed or snapshot named %s exists already" name))
     (save-buffer)
-    (rename-visited-file new)
-    ;; The next rename's check must know the new name.
-    (dbt-project-forget root)
-    (message "Renamed to %s; save the buffers it edited with C-x s" name)))
+    (let ((uses (xref-backend-references 'dbt (concat "ref:" old))))
+      (rename-visited-file new)
+      ;; The next rename's check must know the new name.
+      (dbt-project-forget root)
+      ;; What still names the model, in the buffers that the server edited
+      ;; or else in the files.
+      (setq uses (seq-filter (lambda (item)
+                               (let* ((location (xref-item-location item))
+                                      (file (xref-location-group location)))
+                                 (with-temp-buffer
+                                   (if-let* ((buffer (get-file-buffer file)))
+                                       (insert-buffer-substring buffer)
+                                     (insert-file-contents file))
+                                   (forward-line (1- (xref-location-line location)))
+                                   (re-search-forward (format "\\_<%s\\_>" (regexp-quote old)) (line-end-position) t))))
+                             uses))
+      (when uses
+        (xref-show-xrefs (lambda () uses) nil))
+      (message "Renamed to %s; save the buffers it edited with C-x s%s" name
+               (if uses (format "; %d uses still name %s, which dbt lsp leaves" (length uses) old) "")))))
 
 (defun dbt-lsp-format-buffer ()
   "Save the buffer, and format it with the server."
