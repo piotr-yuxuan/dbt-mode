@@ -332,6 +332,33 @@ A root entry of a root model finds that model."
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_orders.sql" . 1))))))
 
+(ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
+  "A call in a package's YAML properties or singular test resolves in that package first; M-? on its source entry lists its uses.
+The project's namesakes and their uses come after, or not at all."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (make-directory (expand-file-name "dbt_packages/shop_utils/tests" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_sources.yml" root))
+    (write-region "select * from {{ source('raw', 'raw_orders') }}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/pkg_src.sql" root))
+    (write-region "select * from {{ ref('stg_orders') }} where id < 0\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/tests/assert_pkg.sql" root))
+    (write-region (concat "models:\n  - name: pkg_src\n    data_tests:\n      - relationships:\n"
+                          "          arguments:\n            to: ref('stg_orders')\n            field: id\n")
+                  nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
+    (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"))
+      (dbt-test-visit root file)
+      (dbt-test-goto "stg_orders")
+      (should (equal (car (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt))
+                                               root))
+                     '("dbt_packages/shop_utils/models/stg_orders.sql" . 1))))
+    (dbt-test-visit root "dbt_packages/shop_utils/models/_sources.yml")
+    (dbt-test-goto "raw_orders")
+    (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("dbt_packages/shop_utils/models/pkg_src.sql" . 1))))))
+
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
   (dolist (target '((:kind ref :qualifier nil :name "orders" :version nil)

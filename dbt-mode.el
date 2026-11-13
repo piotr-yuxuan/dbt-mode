@@ -484,11 +484,12 @@ dbt-mode's."
              (dbt-project-entities root '(model seed snapshot analysis macro test doc source table))))))
 
 (defun dbt-mode-definitions (target)
-  "Return the entities that define TARGET, from the current buffer."
+  "Return the entities that define TARGET, from the current buffer.
+The calls of a file resolve from its package, whatever the file holds:
+a model, YAML properties, a singular test."
   (let ((root (dbt-project-root)))
     (dbt-project-resolve root target
-                         (plist-get (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
-                                    :package))))
+                         (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))))
 
 (defun dbt-mode--xref (entity &optional summary)
   "Return the xref item of ENTITY, whose summary is SUMMARY or its description."

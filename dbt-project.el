@@ -577,19 +577,25 @@ is looked up in a table, built once for each index."
                        (or (null package) (equal package (plist-get entity :package)))))
                 (if name (gethash name names) index))))
 
+(defun dbt-project-file-package (root file)
+  "Return the package of ROOT that FILE belongs to, as (NAME DIRECTORY CONFIG).
+It is the package whose directory is the nearest above FILE: an
+installed package rather than the project, the project rather than a
+local package that holds it, such as the `../' of a package's
+integration_tests.  Nil when FILE is in none."
+  (let ((file (expand-file-name file)))
+    (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
+                      (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
+                                  (dbt-project-packages root))))))
+
 (defun dbt-project-file-entity (root file)
   "Return the model, seed, snapshot or analysis that FILE of ROOT defines.
 It is the first that the index has of FILE, a snapshot of a Jinja block
 included: a YAML file defines no resource of its own.  FILE need not
 exist yet, nor the index know it: a model, a seed or an analysis is told
-by its place alone.  FILE belongs to the package whose directory is the
-nearest above it: an installed package rather than the project, the
-project rather than a local package that holds it, such as the `../'
-of a package's integration_tests."
+by its place alone, in the package of `dbt-project-file-package'."
   (let* ((file (expand-file-name file))
-         (package (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
-                                    (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
-                                                (dbt-project-packages root)))))
+         (package (dbt-project-file-package root file))
          (kind (dbt-project-file-kind file (nth 1 package) (nth 2 package))))
     (or (seq-find (lambda (entity)
                     (and (equal (plist-get entity :file) file)
