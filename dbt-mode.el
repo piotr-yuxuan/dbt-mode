@@ -426,7 +426,7 @@ For `xref-backend-functions', ahead of lsp-mode's.  Where dbt lsp runs,
 it answers only what dbt-mode does not resolve, such as dbt's own
 macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
 the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
-sources too, where it says so, as `dbt-lsp-proxy-answers-p' tells."
+a request on a source, where it says so: the request goes to it."
   (and (dbt-project-root)
        (or (not (dbt-mode-server-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
@@ -437,11 +437,28 @@ sources too, where it says so, as `dbt-lsp-proxy-answers-p' tells."
                                (looking-at-p (concat "[^\n]*" (alist-get 'snapshot dbt-project-block-regexps))))
                              (dbt-mode-target-at-point)
                            (dbt-mode-call-at-point))))
-             (and target
-                  (not (and (eq (plist-get target :kind) 'source)
-                            (dbt-lsp-proxy-answers-p :references "source")))
-                  (dbt-mode-definitions target))))
+             (and target (dbt-mode-definitions target))))
        'dbt))
+
+(defun dbt-mode--proxy-answers-p (request target)
+  "Return non-nil when dbt-lsp-plus answers REQUEST on TARGET, a source.
+REQUEST is :definition or :references, as `dbt-lsp-proxy-answers-p'
+takes it: the proxy contract steps aside per request and per kind."
+  (and (eq (plist-get target :kind) 'source)
+       (dbt-mode-server-p)
+       (dbt-lsp-proxy-answers-p request "source")))
+
+(cl-defmethod xref-backend-definitions :around ((_backend (eql dbt)) identifier)
+  "Leave the definition of a source to dbt-lsp-plus where it answers it."
+  (if (dbt-mode--proxy-answers-p :definition (dbt-mode-parse-identifier identifier))
+      (xref-backend-definitions 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+    (cl-call-next-method)))
+
+(cl-defmethod xref-backend-references :around ((_backend (eql dbt)) identifier)
+  "Leave the uses of a source to dbt-lsp-plus where it answers them."
+  (if (dbt-mode--proxy-answers-p :references (dbt-mode-parse-identifier identifier))
+      (xref-backend-references 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+    (cl-call-next-method)))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql dbt)))
   "Return the identifier of what point is on, or nil."

@@ -183,9 +183,10 @@ value that its SCHEMA fits, a missing key holding null."
 
 (defun dbt-lsp-proxy-answers-p (request kind)
   "Return non-nil when the server of the buffer answers REQUEST on targets of KIND.
-REQUEST is :references or :rename and KIND \"source\" or \"cte\", as
-dbt-lsp-plus lists them under experimental.dbtLspPlus of its
-capabilities: dbt-mode then steps aside."
+REQUEST is the key of a request that dbt-lsp-plus lists under
+experimental.dbtLspPlus of its capabilities, such as :references or
+:definition, and KIND a kind of target it lists there, such as
+\"source\": dbt-mode then leaves that request to the server."
   (let* ((workspace (dbt-lsp-workspace))
          (capabilities (and workspace (lsp--workspace-server-capabilities workspace))))
     (and (dbt-lsp--conforms-p capabilities `(object (:experimental (object (:dbtLspPlus (object (,request (array stringp))))))))

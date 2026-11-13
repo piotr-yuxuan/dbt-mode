@@ -272,28 +272,59 @@ Choosing the server reads nothing of the project."
       (should (eq (xref-find-backend) 'dbt)))))
 
 (ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
-  "With dbt-lsp-plus listing sources for references, M-. and M-? on a source are the server's.
-dbt-lsp-plus runs the server, given after --, when `dbt-lsp-proxy' is on."
+  "With dbt-lsp-plus listing sources for a request, that request on a source is the server's.
+M-? goes to the server when references lists source, M-. when definition
+does; the rest stays dbt-mode's.  dbt-lsp-plus runs the server, given
+after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
   (let* ((bin (make-temp-file "dbt-lsp-plus" t))
          (exec-path (cons bin exec-path))
          (dbt-lsp-proxy t))
     (write-region "#!/bin/sh\nshift\nexec \"$@\"\n" nil (expand-file-name "dbt-lsp-plus" bin))
     (set-file-modes (expand-file-name "dbt-lsp-plus" bin) #o755)
     (unwind-protect
-        (dbt-lsp-test-with-server root
-            '(("$experimental" . (:dbtLspPlus (:version 1 :references ["source"] :rename ["source"]))))
-          (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 3)
-                         (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))
-          (goto-char (point-max))
-          (insert "\n{{ source('raw', 'raw_orders') }}")
-          (dbt-test-goto "raw_orders')")
-          (should (eq (xref-find-backend) 'xref-lsp))
-          (dbt-test-goto "ref('stg_orders')" 6)
-          (should (eq (xref-find-backend) 'dbt))
-          ;; dbt, as found on exec-path, which dbt-lsp-plus does not search.
-          (let ((dbt-executable (file-name-nondirectory dbt-lsp-test-dbt))
-                (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
-            (should (equal (seq-take (dbt-lsp--command) 3) (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))))
+        (progn
+          (dbt-lsp-test-with-server root
+              `(("$experimental" . (:dbtLspPlus (:version 1 :references ["source"] :rename ["source"])))
+                ("textDocument/references"
+                 . [(:uri ,(lsp--path-to-uri (expand-file-name "models/marts/customers.sql" root))
+                          :range (:start (:line 0 :character 0) :end (:line 0 :character 1)))]))
+            (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 3)
+                           (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt)))
+            (goto-char (point-max))
+            (insert "\n{{ source('raw', 'raw_orders') }}")
+            (dbt-test-goto "raw_orders')")
+            (should (eq (xref-find-backend) 'dbt))
+            (let* (shown
+                   (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher))))
+                   (xref-show-definitions-function xref-show-xrefs-function))
+              (save-window-excursion
+                (switch-to-buffer (current-buffer))
+                (execute-kbd-macro (kbd "M-?"))
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/marts/customers.sql")))
+                (execute-kbd-macro (kbd "M-."))
+                (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                                       shown)
+                               '("models/staging/_sources.yml")))))
+            (should (member "textDocument/references" (dbt-lsp-test-methods)))
+            (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))
+          (dbt-lsp-test-with-server root
+              `(("$experimental" . (:dbtLspPlus (:version 1 :definition ["source"])))
+                ("textDocument/definition"
+                 . [(:uri ,(lsp--path-to-uri (expand-file-name "models/staging/_sources.yml" root))
+                          :range (:start (:line 7 :character 8) :end (:line 7 :character 18)))]))
+            (goto-char (point-max))
+            (insert "\n{{ source('raw', 'raw_orders') }}")
+            (dbt-test-goto "raw_orders')")
+            (save-window-excursion
+              (switch-to-buffer (current-buffer))
+              (execute-kbd-macro (kbd "M-.")))
+            (should (member "textDocument/definition" (dbt-lsp-test-methods)))
+            ;; dbt, as found on exec-path, which dbt-lsp-plus does not search.
+            (let ((dbt-executable (file-name-nondirectory dbt-lsp-test-dbt))
+                  (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
+              (should (equal (seq-take (dbt-lsp--command) 3) (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt))))))
       (delete-directory bin t))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
