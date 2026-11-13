@@ -219,17 +219,25 @@ below it."
   "Alist from a kind of entity to the regexp of the Jinja block defining it.
 The first group matches the name.")
 
+(defun dbt-project-call-regexp (kind qualifier &optional typing)
+  "Return the regexp of a call of KIND, `ref', `source' or `doc'.
+QUALIFIER is `required' when the call gives a package or a source before
+the name, `optional' when it may, and nil when it does not.  Without
+TYPING, the regexp matches a complete call: group 1 the name, group 2
+the qualifier.  With TYPING, it matches a call being typed, up to the
+point where `looking-back' tries it: group 1 the part of the name typed,
+possibly empty, group 2 the qualifier."
+  (concat "\\_<" (symbol-name kind) "[ \t\n]*([ \t\n]*['\"]"
+          (pcase qualifier
+            ('required "\\(?2:[^'\"\n]+\\)['\"][ \t\n]*,[ \t\n]*['\"]")
+            ('optional "\\(?:\\(?2:[^'\"\n]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\)?"))
+          (if typing "\\(?1:[A-Za-z0-9_]*\\)" "\\(?1:[^'\"\n]+\\)['\"]")))
+
 (defconst dbt-project-call-regexps
-  (let ((call (lambda (function qualified)
-                ;; Group 1 matches the name, and group 2 what qualifies it:
-                ;; optional for a package, required for a source.
-                (concat "\\_<" function "[ \t\n]*([ \t\n]*['\"]"
-                        "\\(?:\\(?2:[^'\"\n]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\)" (if qualified "" "?")
-                        "\\(?1:[^'\"\n]+\\)['\"]"))))
-    `((ref . ,(funcall call "ref" nil))
-      (source . ,(funcall call "source" t))
-      (doc . ,(funcall call "doc" nil))))
-  "Alist from the kind of a call of dbt's Jinja to its regexp.
+  `((ref . ,(dbt-project-call-regexp 'ref 'optional))
+    (source . ,(dbt-project-call-regexp 'source 'required))
+    (doc . ,(dbt-project-call-regexp 'doc 'optional)))
+  "Alist from the kind of a call of dbt's Jinja to the regexp of a complete call.
 Group 1 matches the name that the call gives; group 2 the package of a
 `ref' or a `doc', when it is given, or the source of a `source'.")
 

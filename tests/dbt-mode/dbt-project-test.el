@@ -76,6 +76,29 @@
                    (:section "tables" :name "accounts" :line 4 :source "crm")
                    (:section "tables" :name "contacts" :line 5 :source "crm")))))
 
+(ert-deftest dbt-project-call-regexp-reads-calls ()
+  "A complete call gives its name and qualifier; a call being typed, what is typed."
+  (let ((match (lambda (regexp text)
+                 (and (string-match regexp text) (list (match-string 1 text) (match-string 2 text)))))
+        (typed (lambda (regexp text)
+                 (with-temp-buffer
+                   (insert text)
+                   (and (looking-back regexp nil) (list (match-string 1) (match-string 2)))))))
+    (should (equal (funcall match (dbt-project-call-regexp 'ref 'optional) "{{ ref( 'orders' ) }}") '("orders" nil)))
+    (should (equal (funcall match (dbt-project-call-regexp 'ref 'optional) "ref(\"shop_utils\",\n 'orders')")
+                   '("orders" "shop_utils")))
+    (should (equal (funcall match (dbt-project-call-regexp 'source 'required) "source('raw', 'raw_orders')")
+                   '("raw_orders" "raw")))
+    (should-not (funcall match (dbt-project-call-regexp 'source 'required) "source('raw')"))
+    (should-not (funcall match (dbt-project-call-regexp 'ref 'optional) "preferred('orders')"))
+    (should (equal (funcall typed (dbt-project-call-regexp 'ref nil t) "{{ ref('ord") '("ord" nil)))
+    (should (equal (funcall typed (dbt-project-call-regexp 'ref nil t) "{{ ref(\"") '("" nil)))
+    (should (equal (funcall typed (dbt-project-call-regexp 'ref 'required t) "ref('shop_utils', 'ord")
+                   '("ord" "shop_utils")))
+    (should-not (funcall typed (dbt-project-call-regexp 'ref 'required t) "ref('ord"))
+    (should (equal (funcall typed (dbt-project-call-regexp 'source nil t) "source('ra") '("ra" nil)))
+    (should (equal (alist-get 'source dbt-project-call-regexps) (dbt-project-call-regexp 'source 'required)))))
+
 (ert-deftest dbt-project-config-reads-paths ()
   "dbt_project.yml gives the name and paths, in either list form; dbt's defaults otherwise."
   (dbt-test-with-project root
