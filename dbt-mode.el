@@ -993,7 +993,7 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
   ;; The target, the materialization and the compilation, after the name.
   (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))
-  (add-hook 'after-save-hook #'dbt-mode--update-status 'append 'local)
+  (add-hook 'after-save-hook #'dbt-mode--update-status nil 'local)
   (let ((buffer (current-buffer)))
     (run-with-idle-timer 0 nil (lambda ()
                                  (when (buffer-live-p buffer)
