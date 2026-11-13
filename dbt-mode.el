@@ -575,13 +575,18 @@ show' runs it, on the Jinja of the CTE."
 (defun dbt-lineage (name)
   "Show the upstream and downstream of the model, seed or snapshot NAME.
 With dbt lsp, the server gives the lineage; otherwise the `ref' and
-`source' calls of the project's files give it."
+`source' calls of the project's files give it, read again when the
+lineage is asked for again."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
   (if (dbt-mode-server-p)
       (dbt-lsp-lineage name)
-    (let ((root (dbt-mode--root)))
-      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls"))))
+    (let ((root (dbt-mode--root))
+          refresh)
+      (setq refresh (lambda ()
+                      (dbt-project-forget root)
+                      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh)))
+      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh))))
 
 (defun dbt-insert-ref (name)
   "Insert a call of `ref' to NAME, read with completion.

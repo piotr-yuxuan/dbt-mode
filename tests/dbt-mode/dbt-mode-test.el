@@ -483,6 +483,21 @@
     (should (equal (plist-get (dbt-mode-current-resource) :file)
                    (expand-file-name "models/staging/stg_orders.sql" root)))))
 
+(ert-deftest dbt-mode-lineage-reads-the-project-again ()
+  "g in a lineage that no server gives shows what the project holds now, each time."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (dbt-lineage "orders")
+    (with-current-buffer "*dbt lineage: orders*"
+      (unwind-protect
+          (dolist (name '("order_report" "order_audit"))
+            (should-not (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries)))
+            (write-region "select * from {{ ref('orders') }}" nil
+                          (expand-file-name (format "models/marts/%s.sql" name) root))
+            (revert-buffer)
+            (should (member name (mapcar (lambda (entry) (aref (cadr entry) 3)) tabulated-list-entries))))
+        (kill-buffer)))))
+
 (ert-deftest dbt-mode-inserts-refs ()
   "A ref goes inside braces outside a tag, bare inside one."
   (dbt-test-with-project root
