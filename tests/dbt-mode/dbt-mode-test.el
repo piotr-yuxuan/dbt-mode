@@ -272,13 +272,18 @@
     (should (equal (dbt-test-completions "') }}\n{{ doc(\"") '("order_status")))
     (should (equal (dbt-test-completions "\") }}\n{{ shop_utils.") '("is_positive")))
     (should (member "cents_to_dollars" (dbt-test-completions " }}\n{{ cents")))
+    (should-not (dbt-test-completions " }}\n{{ myref('stg_"))
     (should-not (dbt-test-completions " }}\nselect cents"))))
 
 (ert-deftest dbt-mode-imenu-lists-ctes ()
-  "imenu lists the CTEs of a model, in order."
+  "imenu lists the CTEs of a model, in order, and the macros of a file."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
-    (should (equal (mapcar #'car (funcall imenu-create-index-function)) '("orders" "customers" "final")))))
+    (should (equal (mapcar #'car (funcall imenu-create-index-function)) '("orders" "customers" "final")))
+    (dbt-test-visit root "macros/cents_to_dollars.sql")
+    (should (equal (mapcar (lambda (entry) (cons (car entry) (mapcar #'car (cdr entry))))
+                           (funcall imenu-create-index-function))
+                   '(("Macros" "cents_to_dollars"))))))
 
 (ert-deftest dbt-mode-cte-query-selects-from-the-cte ()
   "A CTE's query is the model's WITH up to the CTE, then a select from it."

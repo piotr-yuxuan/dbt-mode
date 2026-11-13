@@ -398,16 +398,16 @@ that other functions, such as those of a language server, still run."
                 (pcase-lambda (`(,regexp . ,candidates))
                   (when (looking-back regexp (max (point-min) (- (point) 300)))
                     (cons (match-beginning 1) (funcall candidates (match-string-no-properties 2)))))
-                `(("ref[ \t\n]*([ \t\n]*['\"]\\(?2:[^'\"]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                `((,(dbt-project-call-regexp 'ref 'required t)
                    . ,(lambda (package) (dbt-project-entities root '(model seed snapshot) nil package)))
-                  ("ref[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'ref nil t)
                    . ,(lambda (_) (dbt-project-entities root '(model seed snapshot))))
-                  ("source[ \t\n]*([ \t\n]*['\"]\\(?2:[^'\"]+\\)['\"][ \t\n]*,[ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'source 'required t)
                    . ,(lambda (source) (seq-filter (lambda (table) (equal source (plist-get table :source)))
                                                    (dbt-project-entities root '(table)))))
-                  ("source[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'source nil t)
                    . ,(lambda (_) (dbt-project-entities root '(source))))
-                  ("doc[ \t\n]*([ \t\n]*['\"]\\(?1:[A-Za-z0-9_]*\\)"
+                  (,(dbt-project-call-regexp 'doc nil t)
                    . ,(lambda (_) (dbt-project-entities root '(doc))))
                   ("\\_<\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\(?1:[A-Za-z0-9_]*\\)"
                    . ,(lambda (package) (and (dbt-mode-jinja-bounds)
@@ -462,7 +462,7 @@ or not a language server runs."
   (interactive)
   (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (entries (seq-filter (lambda (entity)
-                                (member (plist-get entity :section) '("models" "seeds" "snapshots" "analyses")))
+                                (member (plist-get entity :section) dbt-project-resource-sections))
                               (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)))))
     (unless entries
       (user-error "No YAML entry names %s" (plist-get resource :name)))
@@ -567,11 +567,9 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression
-  `(("Macros" "{%-?[ \t\n]*macro[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Tests" "{%-?[ \t\n]*test[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Snapshots" "{%-?[ \t\n]*snapshot[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    ("Docs" "{%-?[ \t\n]*docs[ \t\n]+\\([A-Za-z_][A-Za-z0-9_]*\\)" 1)
-    (nil ,(dbt-mode-cte-regexp) 1))
+  (append (mapcar (pcase-lambda (`(,title . ,kind)) (list title (alist-get kind dbt-project-block-regexps) 1))
+                  '(("Macros" . macro) ("Tests" . test) ("Snapshots" . snapshot) ("Docs" . doc)))
+          `((nil ,(dbt-mode-cte-regexp) 1)))
   "The entries of `imenu' in `dbt-mode': CTEs at top, then Jinja blocks.")
 
 ;;;###autoload
