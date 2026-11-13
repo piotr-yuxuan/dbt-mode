@@ -287,13 +287,18 @@ A node of a package that dbt-mode does not know has no file."
                    "+stg_orders+"))))
 
 (ert-deftest dbt-lsp-rename-model-refuses-what-dbt-would-not-take ()
-  "Renaming a model refuses a name that is not one, or the name of its neighbour."
+  "Renaming a model refuses a name that is not one, or that another resource has.
+dbt names the models, seeds and snapshots of a package apart, wherever
+their files are."
   (dbt-lsp-test-with-server root nil
     (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
       (dbt-lsp)
       (should-error (dbt-lsp-rename-model "2fast") :type 'user-error)
       (should-error (dbt-lsp-rename-model "stg-clients") :type 'user-error)
       (should-error (dbt-lsp-rename-model "stg_orders") :type 'user-error)
+      (should-error (dbt-lsp-rename-model "orders") :type 'user-error)
+      (should-error (dbt-lsp-rename-model "raw_orders") :type 'user-error)
+      (should-error (dbt-lsp-rename-model "orders_snapshot") :type 'user-error)
       (should (equal buffer-file-name (expand-file-name "models/staging/stg_customers.sql" root))))
     (should-not (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))))
 
