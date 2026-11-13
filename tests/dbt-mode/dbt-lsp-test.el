@@ -501,13 +501,9 @@ for a CTE, the model is compiled again first."
   (dbt-lsp-test-with-server root
       '(("workspace/executeCommand dbt.show" :columns ["dbt_diff" "n"] :data [(:dbt_diff "only in target dev" :n "1")]
          :error nil))
-    (let ((state (expand-file-name "prod-state/" root)))
-      (make-directory state)
-      (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"prod.orders\"}}}"
-                    nil (expand-file-name "manifest.json" state))
-      (dbt-data-diff state))
+    (dbt-data-diff (dbt-test-write-state root))
     (should (equal (dbt-lsp-test-rows "orders/diff") '(("only in target dev" "1"))))
-    (should (string-search "dbt_diff_there as (select * from prod.orders)"
+    (should (string-search "dbt_diff_there as (select {{ dbt_diff_columns }} from \"db\".\"prod\".\"orders\")"
                            (plist-get (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params)
                                                        :arguments)
                                             0)

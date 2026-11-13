@@ -295,8 +295,11 @@ another dbt holds the project."
 
 (ert-deftest dbt-cli-diffs-the-rows-of-a-model-with-a-state ()
   "The data diff runs one query on the default target, of the rows that each side lacks.
-The state's relation is the relation_name of its manifest, verbatim; a
-model the state lacks says so; a protected default target asks first."
+The columns are the model's, by name, from its relation; the state's
+relation is the relation_name of its manifest; each side is named after
+its target and its state, in plain characters; a model the state lacks,
+or a relation that is no name, says so; a protected default target asks
+first, and runs nothing on a no."
   (dbt-test-with-project root
     (let ((state (dbt-test-write-state root))
           (dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
@@ -305,21 +308,37 @@ model the state lacks says so; a protected default target asks first."
         (dbt-data-diff state)
         (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/diff*")))
           (let ((arguments (aref (aref dbt-rows--rows 0) 0)))
-            (should (string-search "--inline with dbt_diff_here as (select * from {{ ref('shop', 'orders') }})"
+            (should (string-search (concat "--inline {% set dbt_diff_columns %}{% for column in "
+                                           "adapter.get_columns_in_relation(ref('shop', 'orders')) %}")
                                    arguments))
-            (should (string-search "dbt_diff_there as (select * from \"db\".\"prod\".\"orders\")" arguments))
-            (should (string-search (concat "select 'only in target dev' as dbt_diff, a.* from (select * from dbt_diff_here"
-                                           " {{ dbt.except() }} select * from dbt_diff_there) as a")
+            (should (string-search "with dbt_diff_here as (select {{ dbt_diff_columns }} from {{ ref('shop', 'orders') }})"
                                    arguments))
-            (should (string-search (concat "select 'only in prod-state' as dbt_diff, b.* from (select * from dbt_diff_there"
-                                           " {{ dbt.except() }} select * from dbt_diff_here) as b")
+            (should (string-search "dbt_diff_there as (select {{ dbt_diff_columns }} from \"db\".\"prod\".\"orders\")"
+                                   arguments))
+            (should (string-search "select 'only in dev' as dbt_diff, a.* from (select * from dbt_diff_here" arguments))
+            (should (string-search "select 'only in prod-state' as dbt_diff, b.* from (select * from dbt_diff_there"
                                    arguments)))
           (kill-buffer))
         (let ((process-environment (cons "DBT_TARGET=prod" process-environment))
+              (processes (process-list))
               (asked nil))
           (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil)))
             (should-error (dbt-data-diff state) :type 'user-error))
-          (should (string-match-p "Run on target prod" asked))))
+          (should (string-match-p "Run on target prod" asked))
+          (should (equal (process-list) processes))
+          (should-not (get-buffer "*dbt rows: orders/diff*")))
+        ;; A state whose name holds a quote and Jinja is named plainly.
+        (let ((other (expand-file-name "it's {{ x }}/" root)))
+          (make-directory other)
+          (copy-file (expand-file-name "manifest.json" state) (expand-file-name "manifest.json" other))
+          (dbt-data-diff other)
+          (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/diff*")))
+            (should (string-search "select 'only in it_s __ x __' as dbt_diff" (aref (aref dbt-rows--rows 0) 0)))
+            (kill-buffer)))
+        ;; A relation_name with Jinja, which dbt would run, is no name.
+        (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"{{ run_query('drop table x') }}\"}}}"
+                      nil (expand-file-name "manifest.json" state))
+        (should-error (dbt-data-diff state) :type 'user-error))
       (with-current-buffer (dbt-test-visit root "models/marts/customers.sql")
         (should-error (dbt-data-diff state) :type 'user-error)))))
 
