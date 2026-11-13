@@ -172,10 +172,10 @@ or holds an error, a message says so."
                                           (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
 
 (defun dbt-lsp--compiled (callback)
-  "Have the server compile the current buffer, then call CALLBACK.
+  "Save the current buffer, have the server compile it, then call CALLBACK.
 CALLBACK runs with no argument in the buffer of the compiled SQL, which
-is read-only.  The server compiles the buffer as it is, unsaved changes
-included."
+is read-only.  The server compiles the file on disk, hence the save."
+  (save-buffer)
   (dbt-lsp--execute
    "dbt.compileFile" (list (lsp--buffer-uri)) '(object (:file_uri stringp))
    (lambda (result)
@@ -185,7 +185,8 @@ included."
        (funcall callback)))))
 
 (defun dbt-lsp-compile-file ()
-  "Show the SQL that the current model compiles to, in another window."
+  "Show the SQL that the current model compiles to, in another window.
+The buffer is saved first, as the server compiles the file on disk."
   (interactive)
   (dbt-lsp--compiled (lambda () (display-buffer (current-buffer)))))
 
@@ -199,10 +200,12 @@ included."
 (defun dbt-lsp-show (&optional sql title)
   "Show the rows of the current model, or of the query SQL, as TITLE.
 SQL may hold Jinja.  At most `dbt-preview-limit' rows.  TITLE defaults to
-the name of the model, or \"query\".  Each row shows on one line: a
-newline in a value as \\n, a nested value as JSON.  JSON false reads as
-null in lsp-mode, so it shows as NULL."
+the name of the model, or \"query\".  Without SQL, the buffer is saved
+first, as the server reads the model on disk.  Each row shows on one
+line: a newline in a value as \\n, a nested value as JSON.  JSON false
+reads as null in lsp-mode, so it shows as NULL."
   (interactive)
+  (unless sql (save-buffer))
   (let ((buffer (current-buffer))
         (title (or title (if sql "query" (file-name-base buffer-file-name)))))
     (dbt-lsp--execute
@@ -241,7 +244,8 @@ null in lsp-mode, so it shows as NULL."
 (defun dbt-lsp-preview-cte (name)
   "Show the rows of the CTE NAME of the current model.
 The CTE comes from the compiled SQL, where the Jinja that needs a model,
-such as `is_incremental', is rendered."
+such as `is_incremental', is rendered.  The buffer is saved first, as
+the server compiles the file on disk."
   (interactive (list (car (dbt-mode-cte-query))))
   (let ((source (current-buffer)))
     (dbt-lsp--compiled

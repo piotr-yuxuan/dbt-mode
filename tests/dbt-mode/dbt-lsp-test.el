@@ -191,6 +191,29 @@ lsp-mode reads false as it reads null, so false shows as NULL too."
       (should (equal (buffer-string) "select 1 as compiled\n"))
       (should (get-buffer-window (current-buffer) t)))))
 
+(ert-deftest dbt-lsp-compiles-and-shows-the-buffer-saved ()
+  "The server reads the file on disk, so the buffer is saved before it compiles or shows."
+  (dbt-lsp-test-with-server root
+      `(("workspace/executeCommand dbt.compileFile"
+         :file_uri ,(lsp--path-to-uri (expand-file-name "target/compiled/shop/models/marts/orders.sql" root)))
+        ("workspace/executeCommand dbt.show" :columns ["a"] :data [(:a "1")]))
+    (make-directory (expand-file-name "target/compiled/shop/models/marts/" root) t)
+    (with-temp-file (expand-file-name "target/compiled/shop/models/marts/orders.sql" root)
+      (insert "select 1 as a\n"))
+    (goto-char (point-max))
+    (insert "-- compiled\n")
+    (dbt-lsp-compile-file)
+    (dbt-test-wait (lambda () (get-file-buffer (expand-file-name "target/compiled/shop/models/marts/orders.sql" root))))
+    (insert "-- shown\n")
+    (dbt-lsp-show)
+    (should (equal (dbt-lsp-test-rows "orders") '(("1"))))
+    (should-not (buffer-modified-p))
+    (should (string-suffix-p "-- compiled\n-- shown\n" (dbt-lsp-test-file-text root "models/marts/orders.sql")))
+    (should (member "workspace/executeCommand dbt.show"
+                    (member "textDocument/didSave"
+                            (member "workspace/executeCommand dbt.compileFile"
+                                    (member "textDocument/didSave" (dbt-lsp-test-methods))))))))
+
 (ert-deftest dbt-lsp-preview-cte-shows-the-rows-of-a-lens ()
   "The code lens of a CTE shows the rows of that CTE of the compiled SQL."
   (dbt-lsp-test-with-server root
