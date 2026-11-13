@@ -62,6 +62,7 @@
 (autoload 'dbt-dispatch "dbt-cli" nil t)
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
+(autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
@@ -529,7 +530,7 @@ or not a language server runs."
 
 (defun dbt-visit-compiled ()
   "Show the SQL that the current model compiles to.
-With dbt lsp, the server compiles it, unsaved changes included.
+With dbt lsp, the buffer is saved and the server compiles it.
 Otherwise, show what the last `dbt compile' or `dbt run' wrote."
   (interactive)
   (if (dbt-mode-server-p)
@@ -633,6 +634,7 @@ For `after-save-hook', so that the index sees what was just saved."
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
     ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
+    ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression

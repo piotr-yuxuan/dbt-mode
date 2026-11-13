@@ -56,10 +56,15 @@ For `compilation-error-regexp-alist'.")
 It runs at the root of the project of the current buffer, in a
 compilation buffer of `dbt-compilation-mode'.  dbt runs without colours
 or progress bars, which it would otherwise draw when Emacs passes on the
-TERM of a terminal."
+TERM of a terminal.  The project's modified buffers are offered for
+saving first, under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
+    ;; dbt reads the project's files, not its buffers: offer to save them,
+    ;; as `compile' does.
+    (save-some-buffers (not compilation-ask-about-save)
+                       (lambda () (and buffer-file-name (string-prefix-p root (expand-file-name buffer-file-name)))))
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")
