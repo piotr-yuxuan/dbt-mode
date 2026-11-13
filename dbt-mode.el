@@ -662,13 +662,12 @@ none, such as a singular test or a properties file, as dbt selects by
 path.  Nil outside a file of a project."
   (let* ((target (dbt-mode-target-at-point))
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource)))
-         (root (dbt-project-root)))
+                     (dbt-mode-current-resource))))
     (pcase (plist-get entity :kind)
       ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
       ('source (format "source:%s" (plist-get entity :name)))
       ((pred identity) (dbt-mode-resource-selector entity))
-      (_ (and root buffer-file-name (concat "path:" (file-relative-name buffer-file-name root)))))))
+      (_ (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root))))))))
 
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).
