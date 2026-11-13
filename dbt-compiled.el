@@ -59,7 +59,7 @@ name, or else the line at the same share of the buffer."
     (with-current-buffer compiled
       (save-excursion
         (goto-char (point-min))
-        (if (and cte (re-search-forward (dbt-mode-cte-regexp (car cte)) nil t))
+        (if (and cte (dbt-mode-goto-cte (car cte)))
             (progn (beginning-of-line)
                    (forward-line (cdr cte)))
           (forward-line (round (* share (count-lines (point-min) (point-max))))))

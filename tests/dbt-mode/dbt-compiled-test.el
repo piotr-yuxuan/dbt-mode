@@ -45,6 +45,29 @@ Outside a CTE, the line at the same share of the buffer."
                                                 (dbt-compiled-position compiled)))
                                    (buffer-substring (point) (line-end-position)))))))))
 
+(ert-deftest dbt-compiled-faces-the-model-s-cte-not-an-ephemeral-s ()
+  "A CTE of an ephemeral model that dbt inlines, named as one of the model's, is not the model's.
+The compiled SQL faces the model's own, and the query of a CTE by name
+is that of the model's own."
+  (dbt-test-with-project root
+    (let ((compiled (find-file-noselect
+                     (dbt-test-compile root (concat "with __dbt__cte__stg_payments as (\nwith renamed as (\n"
+                                                    "    select 1 as id\n)\nselect * from renamed\n),\n\n"
+                                                    "renamed as (\n    select 2 as id\n    from x\n)\n\n"
+                                                    "select * from renamed\n")))))
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (erase-buffer)
+        (insert "with renamed as (\n    select 2 as id\n    from {{ ref('x') }}\n)\n\nselect * from renamed\n")
+        (dbt-test-goto "from {{")
+        (let ((position (dbt-compiled-position compiled)))
+          (with-current-buffer compiled
+            (goto-char position)
+            (should (looking-at "    from x$")))))
+      (with-current-buffer compiled
+        (dbt-mode)
+        (should (string-match-p "select 2 as id\n    from x\n)\nselect \\* from renamed\\'"
+                                (cdr (dbt-mode-cte-query "renamed"))))))))
+
 (ert-deftest dbt-compiled-shows-beside-the-model-and-follows-point ()
   "C-c C-v shows the compiled SQL beside the model, point left in it; moving
 point moves the compiled SQL along; once its window goes, so does the mode."

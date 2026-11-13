@@ -285,6 +285,25 @@ multiline construct, read again whole after a change within it.")
 
 ;;;; What point is on
 
+(defun dbt-mode-goto-cte (name)
+  "Move point to the end of the start of the CTE NAME, and return point.
+It is the first CTE NAME outside parentheses, else the first one: in
+compiled SQL, the CTEs of an inlined ephemeral model lie in the
+parentheses of its `__dbt__cte__' CTE, before the model's own.  The
+match data are those of `dbt-mode-cte-regexp'.  Return nil when there is
+no such CTE."
+  (let ((regexp (dbt-mode-cte-regexp name))
+        (case-fold-search t)
+        found first)
+    (goto-char (point-min))
+    (while (and (not found) (re-search-forward regexp nil t))
+      (if (= 0 (save-excursion (save-match-data (car (syntax-ppss (match-beginning 1))))))
+          (setq found (match-beginning 0))
+        (setq first (or first (match-beginning 0)))))
+    (when (or found first)
+      (goto-char (or found first))
+      (re-search-forward regexp nil t))))
+
 (defun dbt-mode-cte-query (&optional name)
   "Return the name of a CTE and a query of its rows, as a pair.
 The CTE is that named NAME, or else the last that starts before the end
@@ -295,7 +314,7 @@ snapshot, which the query would not close."
   (let ((case-fold-search t))
     (save-excursion
       (unless (if name
-                  (progn (goto-char (point-min)) (re-search-forward (dbt-mode-cte-regexp name) nil t))
+                  (dbt-mode-goto-cte name)
                 (end-of-line)
                 (re-search-backward (dbt-mode-cte-regexp) nil t))
         (user-error "No CTE here"))
