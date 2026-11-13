@@ -403,6 +403,16 @@ for a CTE, the model is compiled again first."
                             (member "workspace/executeCommand dbt.compileFile"
                                     (member "textDocument/didSave" (dbt-lsp-test-methods))))))))
 
+(ert-deftest dbt-lsp-previews-a-file-that-is-no-model ()
+  "With the server, C-c C-p shows the rows of any file it shows, such as a singular test."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.show" :columns ["n"] :data [(:n "1")] :error nil))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "tests/assert_positive_amount.sql"))
+      (dbt-lsp)
+      (execute-kbd-macro (kbd "C-c C-p"))
+      (should (equal (dbt-lsp-test-rows "assert_positive_amount") '(("1")))))))
+
 (ert-deftest dbt-lsp-preview-cte-shows-the-rows-of-a-lens ()
   "The code lens of a CTE shows the rows of that CTE of the compiled SQL."
   (dbt-lsp-test-with-server root

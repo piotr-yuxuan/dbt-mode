@@ -677,16 +677,17 @@ server runs the query, on the compiled SQL for a CTE; otherwise `dbt
 show' runs it, on the Jinja of the CTE."
   (interactive (cond (current-prefix-arg (list nil nil t))
                      ((use-region-p) (list (region-beginning) (region-end)))))
-  ;; QUERY is the name of the rows, and their SQL unless they are the
-  ;; model's.
+  ;; QUERY is the name of the rows and their SQL, or nil for the file's:
+  ;; dbt lsp shows any file, dbt show a resource.
   (let ((query (cond (cte (dbt-mode-cte-query))
                      (start (cons (format "%s/query" (file-name-base (buffer-name)))
-                                  (buffer-substring-no-properties start end)))
-                     (t (list (dbt-mode-resource-selector
-                               (or (dbt-mode-current-resource) (user-error "No model here"))))))))
+                                  (buffer-substring-no-properties start end))))))
     (cond (cte (funcall (if (dbt-mode-server-p) #'dbt-lsp-preview-cte #'dbt-cli-preview-cte) (car query)))
           ((dbt-mode-server-p) (dbt-lsp-show (cdr query) (car query)))
-          (t (dbt-cli-show (car query) (cdr query))))))
+          (t (dbt-cli-show (or (car query)
+                               (dbt-mode-resource-selector
+                                (or (dbt-mode-current-resource) (user-error "No model here"))))
+                           (cdr query))))))
 
 (defun dbt-lineage (selector)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
