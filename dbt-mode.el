@@ -623,17 +623,21 @@ and once the buffer is shown."
                          " ")))))
 
 (defun dbt-mode-selection-at-point ()
-  "Return dbt's selector of what point is on, else of the current resource.
+  "Return dbt's selector of what point is on, else of the current file.
 On a `ref', it is the model, seed or snapshot that it names, as NAME or
-NAME.vVERSION; on a `source', source:SOURCE.TABLE.  Nil when point is on
-none of these, and the buffer holds no resource."
+NAME.vVERSION; on a `source', source:SOURCE.TABLE.  Else it is the
+current resource, or path:FILE for a file of the project that holds
+none, such as a singular test or a properties file, as dbt selects by
+path.  Nil outside a file of a project."
   (let* ((target (dbt-mode-target-at-point))
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource))))
+                     (dbt-mode-current-resource)))
+         (root (dbt-project-root)))
     (pcase (plist-get entity :kind)
       ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
       ('source (format "source:%s" (plist-get entity :name)))
-      ((pred identity) (dbt-mode-resource-selector entity)))))
+      ((pred identity) (dbt-mode-resource-selector entity))
+      (_ (and root buffer-file-name (concat "path:" (file-relative-name buffer-file-name root)))))))
 
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).

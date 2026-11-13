@@ -109,6 +109,23 @@ quote counts as it is; a commit on main after the branch does not."
       (should (string-match-p "not a git repository"
                               (cadr (should-error (dbt-cli-changed-selection root) :type 'user-error)))))))
 
+(ert-deftest dbt-cli-dispatch-selects-what-point-is-on ()
+  "C-c C-d selects the ref at point, else the resource, else the file by path, as a singular test."
+  (dbt-test-with-project root
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+      (save-window-excursion
+        (pcase-dolist (`(,file ,text ,selection)
+                       '(("models/marts/orders.sql" "stg_orders')" "stg_orders")
+                         ("models/marts/orders.sql" "final as" "orders")
+                         ("tests/assert_positive_amount.sql" "where" "path:tests/assert_positive_amount.sql")))
+          (switch-to-buffer (dbt-test-visit root file))
+          (dbt-test-goto text)
+          (execute-kbd-macro (kbd "C-c C-d b"))
+          (with-current-buffer "*dbt shop: build*"
+            (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+            (should (string-match-p (format "^arguments: build --select %s$" (regexp-quote selection))
+                                    (buffer-string)))))))))
+
 (ert-deftest dbt-cli-runs-the-last-command-again ()
   "Again runs the project's last dbt command, with its arguments, which the menu shows."
   (dbt-test-with-project root
