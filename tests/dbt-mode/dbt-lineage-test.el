@@ -46,6 +46,18 @@ downstream of all of them."
         (should (= (length tabulated-list-entries) 3999))
         (kill-buffer)))))
 
+(ert-deftest dbt-lineage-reads-the-project-again-on-g-only ()
+  "C-c C-g without a server uses the project as last read; g reads it again."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let ((graph (dbt-project-graph root)))
+      (dbt-lineage "stg_orders")
+      (should (eq (dbt-project-graph root) graph))
+      (with-current-buffer "*dbt lineage: stg_orders*"
+        (revert-buffer)
+        (should-not (eq (dbt-project-graph root) graph))
+        (kill-buffer)))))
+
 (ert-deftest dbt-lineage-shows-the-project-lineage ()
   "C-c C-g without a server lists upstream and downstream rows."
   (dbt-test-with-project root

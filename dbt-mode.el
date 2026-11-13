@@ -696,7 +696,8 @@ again."
       (setq refresh (lambda ()
                       (dbt-project-forget root)
                       (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))
-      (funcall refresh))))
+      ;; Read again on `g' only: the cached graph serves the first time.
+      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh))))
 
 (defun dbt-insert-ref (selector)
   "Insert a call of `ref' to SELECTOR, read with completion.
