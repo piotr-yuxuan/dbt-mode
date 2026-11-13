@@ -601,23 +601,33 @@ In a YAML file, it is the resource whose entry holds point."
 (defvar-local dbt-mode-compiling nil
   "Non-nil while dbt lsp compiles the project of the buffer, as it notifies.")
 
+(defvar-local dbt-mode--node-id nil
+  "The file of the buffer and the node id of its resource, or nil for none.
+Found once for each file name: a save, which forgets the project, would
+read its index again.")
+
 (defun dbt-mode--update-status ()
   "Set what the mode line says: the target that dbt runs on, the materialization.
 The materialization is that of the model's config() call, else that of
-its node in the manifest of the user's runs.  For `after-save-hook',
-and once the buffer is shown."
+its node in the manifest of the user's runs, read only then.  For
+`after-save-hook', and once the buffer is shown, which finds its node."
   (when-let* ((root (dbt-project-root)))
-    (let* ((resource (dbt-mode-current-resource))
-           (manifest (expand-file-name "manifest.json"
-                                       (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
-           (config (and resource
-                        (gethash "config" (or (dbt-project-manifest-node manifest (dbt-project-node-id resource))
-                                              (make-hash-table)))))
-           (materialization (or (save-excursion
-                                  (goto-char (point-min))
-                                  (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
-                                       (match-string-no-properties 1)))
-                                (and (hash-table-p config) (gethash "materialized" config)))))
+    (let* ((id (cdr (if (equal (car dbt-mode--node-id) buffer-file-name)
+                        dbt-mode--node-id
+                      (setq dbt-mode--node-id
+                            (cons buffer-file-name (when-let* ((resource (dbt-mode-current-resource)))
+                                                     (dbt-project-node-id resource)))))))
+           (materialization
+            (or (save-excursion
+                  (goto-char (point-min))
+                  (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
+                       (match-string-no-properties 1)))
+                (let* ((manifest (expand-file-name "manifest.json" (expand-file-name (plist-get (dbt-project-config root)
+                                                                                                :target-path)
+                                                                                      root)))
+                       (node (and id (dbt-project-manifest-node manifest id)))
+                       (config (and (hash-table-p node) (gethash "config" node))))
+                  (and (hash-table-p config) (gethash "materialized" config))))))
       (setq dbt-mode--status
             (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
                          " ")))))
@@ -963,7 +973,7 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
   ;; The target, the materialization and the compilation, after the name.
   (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))
-  (add-hook 'after-save-hook #'dbt-mode--update-status nil 'local)
+  (add-hook 'after-save-hook #'dbt-mode--update-status 'append 'local)
   (let ((buffer (current-buffer)))
     (run-with-idle-timer 0 nil (lambda ()
                                  (when (buffer-live-p buffer)

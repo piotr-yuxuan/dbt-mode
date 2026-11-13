@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'dbt-mode-test-helpers)
+(require 'ert-x)
 (require 'dbt-mode)
 (require 'imenu)
 
@@ -713,6 +714,28 @@ so the test reads what `mode-line-process' shows."
       (set-buffer-modified-p t)
       (save-buffer))
     (should (equal dbt-mode--status "prod view"))))
+
+(ert-deftest dbt-mode-reads-the-materialization-from-the-manifest-only-without-config ()
+  "Without a config() call the materialization is the manifest's; a config() call wins over it.
+The mode line says so once the buffer opens, unsaved; a save reads the
+project's index no more, as the opening found the buffer's node."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"nodes\": {\"model.shop.customers\": {\"config\": {\"materialized\": \"incremental\"}},"
+                          " \"model.shop.orders\": {\"config\": {\"materialized\": \"view\"}}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (with-current-buffer (dbt-test-visit root "models/marts/customers.sql")
+      ;; The user goes idle.
+      (ert-run-idle-timers)
+      (should (equal dbt-mode--status "dev incremental"))
+      (dbt-project-forget root)
+      (set-buffer-modified-p t)
+      (save-buffer)
+      (should (equal dbt-mode--status "dev incremental"))
+      (should-not (gethash (cons root 'index) dbt-project--cache)))
+    (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+      (ert-run-idle-timers)
+      (should (equal dbt-mode--status "dev table")))))
 
 (ert-deftest dbt-mode-copies-the-build-command ()
   "The build command selects the model, or with a prefix its family.
