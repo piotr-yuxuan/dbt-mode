@@ -229,11 +229,22 @@ so the query runs again with the larger limit."
   (funcall dbt-rows--rerun (if limit (prefix-numeric-value limit) (* 2 dbt-rows--limit))))
 
 (defun dbt-rows-show-value ()
-  "Show the whole value of the cell at point."
+  "Show the whole value of the cell at point.
+A value of several lines, or wider than the frame, shows in the buffer
+*dbt value*; any other in the echo area."
   (interactive)
-  (let ((id (or (tabulated-list-get-id) (user-error "No row here")))
-        (column (or (get-text-property (point) 'tabulated-list-column-name) (user-error "No cell here"))))
-    (message "%s: %s" column (or (aref (aref dbt-rows--rows id) (seq-position dbt-rows--columns column)) "NULL"))))
+  (let* ((id (or (tabulated-list-get-id) (user-error "No row here")))
+         (column (or (get-text-property (point) 'tabulated-list-column-name) (user-error "No cell here")))
+         (value (or (aref (aref dbt-rows--rows id) (seq-position dbt-rows--columns column)) "NULL")))
+    (if (and (not (string-search "\n" value)) (< (string-width value) (frame-width)))
+        (message "%s: %s" column value)
+      (with-current-buffer (get-buffer-create "*dbt value*")
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert value))
+        (special-mode)
+        (setq header-line-format (format " %s, row %d" column (1+ id)))
+        (display-buffer (current-buffer))))))
 
 (defvar-keymap dbt-rows-mode-map
   :doc "Keymap of `dbt-rows-mode'."

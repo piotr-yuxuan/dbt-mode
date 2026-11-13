@@ -131,19 +131,26 @@ The mode line says when the rows reached the limit."
     (should (equal (mapcar #'car (dbt-rows-test-shown)) '("Al")))))
 
 (ert-deftest dbt-rows-shows-the-whole-value-of-a-cell ()
-  "RET on a cell shows its whole value, newlines included, and NULL as such."
-  (dbt-rows-test-with-grid dbt-rows-test-rows
+  "RET on a cell shows its whole value, and NULL as such.
+A value of several lines, or wider than the frame, shows in a buffer of
+its own, which the echo area would cut."
+  (dbt-rows-test-with-grid (cons (list "Long" "1" (make-string (* 2 (frame-width)) ?x)) dbt-rows-test-rows)
     (goto-char (point-min))
     (search-forward "line 1")
     (goto-char (match-beginning 0))
     (let ((column (current-column))
           (messages (with-current-buffer (messages-buffer) (point-max-marker))))
       (execute-kbd-macro (kbd "RET"))
+      (should (equal (with-current-buffer "*dbt value*" (buffer-string)) "line 1\nline 2"))
       (forward-line 1)
       (move-to-column column)
       (execute-kbd-macro (kbd "RET"))
       (should (equal (with-current-buffer (messages-buffer) (buffer-substring messages (point-max)))
-                     "note: line 1\nline 2\nnote: NULL\n")))))
+                     "note: NULL\n"))
+      (goto-char (point-min))
+      (move-to-column column)
+      (execute-kbd-macro (kbd "RET"))
+      (should (equal (with-current-buffer "*dbt value*" (buffer-string)) (make-string (* 2 (frame-width)) ?x))))))
 
 (ert-deftest dbt-rows-reads-what-dbt-show-prints-around-its-rows ()
   "Lines before the rows, a column name twice, and text beyond ASCII read as dbt means them.
