@@ -22,12 +22,13 @@ dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer
 dbt-lsp.el                 the lsp-mode client of dbt lsp and its custom commands
 tests/run-ert.el           strict ERT runner: a skip must have an allowed reason
 tests/helpers/             what the tests share
-tests/dbt-mode/            the tests; *-live-test.el run the real dbt lsp
+tests/dbt-mode/            the tests; dbt-lsp-test.el runs the lsp client offline, *-live-test.el against the real dbt lsp
 tests/fixtures/shop/       the fixture dbt project, on DuckDB
-tests/bin/dbt              a stand-in for dbt
+tests/bin/dbt              a stand-in for dbt; for `dbt lsp' it runs fake_dbt_lsp.py, a scripted server
+tests/scripts/             tests of scripts/
 scripts/with-scratch-home  runs a command in a scratch home
 scripts/lint.el            byte-compile and checkdoc, one file per Emacs
-scripts/complexity.el      cyclomatic complexity of each definition, at most 10
+scripts/complexity.el      cyclomatic complexity of each definition, at most 10; each binding of a *-let* form counts
 flake.nix                  the development shell
 ```
 
@@ -37,4 +38,7 @@ The protocol of `dbt lsp` is not documented. What dbt-lsp.el relies on was
 observed on dbt 2.0.9, and the live tests check it: the custom commands
 `dbt.compileFile`, `dbt.show`, `dbt.listNodes` and the code lens
 `dbt.previewCte`, the notifications `dbt/*`, file renames through
-`workspace/willRenameFiles`, and formatting computed from the file on disk.
+`workspace/willRenameFiles`, and that formatting, the linter's fix-all,
+`dbt.compileFile` and `dbt.show` with a uri all read the file on disk.
+`dbt.show` answers no columns for a macro. lsp-mode reads JSON false as
+nil.

@@ -6,8 +6,9 @@ lineage, and the full language server of dbt 2 through
 [lsp-mode](https://emacs-lsp.github.io/lsp-mode/).
 
 `dbt-mode` is `sql-mode` that also reads Jinja. A `.sql` file below a
-`dbt_project.yml` opens in it, unless it lies in `target/` or `logs/`, where
-dbt writes plain SQL. It keeps every key of `sql-mode`.
+`dbt_project.yml` opens in it, unless it lies under the project's
+`target-path` (`target/` by default) or `logs/`, where dbt writes plain SQL.
+It keeps every key of `sql-mode`.
 
 ## What it does
 
@@ -15,14 +16,24 @@ Without any dbt executable, dbt-mode reads the project's files:
 
 - Jinja's `{# #}` comments are comments, apostrophes included, and the tags
   `{{ }}` and `{% %}` show their delimiters, keywords, dbt's functions,
-  packages and macro calls, over several lines too;
+  packages and macro calls, over several lines too; a string inside a tag
+  is a string, so the apostrophe of `"doesn't"` opens nothing;
 - `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
-  `dbt_utils.star(…)` included, goes to its definition, and `M-?` lists where
-  it is used, YAML entries included;
+  `dbt_utils.star(…)` included, goes to its definition, and on
+  `ref('m', v=2)` to that version; `M-?` lists the calls that resolve to the
+  same definition, so a package's model and the project's namesake stay
+  apart, and the YAML entries of a model;
 - completion of the arguments of `ref`, `source` and `doc`, and of macros in
   a tag;
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
 - the lineage of a model, from its `ref` and `source` calls.
+
+The index knows versioned models, snapshots defined in YAML, flow-style
+YAML, packages under `packages-install-path` and local packages, and leaves
+`{# #}` comments out. A project nested in another, such as a package's
+`integration_tests`, is its own project; a package that a project installs
+or declares belongs to that project. Saving re-reads only the files that
+changed.
 
 With dbt 2 (`dbt lsp`), `dbt-lsp-deferred` starts the server through
 lsp-mode, which then gives:
@@ -36,7 +47,8 @@ lsp-mode, which then gives:
 - renaming a model renames every `ref` and YAML entry that names it, whether
   by `dbt-lsp-rename-model`, Dired or `rename-visited-file`;
 - the compiled SQL, the rows of a model, a region or a CTE, and the lineage
-  as the server computes it.
+  as the server computes it. The server compiles and previews the file on
+  disk, so these commands save the buffer first.
 
 Column-level features (column lineage, column definitions and renames)
 need a dbt account: without one, the server says nothing about columns.
@@ -50,7 +62,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
-| `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, macro, docs block or source     |
+| `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, analysis, macro, docs block or source |
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion                             |
 | `M-.`, `M-?`  | `xref`                 | Definition and uses of what point is on                          |
 
@@ -58,13 +70,21 @@ need a dbt account: without one, the server says nothing about columns.
 `show`, `list`, `lint`, `format`, `parse`, `deps`, `debug`, `retry` and
 `docs generate` in a compilation buffer whose errors link to their files.
 Its selection defaults to the current model, and two switches add its
-upstream (`+model`) or its downstream (`model+`).
+upstream (`+model`) or its downstream (`model+`). Each command gets only the
+options dbt takes for it: `--full-refresh` goes to `build`, `run`, `compile`
+and `seed`, the limit to `build`, `run`, `test`, `compile`, `show` and
+`list`. dbt runs without colours or progress bars, whatever `TERM` Emacs
+passes on, and the project's modified buffers are offered for saving first,
+as `compile` does.
 
-In the lineage and the rows, `RET` visits a node's file and `g` asks again.
+In the lineage and the rows, `RET` visits a node's file and `g` asks again;
+without a server, `g` reads the project again. The rows show nested values
+as JSON and newlines as `\n`; lsp-mode reads JSON `false` as null, so it
+shows as `NULL`.
 
 ## Installation
 
-dbt-mode needs Emacs 29.1 or later and lsp-mode 9. The language server
+dbt-mode needs Emacs 31.1 or later and lsp-mode 9. The language server
 needs dbt 2.0 or later, the `dbt` distribution (dbt Core 1.x and `dbt-oss`
 have no `dbt lsp`); it was tested with dbt 2.0.9.
 
@@ -80,7 +100,10 @@ With [straight.el](https://github.com/radian-software/straight.el) and
 
 `dbt-lsp-deferred` makes the root of the dbt project a folder of the lsp
 session before it starts the server, so that the server runs on the
-project, not on an enclosing repository. `dbt-properties-mode-maybe` turns
+project, not on an enclosing repository, and each dbt project of a
+repository gets its own server, whatever `lsp-auto-guess-root` says. It
+adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
+it asks once per executable, within ten seconds. `dbt-properties-mode-maybe` turns
 on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 
 ## Options
@@ -97,12 +120,17 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 lsp-mode's own options apply: `lsp-lens-enable` shows the "Preview CTE"
 lenses, `lsp-semantic-tokens-enable` the server's semantic tokens.
 
-## Formatting
+## Formatting and fixes
 
-`dbt lsp` 2.0.9 formats the file on disk rather than the buffer, so its edits
-would corrupt unsaved changes. dbt-mode hides formatting from lsp-mode;
-`dbt-lsp-format-buffer` saves the buffer first, then formats it, and
-`dbt-dispatch` runs `dbt format`.
+`dbt lsp` 2.0.9 formats the file on disk rather than the buffer, and so does
+its linter's fix-all code action: their edits would corrupt unsaved changes.
+dbt-mode hides both from lsp-mode. `dbt-lsp-format-buffer` saves the buffer
+first, then formats it; `dbt-lsp-fix-all`, with `dbt-lsp-enable-linter`,
+saves, then fixes and formats; `dbt-dispatch` runs `dbt format` and `dbt
+lint`.
+
+`dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
+of the package already has.
 
 ## Limitations
 
@@ -118,7 +146,8 @@ would corrupt unsaved changes. dbt-mode hides formatting from lsp-mode;
 
 ## Tests
 
-`make check` in `nix develop` runs the lints and the tests. With
+`make check` in `nix develop` runs the lints and the tests; the lsp client
+is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
 `DBT_MODE_TEST_DBT` naming a dbt 2 executable, the tests also run the real
 `dbt lsp` on the fixture project, `tests/fixtures/shop`, through lsp-mode.
 
