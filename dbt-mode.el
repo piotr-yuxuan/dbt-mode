@@ -789,6 +789,42 @@ show' runs it, on the Jinja of the CTE."
                                 (or (dbt-mode-current-resource) (user-error "No model here"))))
                            (cdr query))))))
 
+(defun dbt-data-diff (state)
+  "Show the rows of the current model that differ from its relation in STATE.
+STATE is a directory of another target's artifacts, such as
+production's, as dbt's --state takes it: the model's relation there is
+the relation_name of its node in STATE's manifest.json.  One query on
+the default target gives the rows of each side that the other lacks, as
+`{{ dbt.except() }}' finds them, set difference, each row in a first
+column dbt_diff that names its side.  Both relations must be readable
+from the default target's connection, with the same columns; else the
+database's error shows.  A protected target asks first, as
+`dbt-project-confirm-target' says.  The rows show as a preview's do."
+  (interactive (list (read-directory-name "Compare with the state in: " nil nil t)))
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (selector (dbt-mode-resource-selector resource))
+         (node (dbt-project-manifest-node (expand-file-name "manifest.json" state) (dbt-project-node-id resource)))
+         ;; The manifest is dbt's, read as it is: its relation, verbatim.
+         (relation (or (and (hash-table-p node) (stringp (gethash "relation_name" node)) (gethash "relation_name" node))
+                       (user-error "No relation of %s in %s" selector (abbreviate-file-name state))))
+         (label (dbt-project-confirm-target root nil))
+         (side (lambda (name) (format "'only in %s'" (string-replace "'" "''" name))))
+         (sql (format (concat "with dbt_diff_here as (select * from {{ ref('%s', '%s'%s) }}),\n"
+                              "dbt_diff_there as (select * from %s)\n"
+                              "select %s as dbt_diff, a.* from (select * from dbt_diff_here {{ dbt.except() }} "
+                              "select * from dbt_diff_there) as a\nunion all\n"
+                              "select %s as dbt_diff, b.* from (select * from dbt_diff_there {{ dbt.except() }} "
+                              "select * from dbt_diff_here) as b")
+                      (plist-get resource :package) (plist-get resource :name)
+                      (if (plist-get resource :version) (format ", v=%s" (plist-get resource :version)) "")
+                      relation (funcall side label)
+                      (funcall side (file-name-nondirectory (directory-file-name state)))))
+         (title (format "%s/diff" selector)))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-show sql title)
+      (dbt-cli-show title sql))))
+
 (defun dbt-lineage (selector)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
 SELECTOR is its name, or NAME.vVERSION for a version of a model; a name
@@ -991,6 +1027,7 @@ CTE rather than by statement."
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
     ["Compiled SQL against a state..." dbt-compiled-diff]
+    ["Data against a state..." dbt-data-diff]
     ["Copy the relation" dbt-copy-relation]
     ["Copy the build command" dbt-copy-build-command]
     ["Dashboard of the project" dbt-dashboard]

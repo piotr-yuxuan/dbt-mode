@@ -293,6 +293,44 @@ another dbt holds the project."
         (dbt-preview (point-min) (+ (point-min) 10)))
       (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/query*"))))))
 
+(defun dbt-test-write-state (root)
+  "Write a state of ROOT's artifacts, with a relation of the model orders; return its directory."
+  (let ((state (expand-file-name "prod-state/" root)))
+    (make-directory state)
+    (write-region "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"prod\\\".\\\"orders\\\"\"}}}"
+                  nil (expand-file-name "manifest.json" state))
+    state))
+
+(ert-deftest dbt-cli-diffs-the-rows-of-a-model-with-a-state ()
+  "The data diff runs one query on the default target, of the rows that each side lacks.
+The state's relation is the relation_name of its manifest, verbatim; a
+model the state lacks says so; a protected default target asks first."
+  (dbt-test-with-project root
+    (let ((state (dbt-test-write-state root))
+          (dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+      (with-current-buffer (dbt-test-visit root "models/marts/orders.sql")
+        (dbt-data-diff state)
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/diff*")))
+          (let ((arguments (aref (aref dbt-rows--rows 0) 0)))
+            (should (string-search "--inline with dbt_diff_here as (select * from {{ ref('shop', 'orders') }})"
+                                   arguments))
+            (should (string-search "dbt_diff_there as (select * from \"db\".\"prod\".\"orders\")" arguments))
+            (should (string-search (concat "select 'only in target dev' as dbt_diff, a.* from (select * from dbt_diff_here"
+                                           " {{ dbt.except() }} select * from dbt_diff_there) as a")
+                                   arguments))
+            (should (string-search (concat "select 'only in prod-state' as dbt_diff, b.* from (select * from dbt_diff_there"
+                                           " {{ dbt.except() }} select * from dbt_diff_here) as b")
+                                   arguments)))
+          (kill-buffer))
+        (let ((process-environment (cons "DBT_TARGET=prod" process-environment))
+              (asked nil))
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil)))
+            (should-error (dbt-data-diff state) :type 'user-error))
+          (should (string-match-p "Run on target prod" asked))))
+      (with-current-buffer (dbt-test-visit root "models/marts/customers.sql")
+        (should-error (dbt-data-diff state) :type 'user-error)))))
+
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
 Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and

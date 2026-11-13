@@ -57,7 +57,8 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
 
 (defcustom dbt-protected-targets '("prod")
   "The targets on which dbt-mode asks before SQL runs on the warehouse.
-An Org Babel block of dbt asks, and so does `dbt-dashboard-freshness'.
+An Org Babel block of dbt asks, and so do `dbt-dashboard-freshness' and
+`dbt-data-diff'.
 While any target is protected, a default target that dbt-mode cannot
 read asks too."
   :type '(repeat string))
