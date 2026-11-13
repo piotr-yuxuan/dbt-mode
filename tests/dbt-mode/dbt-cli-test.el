@@ -496,6 +496,24 @@ saved; dbt's runs leave no buffer behind."
         (should-not (buffer-modified-p))
         (should (verify-visited-file-modtime))))))
 
+(ert-deftest dbt-cli-formats-twice-in-a-row ()
+  "C-c C-q twice in a row: the buffer shows the file as both formats left it, and no edit is said to win."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+            (process-environment (append '("FAKE_DBT_SUCCEED=1" "FAKE_DBT_SLEEP=0.3") process-environment))
+            (start (with-current-buffer (messages-buffer) (point-max))))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (execute-kbd-macro (kbd "C-c C-q"))
+        (dbt-test-formatted)
+        (should (string-prefix-p "-- formatted\n-- formatted\n" (buffer-string)))
+        (should (equal (buffer-string) (dbt-test-file-text root "models/marts/orders.sql")))
+        (should-not (buffer-modified-p))
+        (should-not (with-current-buffer (messages-buffer)
+                      (string-search "your edits since" (buffer-substring start (point-max)))))))))
+
+
 (ert-deftest dbt-cli-formats-a-buffer-saved-while-another-formats ()
   "A buffer saved while another one formats, as by a timer, is formatted after its save."
   (dbt-test-with-project root
