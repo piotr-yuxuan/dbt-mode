@@ -408,13 +408,15 @@ KIND:NAME."
 (defun dbt-mode-entity-target (entity project)
   "Return the target that names ENTITY, an entity of the PROJECT's index.
 An entry of the properties of a resource names what its section holds,
-as `dbt-project-section-kinds' tells.  A resource of a package other
-than PROJECT is qualified by its package, and a version of a model by
-its version."
-  (let ((kind (if (eq (plist-get entity :kind) 'properties)
-                  (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
-                (plist-get entity :kind)))
-        (package (and (not (equal (plist-get entity :package) project)) (plist-get entity :package))))
+as `dbt-project-section-kinds' tells, of its own package: dbt 2.0.9
+calls a root entry that names a package's model unused (dbt1089).
+Another resource of a package other than PROJECT is qualified by its
+package, and a version of a model by its version."
+  (let* ((entry (eq (plist-get entity :kind) 'properties))
+         (kind (if entry
+                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
+                 (plist-get entity :kind)))
+         (package (and (or entry (not (equal (plist-get entity :package) project))) (plist-get entity :package))))
     (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
                                   (doc . doc) (analysis . analysis))
                            'ref)

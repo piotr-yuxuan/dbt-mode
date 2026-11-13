@@ -299,7 +299,7 @@ tags are code, in SQL strings or in comments."
     (should (equal (dbt-mode-target-at-point) '(:kind source :qualifier "raw" :name "raw_orders" :version nil)))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "stg_orders" :version nil)))
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop" :name "stg_orders" :version nil)))
     (dbt-test-goto "order_status")
     (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status" :version nil)))))
 
@@ -315,6 +315,22 @@ tags are code, in SQL strings or in comments."
     (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders" :version nil)))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
+
+(ert-deftest dbt-mode-finds-no-package-model-from-a-root-entry ()
+  "M-. on a root YAML entry that names only a package's model finds nothing, as dbt 2.0.9 calls the entry unused.
+A root entry of a root model finds that model."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/util_orders.sql" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
+    (dbt-test-visit root "models/_utils.yml")
+    (dbt-test-goto "util_orders")
+    (should-not (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+    (dbt-test-visit root "models/staging/_staging.yml")
+    (dbt-test-goto "stg_orders")
+    (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("models/staging/stg_orders.sql" . 1))))))
 
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
