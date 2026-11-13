@@ -165,22 +165,25 @@ closing delimiter, or nil when the tag is not closed yet."
   (save-excursion
     (let* ((position (or position (point)))
            (limit dbt-mode-jinja-max-tag-length)
-           bounds done)
+           (floor (max (point-min) (- position limit)))
+           bounds)
       (goto-char position)
       ;; The nearest opener may be that of a tag in a string of the tag
       ;; around POSITION, which ends before it.
-      (while (and (not (or bounds done)) (re-search-backward "{[{%]" (max (point-min) (- position limit)) t))
+      (while (and (not bounds) (re-search-backward "{[{%]" floor t))
         (let ((start (point))
               (state (syntax-ppss)))
-          (unless (nth 4 state)
-            (forward-char 2)
-            (let ((end (dbt-mode--tag-end (min (point-max) (+ position limit)))))
-              (cond ((if end (> end position) (>= (point) position))
-                     (setq bounds (cons start end)))
-                    ;; Outside a string, a tag that ends before POSITION is
-                    ;; in no other tag: no opener further back holds it.
-                    ((not (nth 3 state))
-                     (setq done t)))))
+          (forward-char 2)
+          (let ((end (dbt-mode--tag-end (min (point-max) (+ position limit)))))
+            (cond ((not (if end (> end position) (>= (point) position)))
+                   ;; A tag that ends before POSITION is in no other tag
+                   ;; but one around the SQL string it is in: the search
+                   ;; stops there, or at the start of that string.
+                   (unless (eq (nth 3 state) t)
+                     (setq floor (max floor (if (nth 3 state) (nth 8 state) start)))))
+                  ;; In a comment, a tag is no tag.
+                  ((not (nth 4 state))
+                   (setq bounds (cons start end)))))
           (goto-char start)))
       bounds)))
 
