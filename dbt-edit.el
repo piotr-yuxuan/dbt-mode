@@ -253,7 +253,7 @@ in from its block."
                  (let ((other (dbt-edit--opener (point) blocks)))
                    (cond ((> other opener) (goto-char other))
                          ((nth 8 (syntax-ppss (point))))
-                         ((looking-at-p "[ \t]*{") (setq found column))
+                         ((looking-at-p "[ \t]*{%-?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
                          (t (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
