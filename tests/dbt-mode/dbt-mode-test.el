@@ -433,6 +433,20 @@
     (goto-char (point-min))
     (should-error (dbt-mode-cte-query) :type 'user-error)))
 
+(ert-deftest dbt-mode-cte-query-keeps-the-definitions-before-the-with ()
+  "A set with `=', an import and a from before the WITH come first in the query.
+A commented tag, a block set and a snapshot block do not: the query would
+not parse."
+  (with-temp-buffer
+    (insert "{# {% set old = 1 %} #}\n{% snapshot s %}\n{% set cols = ['a',\n 'b'] %}\n"
+            "{%- import 'm.sql' as m -%}\n{% set block %}x{% endset %}\n"
+            "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)\nselect * from x\n")
+    (dbt-mode)
+    (dbt-test-goto "select {%")
+    (should (equal (cdr (dbt-mode-cte-query))
+                   (concat "{% set cols = ['a',\n 'b'] %}\n{%- import 'm.sql' as m -%}\n"
+                           "with x as (\n    select {% for c in cols %}{{ c }}{% endfor %}\n)\nselect * from x")))))
+
 (ert-deftest dbt-mode-knows-when-no-server-runs ()
   "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."
   (dbt-test-with-project root

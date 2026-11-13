@@ -271,7 +271,10 @@ multiline construct, read again whole after a change within it.")
   "Return the name of a CTE and a query of its rows, as a pair.
 The CTE is that named NAME, or else the last that starts before the end
 of the line of point.  The query is the WITH of the buffer up to the end
-of that CTE, then a select from it; Jinja stays as it is."
+of that CTE, then a select from it; Jinja stays as it is.  The tags
+before the WITH that define a name for the CTE, a `set' with `=', an
+`import' or a `from', come first; a block `set' or a macro there does
+not."
   (let ((case-fold-search t))
     (save-excursion
       (unless (if name
@@ -286,7 +289,18 @@ of that CTE, then a select from it; Jinja stays as it is."
         (while (and (re-search-backward "\\_<with\\_>" nil 'move)
                     (let ((state (syntax-ppss)))
                       (or (> (car state) 0) (nth 8 state)))))
-        (cons name (format "%s\nselect * from %s" (buffer-substring-no-properties (point) end) name))))))
+        (cons name (format "%s%s\nselect * from %s"
+                           (let ((with (point))
+                                 (definitions ""))
+                             (save-excursion
+                               (goto-char (point-min))
+                               (while (re-search-forward (concat "{%-?[ \t\n]*\\(?:set\\_>[^%=]*=\\|import\\_>\\|from\\_>\\)"
+                                                                 "[^%]*%}")
+                                                         with t)
+                                 (unless (nth 4 (save-excursion (syntax-ppss (match-beginning 0))))
+                                   (setq definitions (concat definitions (match-string-no-properties 0) "\n")))))
+                             definitions)
+                           (buffer-substring-no-properties (point) end) name))))))
 
 (defconst dbt-mode-macro-call-regexp
   "\\_<\\(?:\\(?2:[A-Za-z_][A-Za-z0-9_]*\\)\\.\\)?\\(?1:[A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*("
