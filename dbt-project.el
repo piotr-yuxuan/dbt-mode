@@ -222,6 +222,10 @@ in any order, give the other properties."
 Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
 list of paths.")
 
+(defun dbt-project-target (root)
+  "Return the directory where dbt writes the artifacts of the project at ROOT."
+  (expand-file-name (plist-get (dbt-project-config root) :target-path) root))
+
 (defun dbt-project-config (root)
   "Return the configuration of the project at ROOT as a plist.
 The plist has a property for each key of `dbt-project-config-keys', with

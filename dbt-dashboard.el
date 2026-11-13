@@ -111,11 +111,8 @@ says how long ago dbt wrote FILE, or that it holds no results."
   "Visit the file of the node on point's line, as the manifest gives it."
   (interactive)
   (let* ((id (or (get-text-property (line-beginning-position) 'dbt-dashboard-node) (user-error "No node here")))
-         (node (dbt-project-manifest-node
-                (expand-file-name "manifest.json"
-                                  (expand-file-name (plist-get (dbt-project-config dbt-dashboard--root) :target-path)
-                                                    dbt-dashboard--root))
-                id))
+         (node (dbt-project-manifest-node (expand-file-name "manifest.json" (dbt-project-target dbt-dashboard--root))
+                                          id))
          (directory (nth 1 (assoc (and (hash-table-p node) (gethash "package_name" node))
                                   (dbt-project-packages dbt-dashboard--root))))
          (file (and directory (stringp (gethash "original_file_path" node))

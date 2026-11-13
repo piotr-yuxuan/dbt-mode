@@ -645,9 +645,7 @@ its node in the manifest of the user's runs, read only then.  For
                   (goto-char (point-min))
                   (and (re-search-forward "\\_<materialized[ \t\n]*=[ \t\n]*['\"]\\([A-Za-z_]+\\)" nil t)
                        (match-string-no-properties 1)))
-                (let* ((manifest (expand-file-name "manifest.json" (expand-file-name (plist-get (dbt-project-config root)
-                                                                                                :target-path)
-                                                                                      root)))
+                (let* ((manifest (expand-file-name "manifest.json" (dbt-project-target root)))
                        (node (and id (dbt-project-manifest-node manifest id)))
                        (config (and (hash-table-p node) (gethash "config" node))))
                   (and (hash-table-p config) (gethash "materialized" config))))))
@@ -738,8 +736,7 @@ included.  Return nil when dbt has not written it."
                   (file-name-concat (plist-get config :packages-install-path) package
                                     (file-relative-name (plist-get resource :file)
                                                         (nth 1 (assoc package (dbt-project-packages root))))))
-                (expand-file-name (concat directory "/" package)
-                                  (expand-file-name (plist-get config :target-path) root))))
+                (expand-file-name (concat directory "/" package) (dbt-project-target root))))
          ;; dbt 2 writes that of a snapshot in a directory of that path,
          ;; named after the snapshot.
          (file (if (file-directory-p file)
@@ -879,8 +876,7 @@ write; the message says when it was written."
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
                      (dbt-mode-current-resource)
                      (user-error "No model or source here")))
-         (file (expand-file-name "manifest.json"
-                                 (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
+         (file (expand-file-name "manifest.json" (dbt-project-target root)))
          (id (dbt-project-node-id entity))
          (node (if (file-readable-p file)
                    (dbt-project-manifest-node file id)
