@@ -26,13 +26,23 @@
   '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint")
   "The commands of dbt that take a selection.")
 
+(defconst dbt-cli-state-commands
+  '("build" "run" "test" "seed" "snapshot" "compile" "show" "list" "lint" "format" "parse" "deps" "debug"
+    "retry")
+  "The commands of `dbt-dispatch' that take --defer, --state and --vars.
+All of them but docs generate.")
+
 (defconst dbt-cli-option-commands
   `(("--select" . ,dbt-cli-selecting-commands)
     ("--exclude" . ,dbt-cli-selecting-commands)
     ("--full-refresh" "build" "run" "compile" "seed")
-    ("--limit" "build" "run" "test" "compile" "show" "list"))
+    ("--limit" "build" "run" "test" "compile" "show" "list")
+    ("--defer" . ,dbt-cli-state-commands)
+    ("--state" . ,dbt-cli-state-commands)
+    ("--vars" . ,dbt-cli-state-commands))
   "The options of `dbt-dispatch' that only some commands take, with these commands.
-dbt 2.0.9 rejects --full-refresh and --limit on any other command.  The
+dbt 2.0.9 rejects --full-refresh and --limit on any other command, and
+lists --defer, --state and --vars for every one but docs generate.  The
 other options, --target and --fail-fast, go to every command.")
 
 (defconst dbt-cli-error-regexp-alist
@@ -174,6 +184,9 @@ See `dbt-cli-option-commands'."
    ("-x" "Exclude" "--exclude=")]
   ["Options"
    ("-t" "Target" "--target=")
+   ("-v" "Variables" "--vars=")
+   ("-S" "State" "--state=" :reader transient-read-existing-directory)
+   ("-e" "Defer to the state" "--defer")
    ("-f" "Full refresh" "--full-refresh")
    ("-F" "Fail fast" "--fail-fast")
    ("-l" "Limit of show" "--limit=")]

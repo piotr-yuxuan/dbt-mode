@@ -24,14 +24,16 @@
   "Each command of dbt-dispatch gets only those of its options that dbt takes.
 The options each command takes are those that `dbt COMMAND OPTION
 --help' of dbt 2.0.9 accepts; --target and --fail-fast go to every
-command, the selection only to the commands that select resources."
+command, the selection only to the commands that select resources, and
+--defer, --state and --vars to every one but docs generate."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
-    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
-          (transient-values '((dbt-dispatch "--upstream" "--exclude=customers" "--target=prod"
-                                            "--full-refresh" "--fail-fast" "--limit=3")))
-          (selecting '("select +orders" "exclude customers" "target prod" "fail-fast"))
-          (other '("target prod" "fail-fast")))
+    (let* ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+           (transient-values '((dbt-dispatch "--select=orders" "--upstream" "--exclude=customers" "--target=prod"
+                                             "--full-refresh" "--fail-fast" "--limit=3" "--vars=x"
+                                             "--state=prod-state" "--defer")))
+           (other '("target prod" "fail-fast" "vars x" "state prod-state" "defer"))
+           (selecting `("select +orders" "exclude customers" ,@other)))
       (dolist (case `(("build" ,@selecting "full-refresh" "limit 3")
                       ("run" ,@selecting "full-refresh" "limit 3")
                       ("compile" ,@selecting "full-refresh" "limit 3")
@@ -46,7 +48,7 @@ command, the selection only to the commands that select resources."
                       ("deps" ,@other)
                       ("debug" ,@other)
                       ("retry" ,@other)
-                      ("docs generate" ,@other)))
+                      ("docs generate" "target prod" "fail-fast")))
         (with-current-buffer (dbt-cli-dispatch (car case))
           (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
           (goto-char (point-min))
