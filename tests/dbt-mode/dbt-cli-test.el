@@ -103,6 +103,19 @@ that names no model and a ref to no model."
     (should (equal (dbt-test-compilation-messages)
                    '(("models/staging/_extra.yml" nil nil 1) ("models/marts/customers.sql" 4 6 2))))))
 
+(ert-deftest dbt-cli-links-an-error-of-the-database-to-the-sql-that-ran ()
+  "An error of the database, which has no location, links to the SQL that ran.
+The output is that of dbt 2.0.9 on a model that selects a missing column."
+  (with-temp-buffer
+    (insert "=================== Errors and Warnings ====================\n"
+            "[error] [DbDriverFailed (dbt1308)]: Database Error in model badcol "
+            "(target/run/shop/models/marts/badcol.sql)\n"
+            "  Binder Error: Referenced column \"nope\" not found in FROM clause!\n"
+            "\n"
+            "==================== Execution Summary =====================\n")
+    (dbt-compilation-mode)
+    (should (equal (dbt-test-compilation-messages) '(("target/run/shop/models/marts/badcol.sql" nil nil 2))))))
+
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
   "With TERM naming a colour terminal, the output of dbt is plain and links.
 Emacs started from a terminal passes its TERM on to dbt, which then
