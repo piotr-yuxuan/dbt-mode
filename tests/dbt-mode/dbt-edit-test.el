@@ -365,6 +365,15 @@ above."
     (dbt-test-keys "TAB")
     (should (= (current-indentation) 4))))
 
+(ert-deftest dbt-edit-indents-a-comment-as-the-code-after-it ()
+  "A line that starts a comment indents as the code after it: before a clause, between CTEs, before the final select.
+Its text is left as it is."
+  (let ((text (concat "with orders as (\n    select * from x\n    -- only the paid ones\n    where status = 'paid'\n),\n\n"
+                      "-- logical CTEs\n{# the final CTE #}\nfinal as (\n    select * from orders\n)\n\n"
+                      "-- simple select statement\nselect * from final\n")))
+    (should (equal (dbt-test-indented text) text))
+    (should (equal (dbt-test-indented (replace-regexp-in-string "^ +" "" text)) text))))
+
 (ert-deftest dbt-edit-keeps-left-and-right-among-columns ()
   "Columns that call left() or right() are columns, one step in from select; a join with left or natural is a clause."
   (let ((text (concat "select\n    id,\n    left(name, 3) as initials,\n    RIGHT (code, 2) as suffix,\n    name\n"

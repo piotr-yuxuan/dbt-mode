@@ -244,15 +244,28 @@ of a select, the conditions of a where, a tag among them."
 
 (defun dbt-edit--indent (blocks)
   "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
-A line that starts in a string or a comment keeps its indentation."
+A line that starts in a string or a comment keeps its indentation.  A
+line that starts a comment, with `--', `/*' or `{#', indents as the line
+of code after it, unless that code is on its own line or closes, or
+there is none."
   (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
-    (indent-line-to (dbt-edit-indentation blocks))))
+    (indent-line-to
+     (save-excursion
+       (back-to-indentation)
+       (when (looking-at-p "--\\|/\\*\\|{#")
+         (let ((start (point))
+               (end (line-end-position)))
+           (forward-comment (buffer-size))
+           (when (or (eobp) (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
+             (goto-char start))))
+       (dbt-edit-indentation blocks)))))
 
 (defun dbt-edit-indent-line ()
   "Indent the current line as `dbt-edit-indentation' says.
-A line that starts in a string or a comment keeps its indentation.
-Point keeps its place in the text, or goes to the indentation from
-within it.  For `indent-line-function'."
+A line that starts in a string or a comment keeps its indentation, and
+one that starts a comment indents as the code after it.  Point keeps its
+place in the text, or goes to the indentation from within it.  For
+`indent-line-function'."
   (let* ((blocks (dbt-edit-blocks (line-beginning-position)))
          (blocks (append (car blocks) (cdr blocks))))
     (if (<= (current-column) (current-indentation))
