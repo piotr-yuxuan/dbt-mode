@@ -534,6 +534,52 @@
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_customers.sql" . 1))))))
 
+(defun dbt-test-write-versions (root)
+  "Write a model dim of ROOT with versions 1 and 2, the latest, and a user of v1."
+  (dolist (file '("dim_v1" "dim_v2"))
+    (write-region "select * from {{ ref('stg_orders') }}" nil (expand-file-name (format "models/marts/%s.sql" file) root)))
+  (write-region "models:\n  - name: dim\n    latest_version: 2\n    versions:\n      - v: 1\n      - v: 2\n"
+                nil (expand-file-name "models/marts/_dim.yml" root))
+  (write-region "select * from {{ ref('dim', v=1) }}" nil (expand-file-name "models/marts/uses_v1.sql" root)))
+
+(ert-deftest dbt-mode-names-a-version-as-dbt-selects-it ()
+  "A version is NAME.vVERSION: its lineage, the ref inserted, the choices offered.
+A name alone is the latest version, as for `ref'."
+  (dbt-test-with-project root
+    (dbt-test-write-versions root)
+    (dbt-test-visit root "models/marts/dim_v2.sql")
+    (should (equal (dbt-mode-resource-selector (dbt-mode-current-resource)) "dim.v2"))
+    ;; dbt show selects one node only.
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
+      (with-current-buffer (dbt-preview)
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+        (should (string-match-p "^arguments: show --select dim\\.v2 " (buffer-string)))))
+    (should (equal (dbt-mode-parse-selector "dim.v2") '("dim" . "2")))
+    (should (equal (dbt-mode-parse-selector "dim") '("dim")))
+    (let ((completing-read-function (lambda (_prompt collection &rest _) (all-completions "dim" collection))))
+      (should (equal (sort (dbt-mode-read-resource "Lineage of: ") #'string<) '("dim.v1" "dim.v2"))))
+    (dbt-lineage "dim.v1")
+    (with-current-buffer "*dbt lineage: dim.v1*"
+      (should (member '("downstream" "1" "model" "uses_v1" "models/marts/uses_v1.sql")
+                      (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (kill-buffer))
+    (dbt-lineage "dim")
+    (with-current-buffer "*dbt lineage: dim.v2*"
+      (should-not (assoc "downstream" (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)))
+      (kill-buffer))
+    (goto-char (point-max))
+    (insert "\n")
+    (dbt-insert-ref "dim.v1")
+    (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))))
+
+(ert-deftest dbt-mode-offers-no-analysis-as-a-resource ()
+  "In an analysis, the resource read has no default: an analysis has no lineage."
+  (dbt-test-with-project root
+    (dbt-test-visit root "analyses/order_counts.sql")
+    ;; The seventh argument of `completing-read' is the default.
+    (let ((completing-read-function (lambda (&rest arguments) (nth 6 arguments))))
+      (should-not (dbt-mode-read-resource "Lineage of: ")))))
+
 (ert-deftest dbt-mode-copies-relations-from-the-manifest ()
   "The relation of the model, or of the ref or source at point, comes from the manifest.
 It is that of the node with this very id, not a list of its children,

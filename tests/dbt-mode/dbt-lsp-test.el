@@ -373,7 +373,7 @@ A node of a package that dbt-mode does not know has no file."
                              :package_name "dbt_adapters" :original_file_path "models/internal.sql"
                              :depends_on (:nodes ["model.shop_utils.util"]))]
          :error nil))
-    (dbt-lsp-lineage "stg_orders")
+    (dbt-lsp-lineage "stg_orders" "model.shop.stg_orders")
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
       (should (equal (mapcar (lambda (entry) (append (cadr entry) nil)) tabulated-list-entries)
                      '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
@@ -452,7 +452,7 @@ their files are."
     (dbt-lsp-test-message "dbt lsp: dbt\\.show answered what dbt-mode cannot read: {\"columns\":3")
     (dbt-lsp-compile-file)
     (dbt-lsp-test-message "dbt lsp: dbt\\.compileFile answered what dbt-mode cannot read")
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (let ((text (buffer-string)))
       (should (string-match-p "\\`dbt lsp: textDocument/formatting answered what dbt-mode cannot read"
@@ -461,6 +461,24 @@ their files are."
     (should-not (get-buffer "*dbt rows: orders*"))
     (should-not (get-buffer "*dbt lineage: orders*"))))
 
+(ert-deftest dbt-lsp-lineage-asks-again-without-the-model-buffer ()
+  "g in the lineage asks the server again, once the model's buffer is gone too."
+  (dbt-lsp-test-with-server root
+      '(("workspace/executeCommand dbt.listNodes"
+         :nodes [(:unique_id "model.shop.orders" :name "orders" :resource_type "model"
+                             :package_name "shop" :original_file_path "models/marts/orders.sql"
+                             :depends_on (:nodes []))]
+         :error nil))
+    ;; Another buffer of the project keeps the server running.
+    (with-current-buffer (dbt-test-visit root "models/staging/stg_orders.sql")
+      (dbt-lsp))
+    (dbt-lsp-lineage "orders" "model.shop.orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: orders*")))
+      (kill-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root)))
+      (let ((asked (length (dbt-lsp-test-methods))))
+        (revert-buffer)
+        (dbt-test-wait (lambda () (> (length (dbt-lsp-test-methods)) asked)))))))
+
 (ert-deftest dbt-lsp-names-the-node-it-cannot-read ()
   "A node of an unexpected shape among those of the lineage is reported."
   (dbt-lsp-test-with-server root
@@ -468,7 +486,7 @@ their files are."
          :nodes [(:unique_id "model.shop.orders" :name "orders" :resource_type "model"
                              :package_name "shop" :original_file_path "models/marts/orders.sql"
                              :depends_on (:nodes [3]))]))
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes answered what dbt-mode cannot read")
     (should-not (get-buffer "*dbt lineage: orders*"))))
 
@@ -478,7 +496,7 @@ their files are."
       '(("workspace/executeCommand dbt.listNodes" :error "No nodes found" :nodes []))
     (dbt-lsp-show)
     (dbt-lsp-test-message "dbt lsp: dbt\\.show answered nothing")
-    (dbt-lsp-lineage "orders")
+    (dbt-lsp-lineage "orders" "model.shop.orders")
     (dbt-lsp-test-message "dbt lsp: dbt\\.listNodes failed: No nodes found")
     (should-not (get-buffer "*dbt rows: orders*"))))
 

@@ -110,8 +110,9 @@ See `dbt-cli-option-commands'."
   ["Selection"
    ("-s" "Select" "--select="
     :init-value (lambda (option)
-                  (oset option value (and (dbt-project-root)
-                                          (plist-get (dbt-mode-current-resource) :name)))))
+                  (oset option value (when-let* (((dbt-project-root))
+                                                 (resource (dbt-mode-current-resource)))
+                                       (dbt-mode-resource-selector resource)))))
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
    ("-x" "Exclude" "--exclude=")]

@@ -179,7 +179,11 @@ value that its SCHEMA fits, a missing key holding null."
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
 or holds an error, a message says so."
-  (let ((workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))))
+  ;; From a buffer the server does not serve, such as that of the
+  ;; lineage, the server of the project.
+  (let ((workspace (or (dbt-lsp-workspace)
+                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
+                       (user-error "No dbt lsp runs on this project"))))
     (with-lsp-workspace workspace
       (lsp-request-async "workspace/executeCommand"
                          (list :command command :arguments (vconcat arguments))
@@ -287,19 +291,19 @@ client.  Its arguments are the file and the CTE."
        (dbt-lsp-preview-cte (lsp-get cte :name))))
     (arguments (error "%s" (dbt-lsp--unreadable "dbt.previewCte" arguments)))))
 
-(defun dbt-lsp-lineage (name)
-  "Show the lineage of the model, seed or snapshot NAME, as the server sees it."
-  (interactive (list (file-name-base buffer-file-name)))
-  (let ((root (dbt-project-root))
-        (buffer (current-buffer)))
+(defun dbt-lsp-lineage (selector id)
+  "Show the lineage of the node ID, which SELECTOR selects, as the server sees it.
+SELECTOR is dbt's selector of a model, seed or snapshot, such as
+orders or orders.v2."
+  (let ((root (dbt-project-root)))
     (dbt-lsp--execute
-     "dbt.listNodes" (list (format "+%s+" name))
+     "dbt.listNodes" (list (format "+%s+" selector))
      '(object (:nodes (array (object (:unique_id stringp) (:name stringp) (:resource_type stringp)
                                      (:package_name stringp) (:original_file_path stringp)
                                      (:depends_on (or null (object (:nodes (or null (array stringp))))))))))
      (lambda (result)
        (dbt-lineage-show
-        root name
+        root id
         (mapcar (lambda (node)
                   (let ((directory (nth 1 (assoc (lsp-get node :package_name) (dbt-project-packages root)))))
                     (list :id (lsp-get node :unique_id)
@@ -310,7 +314,7 @@ client.  Its arguments are the file and the CTE."
                           :parents (append (lsp-get (lsp-get node :depends_on) :nodes) nil))))
                 (append (lsp-get result :nodes) nil))
         "dbt lsp"
-        (lambda () (with-current-buffer buffer (dbt-lsp-lineage name))))))))
+        (lambda () (let ((default-directory root)) (dbt-lsp-lineage selector id))))))))
 
 (defun dbt-lsp-rename-model (name)
   "Rename the model of the current buffer to NAME, and every use of it.

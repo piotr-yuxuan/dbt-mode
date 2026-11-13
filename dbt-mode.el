@@ -454,11 +454,11 @@ it.  The YAML entries of what IDENTIFIER resolves to count as uses."
 
 (defun dbt-mode--candidates (entities &optional key)
   "Return the values of KEY, :name by default, of ENTITIES, for completion.
-Each candidate carries the kind and package of its entity, for the
-annotations."
+KEY is a property, or a function of an entity.  Each candidate carries
+the kind and package of its entity, for the annotations."
   (delete-dups
    (mapcar (lambda (entity)
-             (propertize (plist-get entity (or key :name))
+             (propertize (if (functionp key) (funcall key entity) (plist-get entity (or key :name)))
                          'dbt-annotation (format " %s %s" (plist-get entity :kind) (plist-get entity :package))))
            entities)))
 
@@ -519,11 +519,29 @@ In a YAML file, it is the resource whose entry holds point."
                     ((memq (plist-get target :kind) '(ref analysis))))
           (car (dbt-mode-definitions target))))))
 
+(defun dbt-mode-resource-selector (resource)
+  "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version."
+  (concat (plist-get resource :name)
+          (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
+
+(defun dbt-mode-parse-selector (selector)
+  "Return the name and the version that SELECTOR names, as (NAME . VERSION).
+SELECTOR is NAME, or NAME.vVERSION for a version of a model; VERSION is
+nil for a bare name."
+  (if (string-match "\\`\\([^.]+\\)\\.v\\(.+\\)\\'" selector)
+      (cons (match-string 1 selector) (match-string 2 selector))
+    (list selector)))
+
 (defun dbt-mode-read-resource (prompt &optional no-default)
-  "Read the name of a model, seed or snapshot with PROMPT.
-The default is that of the current buffer, unless NO-DEFAULT."
-  (completing-read prompt (dbt-mode--candidates (dbt-project-entities (dbt-mode--root) '(model seed snapshot)))
-                   nil t nil nil (unless no-default (plist-get (dbt-mode-current-resource) :name))))
+  "Read a model, seed or snapshot with PROMPT, as its selector.
+A version of a model is NAME.vVERSION.  The default is the resource of
+the current buffer, unless NO-DEFAULT, or unless it is none of these."
+  (let ((resource (dbt-mode-current-resource)))
+    (completing-read prompt (dbt-mode--candidates (dbt-project-entities (dbt-mode--root) '(model seed snapshot))
+                                                  #'dbt-mode-resource-selector)
+                     nil t nil nil (and (not no-default)
+                                        (memq (plist-get resource :kind) '(model seed snapshot))
+                                        (dbt-mode-resource-selector resource)))))
 
 (defun dbt-find-resource (identifier)
   "Visit the definition of IDENTIFIER, read with completion.
@@ -608,39 +626,50 @@ show' runs it, on the Jinja of the CTE."
     (cond ((not (dbt-mode-server-p))
            (require 'dbt-cli)
            (dbt-cli-show (cdr query)
-                         (unless query (plist-get (or (dbt-mode-current-resource) (user-error "No model here"))
-                                                  :name))))
+                         (unless query (dbt-mode-resource-selector
+                                        (or (dbt-mode-current-resource) (user-error "No model here"))))))
           (cte (dbt-lsp-preview-cte (car query)))
           (t (dbt-lsp-show (cdr query) (car query))))))
 
-(defun dbt-lineage (name)
-  "Show the upstream and downstream of the model, seed or snapshot NAME.
-With dbt lsp, the server gives the lineage; otherwise the `ref' and
-`source' calls of the project's files give it, read again when the
-lineage is asked for again."
+(defun dbt-lineage (selector)
+  "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
+SELECTOR is its name, or NAME.vVERSION for a version of a model; a name
+alone is that of its latest version, as for `ref'.  With dbt lsp, the
+server gives the lineage; otherwise the `ref' and `source' calls of the
+project's files give it, read again when the lineage is asked for
+again."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
-  (if (dbt-mode-server-p)
-      (dbt-lsp-lineage name)
-    (let ((root (dbt-mode--root))
-          refresh)
+  (let* ((root (dbt-mode--root))
+         (wanted (dbt-mode-parse-selector selector))
+         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
+                     (user-error "No model, seed or snapshot %s" selector)))
+         (id (dbt-project-node-id entity))
+         refresh)
+    (if (dbt-mode-server-p)
+        (dbt-lsp-lineage (dbt-mode-resource-selector entity) id)
       (setq refresh (lambda ()
                       (dbt-project-forget root)
-                      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh)))
-      (dbt-lineage-show root name (dbt-project-graph root) "ref and source calls" refresh))))
+                      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))
+      (funcall refresh))))
 
-(defun dbt-insert-ref (name)
-  "Insert a call of `ref' to NAME, read with completion.
-Outside a Jinja tag, the call comes within `{{ }}'.  A resource of an
-installed package is called with its package.  The current resource is
-not the default: a model that refers to itself is a cycle."
+(defun dbt-insert-ref (selector)
+  "Insert a call of `ref' to SELECTOR, read with completion.
+SELECTOR is a name, or NAME.vVERSION, which calls that version.  Outside
+a Jinja tag, the call comes within `{{ }}'.  A resource of an installed
+package is called with its package.  The current resource is not the
+default: a model that refers to itself is a cycle."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
-         (entity (or (car (dbt-project-resolve-ref root nil name))
-                     (user-error "No model, seed or snapshot named `%s'" name)))
-         (call (if (equal (plist-get entity :package) (dbt-project-name root))
-                   (format "ref('%s')" name)
-                 (format "ref('%s', '%s')" (plist-get entity :package) name))))
+         (wanted (dbt-mode-parse-selector selector))
+         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
+                     (user-error "No model, seed or snapshot `%s'" selector)))
+         (call (format "ref(%s'%s'%s)"
+                       (if (equal (plist-get entity :package) (dbt-project-name root))
+                           ""
+                         (format "'%s', " (plist-get entity :package)))
+                       (car wanted)
+                       (if (cdr wanted) (format ", v=%s" (cdr wanted)) ""))))
     (insert (if (dbt-mode-jinja-bounds) call (format "{{ %s }}" call)))))
 
 (defun dbt-copy-relation ()
