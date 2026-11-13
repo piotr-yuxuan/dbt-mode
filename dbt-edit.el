@@ -111,16 +111,37 @@ otherwise, or with an active region, this is `delete-backward-char'."
     "materialization" "block" "with")
   "The Jinja statements that open a block, which `end' and their name close.")
 
+(defvar-local dbt-edit--scans (list (list 0))
+  "The states that `dbt-edit-blocks' resumes its scan from, the last first.
+Each is (POSITION CLOSED . OPEN), the blocks of the tags before
+POSITION; the last is that of the buffer's start.  They hold for the
+whole buffer, never for a narrowing of it.")
+
+(defun dbt-edit--forget-scans (start &rest _)
+  "Forget the states of `dbt-edit--scans' that a change at START may alter.
+A tag before START and not closed yet may be closed by the change, up
+to `dbt-mode-jinja-max-tag-length' further on.  For
+`before-change-functions'."
+  (let ((floor (- start dbt-mode-jinja-max-tag-length)))
+    (while (and (cdr dbt-edit--scans) (>= (caar dbt-edit--scans) floor))
+      (pop dbt-edit--scans))))
+
 (defun dbt-edit-blocks (limit)
   "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
 CLOSED lists the closed blocks, OPEN those still open at LIMIT,
 innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
 CLOSE-END), the last two only when it is closed.  A `set' opens a block
 only without `=', and a tag in a `{# #}' comment or not closed yet
-counts for nothing; a tag that starts before LIMIT counts whole."
+counts for nothing; a tag that starts before LIMIT counts whole.  The
+scan resumes from the last of `dbt-edit--scans' before LIMIT, unless the
+buffer is narrowed, and keeps the states it reaches."
+  (add-hook 'before-change-functions #'dbt-edit--forget-scans nil t)
   (save-excursion
-    (goto-char (point-min))
-    (let (closed open)
+    (let* ((scans (if (buffer-narrowed-p) (list (list 0)) dbt-edit--scans))
+           (scans (member (seq-find (lambda (state) (<= (car state) limit)) scans) scans))
+           (closed (cadar scans))
+           (open (cddar scans)))
+      (goto-char (caar scans))
       ;; After a tag that ends past LIMIT, no search may bound behind point.
       (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
         ;; dbt-mode-jinja-bounds searches: read the match before it.
@@ -132,14 +153,18 @@ counts for nothing; a tag that starts before LIMIT counts whole."
           (when end
             (cond (closing
                    (when-let* ((block (assoc keyword open)))
-                     (setq open (delq block open))
+                     ;; Not delq: the states kept share this list.
+                     (setq open (remove block open))
                      (push (append block (list start end)) closed)))
                   ;; A `set' with `=' assigns a value, and opens no block.
                   ((member keyword (if (string-search "=" (buffer-substring-no-properties start end))
                                        (remove "set" dbt-edit-block-keywords)
                                      dbt-edit-block-keywords))
                    (push (list keyword start end) open)))
-            (goto-char end))))
+            (goto-char end))
+          (push (cons (point) (cons closed open)) scans)))
+      (unless (buffer-narrowed-p)
+        (setq dbt-edit--scans scans))
       (cons closed open))))
 
 (defcustom dbt-indent-offset 4

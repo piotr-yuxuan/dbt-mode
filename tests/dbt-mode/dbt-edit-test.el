@@ -343,5 +343,31 @@ orders.sql does not indent the body of its block; dbt-mode does."
     (dbt-test-keys "TAB")
     (should (= (current-indentation) 4))))
 
+(ert-deftest dbt-edit-indents-the-buffer-as-it-is-now ()
+  "TAB reads the Jinja blocks of the text as it is after an edit above it; in a narrowing, the blocks are its own.
+TAB indents in the whole buffer, as Emacs widens it; C-c / reads the
+narrowing alone."
+  (dbt-test-with-window "{% if x %}\nselect\n{% set a = 1 %}\nfrom t\nwhere a\n"
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (goto-char (point-min))
+    (dbt-test-keys "C-k C-k")
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0)))
+  (dbt-test-with-window "{% macro m() %}\nselect\nid\nfrom t\n{% endmacro %}\n"
+    (dbt-test-goto "from t")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (narrow-to-region (progn (dbt-test-goto "select") (point)) (progn (dbt-test-goto "{% endmacro") (point)))
+    (dbt-test-goto "from t")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (goto-char (point-max))
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (widen)
+    (should (equal (buffer-string) "{% macro m() %}\nselect\nid\n    from t\n{% endmacro %}\n"))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
