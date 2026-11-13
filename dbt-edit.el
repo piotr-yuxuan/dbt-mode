@@ -173,10 +173,13 @@ buffer is narrowed, and keeps the states it reaches."
   :group 'dbt)
 
 (defconst dbt-edit-clause-regexp
-  (regexp-opt '("select" "from" "where" "group" "having" "qualify" "order" "limit" "offset" "union"
-                "intersect" "except" "minus" "with" "window" "join" "left" "right" "full" "inner" "cross"
-                "natural" "lateral")
-              'symbols)
+  (concat "\\(?:"
+          (regexp-opt '("select" "from" "where" "group" "having" "qualify" "order" "limit" "offset" "union"
+                        "intersect" "except" "minus" "with" "window" "join" "lateral")
+                      'symbols)
+          ;; left(x, 3) is a column: a join's word starts a clause only
+          ;; with join after it.
+          "\\|\\_<\\(?:left\\|right\\|full\\|inner\\|cross\\|natural\\)\\_>[^(\n]*\\_<join\\_>\\)")
   "The keywords that start a clause of SQL, on a line of their own level.")
 
 (defun dbt-edit--opener (position blocks)
