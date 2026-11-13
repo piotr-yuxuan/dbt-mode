@@ -47,6 +47,10 @@
 The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   :type 'string)
 
+(defcustom dbt-preview-limit 50
+  "The number of rows that a preview of a model or a query shows."
+  :type 'natnum)
+
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
 Saving a buffer of the project forgets the index at once; this bounds how

@@ -13,6 +13,15 @@
 (require 'dbt-mode-test-helpers)
 (require 'dbt-project)
 
+(ert-deftest dbt-project-defines-the-preview-limit ()
+  "dbt-project.el alone defines the rows of a preview, 50, in the group dbt."
+  (with-temp-buffer
+    (should (zerop (call-process (expand-file-name invocation-name invocation-directory) nil t nil
+                                 "-Q" "--batch" "-L" (file-name-directory (locate-library "dbt-project"))
+                                 "-l" "dbt-project"
+                                 "--eval" "(prin1 (list dbt-preview-limit (assq 'dbt-preview-limit (get 'dbt 'custom-group))))")))
+    (should (equal (car (read-from-string (buffer-string))) '(50 (dbt-preview-limit custom-variable))))))
+
 (ert-deftest dbt-project-yaml-line-reads-keys ()
   "A key's column follows the dash of a list item; quotes and comments go."
   (should (equal (dbt-project-yaml-line "  - name: \"events\"  # a comment")
