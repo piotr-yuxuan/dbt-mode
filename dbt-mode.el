@@ -460,17 +460,21 @@ it.  The YAML entries of what IDENTIFIER resolves to count as uses."
         (with-temp-buffer
           ;; A dangling link or an unreadable file holds no use.
           (ignore-error file-error (insert-file-contents file))
-          (while (re-search-forward regexp nil t)
-            (let ((call (if source
-                            (list :kind kind :name (match-string 2))
-                          (list :kind kind :qualifier (match-string 2) :name (match-string 1)
-                                :version (match-string 3)))))
-              (when (and (equal (plist-get call :name) (plist-get target :name))
-                         (equal (car (dbt-project-resolve root call package)) definition))
-                (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
-                                 (xref-make-file-location file (line-number-at-pos (match-beginning 0))
-                                                          (- (match-beginning 0) (line-beginning-position))))
-                      uses)))))))
+          ;; A use names the target: a file without its name holds none,
+          ;; and the literal search costs a fraction of the regexp's.
+          (when (search-forward (plist-get target :name) nil t)
+            (goto-char (point-min))
+            (while (re-search-forward regexp nil t)
+              (let ((call (if source
+                              (list :kind kind :name (match-string 2))
+                            (list :kind kind :qualifier (match-string 2) :name (match-string 1)
+                                  :version (match-string 3)))))
+                (when (and (equal (plist-get call :name) (plist-get target :name))
+                           (equal (car (dbt-project-resolve root call package)) definition))
+                  (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
+                                   (xref-make-file-location file (line-number-at-pos (match-beginning 0))
+                                                            (- (match-beginning 0) (line-beginning-position))))
+                        uses))))))))
     (append (nreverse uses)
             (and definition
                  (mapcar #'dbt-mode--xref
