@@ -64,8 +64,10 @@ changed.
 With dbt 2 (`dbt lsp`), `dbt-lsp-deferred` starts the server through
 lsp-mode, which then gives:
 
-- definitions and references of models, sources and macros, packages' and
-  dbt's own included;
+- definitions of what dbt-mode does not resolve, such as dbt's own macros:
+  on a `ref`, a source, a doc or a macro of the project or its packages,
+  `M-.` and `M-?` stay dbt-mode's, as dbt lsp 2.0.9 lists the uses in the
+  current file only, ignores a `ref`'s version and resolves no `doc`;
 - hover with a model's description, parents, children and columns;
 - completion of models, macros and SQL functions;
 - diagnostics as you type, such as a `ref` to a model that does not exist;

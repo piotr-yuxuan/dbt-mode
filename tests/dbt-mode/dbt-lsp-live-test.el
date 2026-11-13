@@ -60,12 +60,15 @@ and the buffers of rows and lineage are killed."
 
 (ert-deftest dbt-lsp-live-navigates-a-project ()
   "M-. on a ref and on macros, M-?, hover and completion come from the server.
+On a ref, xref goes to dbt-mode first.
 lsp-mode neither formats nor runs code actions, and takes the server's
 notifications."
   (dbt-test-with-server root
     (should (equal (cadr (member "--project-dir" (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace)))))
                    (directory-file-name root)))
     (dbt-test-goto "ref('stg_orders')" 6)
+    ;; M-. and M-? on a ref stay dbt-mode's, which finds every use.
+    (should (eq (xref-find-backend) 'dbt))
     (should (equal (dbt-test-lsp-definition-files) (list (expand-file-name "models/staging/stg_orders.sql" root))))
     (dbt-test-goto "is_positive" 2)
     (should (equal (dbt-test-lsp-definition-files)

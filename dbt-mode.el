@@ -367,8 +367,15 @@ its version."
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.
-For `xref-backend-functions'."
-  (and (dbt-project-root) 'dbt))
+For `xref-backend-functions', ahead of lsp-mode's.  Where dbt lsp runs,
+it answers only what dbt-mode does not resolve, such as dbt's own
+macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
+the version of a `ref' and resolves no `doc'."
+  (and (dbt-project-root)
+       (or (not (dbt-mode-server-p))
+           (let ((target (dbt-mode-target-at-point)))
+             (and target (dbt-mode-definitions target))))
+       'dbt))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql dbt)))
   "Return the identifier of what point is on, or nil."
@@ -525,9 +532,9 @@ docs block, source and table of the project and its packages, whether
 or not a language server runs."
   (interactive
    (list (completing-read "Find dbt resource: "
-                          (xref-backend-identifier-completion-table (dbt-mode-xref-backend))
+                          (xref-backend-identifier-completion-table 'dbt)
                           nil t)))
-  (let ((xref-backend-functions '(dbt-mode-xref-backend)))
+  (let ((xref-backend-functions (list (lambda () 'dbt))))
     (xref-find-definitions identifier)))
 
 (defun dbt-visit-properties ()
@@ -796,7 +803,7 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'font-lock-extend-region-functions #'dbt-mode--extend-region 'append 'local)
   (setq-local imenu-generic-expression dbt-mode-imenu-generic-expression
               imenu-case-fold-search t)
-  (add-hook 'xref-backend-functions #'dbt-mode-xref-backend nil 'local)
+  (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
   (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))

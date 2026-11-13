@@ -221,6 +221,14 @@ Its one code action, which fixes and formats, is hidden too."
       (should-not (string-match-p "Unknown notification"
                                   (with-current-buffer "*Warnings*" (buffer-substring start (point-max))))))))
 
+(ert-deftest dbt-lsp-leaves-xref-to-dbt-mode-where-it-resolves ()
+  "With the server, M-. and M-? on a ref are dbt-mode's; elsewhere, the server's."
+  (dbt-lsp-test-with-server root nil
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should (eq (xref-find-backend) 'dbt))
+    (dbt-test-goto "customers.first_name")
+    (should (eq (xref-find-backend) 'xref-lsp))))
+
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.
 lsp-mode reads false as it reads null, so false shows as NULL too."
