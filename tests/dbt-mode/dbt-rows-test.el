@@ -38,6 +38,19 @@ limits that the grid asked again with, latest first."
   '(("Ada" "10" "line 1\nline 2") ("Alan" "9" nil) ("Grace" nil "a|b") ("Edsger" "-1.5" "x,y \"q\""))
   "Rows with numbers, NULL, a newline, a bar, a comma and quotes.")
 
+(ert-deftest dbt-rows-reads-the-json-of-dbt-show ()
+  "dbt show's JSON gives its columns in order, and each value's raw text.
+NULL is nil; a value that is not a string is its JSON."
+  (should (equal (dbt-rows-read-json
+                  (concat "[{\"z\":null,\"t\":true,\"f\":false,\"n\":1.5,\"s\":\"a\\nb\","
+                          "\"o\":{\"k\":null},\"l\":[1,\"x\"]},{\"z\":1}]"))
+                 '(("z" "t" "f" "n" "s" "o" "l")
+                   (nil "true" "false" "1.5" "a\nb" "{\"k\":null}" "[1,\"x\"]")
+                   ("1" nil nil nil nil nil nil))))
+  (should (equal (dbt-rows-read-json "[]") '(nil)))
+  (dolist (json '("" "not json" "{\"a\":1}" "[1,2]" "[{\"a\":1}] trailing"))
+    (should-not (dbt-rows-read-json json))))
+
 (ert-deftest dbt-rows-shows-each-row-on-one-line ()
   "Each row is one line; NULL shows as NULL in its own face, a newline as \\n."
   (dbt-rows-test-with-grid dbt-rows-test-rows

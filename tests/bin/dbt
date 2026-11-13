@@ -2,13 +2,20 @@
 # SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 #
 # A stand-in for dbt.  `dbt lsp --help' succeeds, as dbt 2's does, and
-# `dbt lsp ...' runs the scripted server fake_dbt_lsp.py.  Any other
-# command prints its arguments, then an error as dbt 2 prints one, and
-# fails.
+# `dbt lsp ...' runs the scripted server fake_dbt_lsp.py.  With
+# FAKE_DBT_SUCCEED set, any other command prints one row of JSON, as
+# `dbt show -q --output json' does, holding its arguments and a null,
+# with a warning on stderr, and succeeds.  Otherwise it prints its
+# arguments, then an error as dbt 2 prints one, and fails.
 case "$1 $2" in
   "lsp --help") exit 0 ;;
   "lsp "*) exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@" ;;
 esac
+if [ -n "$FAKE_DBT_SUCCEED" ]; then
+  printf '[{"arguments":"%s","nothing":null}]\n' "$*"
+  echo "[warning] a warning, on stderr" >&2
+  exit 0
+fi
 echo "arguments: $*"
 echo "[error] [DependencyNotFound (dbt1048)]: Ref 'nope' not found in project."
 echo "  --> models/marts/orders.sql:12:19"

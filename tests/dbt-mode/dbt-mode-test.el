@@ -629,9 +629,10 @@ A name alone is the latest version, as for `ref'."
     (should (equal (dbt-mode-resource-selector (dbt-mode-current-resource)) "dim.v2"))
     ;; dbt show selects one node only.
     (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
-      (with-current-buffer (dbt-preview)
-        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
-        (should (string-match-p "^arguments: show --select dim\\.v2 " (buffer-string)))))
+      (dbt-preview)
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt show: dim.v2*")))
+        (should (string-match-p "^arguments: show .* --select dim\\.v2$" (buffer-string)))
+        (kill-buffer)))
     (should (equal (dbt-mode-parse-selector "dim.v2") '("dim" . "2")))
     (should (equal (dbt-mode-parse-selector "dim") '("dim")))
     (let ((completing-read-function (lambda (_prompt collection &rest _) (all-completions "dim" collection))))

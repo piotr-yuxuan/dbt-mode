@@ -681,9 +681,9 @@ show' runs it, on the Jinja of the CTE."
                      (start (cons "query" (buffer-substring-no-properties start end))))))
     (cond ((not (dbt-mode-server-p))
            (require 'dbt-cli)
-           (dbt-cli-show (cdr query)
-                         (unless query (dbt-mode-resource-selector
-                                        (or (dbt-mode-current-resource) (user-error "No model here"))))))
+           (dbt-cli-show (or (car query)
+                             (dbt-mode-resource-selector (or (dbt-mode-current-resource) (user-error "No model here"))))
+                         (cdr query)))
           (cte (dbt-lsp-preview-cte (car query)))
           (t (dbt-lsp-show (cdr query) (car query))))))
 

@@ -61,6 +61,27 @@ unless COLUMN is nil.")
                                     (if (< (length dbt-rows--entries) dbt-rows--limit) "" ", limit reached")))
     (tabulated-list-print t)))
 
+(defun dbt-rows-read-json (json)
+  "Return the rows of JSON, as `dbt show --output json' prints them.
+JSON is an array of objects, one per row, whose keys are the columns,
+in order.  The rows are (COLUMNS . ROWS), as `dbt-rows-show' takes them:
+a value that is not a string is its JSON.  An array of no row has no
+columns either: (nil).  Return nil when JSON is not such an array."
+  ;; json.el, which lsp-mode loads, redefines some errors of
+  ;; `json-parse-string' as errors of json-error only.
+  (let ((rows (ignore-error json-error (json-parse-string json :object-type 'alist))))
+    (when (and (vectorp rows) (seq-every-p #'listp rows))
+      (let ((columns (and (not (seq-empty-p rows)) (mapcar #'car (aref rows 0)))))
+        (cons (mapcar #'symbol-name columns)
+              (mapcar (lambda (row)
+                        (mapcar (lambda (column)
+                                  (let ((value (alist-get column row :null)))
+                                    (cond ((eq value :null) nil)
+                                          ((stringp value) value)
+                                          (t (json-serialize value)))))
+                                columns))
+                      rows))))))
+
 (defun dbt-rows-show (title columns rows limit rerun)
   "Show ROWS of COLUMNS in the buffer *dbt rows: TITLE*, and return it.
 COLUMNS lists the names of the columns, and ROWS the rows, each a list

@@ -60,16 +60,34 @@ command, the selection only to the commands that select resources."
     (dbt-test-visit root "models/marts/orders.sql")
     (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
           (dbt-preview-limit 7))
-      (with-current-buffer (dbt-cli-show nil "orders")
-        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+      (dbt-cli-show "orders" nil)
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt show: orders*")))
         (should (equal default-directory root))
-        (should (string-match-p "^arguments: show --select orders --limit 7$" (buffer-string)))
+        (should (string-match-p "^arguments: show --quiet --output json --limit 7 --select orders$"
+                                (buffer-string)))
         (goto-char (point-min))
         (compilation-next-error 1)
         (let ((location (compilation--message->loc (get-text-property (point) 'compilation-message))))
           (should (equal (caar (compilation--loc->file-struct location)) "models/marts/orders.sql"))
           (should (equal (compilation--loc->line location) 12))
-          (should (equal (compilation--loc->col location) 19)))))))
+          (should (equal (compilation--loc->col location) 19)))
+        (kill-buffer)))))
+
+(ert-deftest dbt-cli-show-shows-the-rows-in-the-grid ()
+  "dbt show's JSON fills the grid, whatever dbt writes on stderr.
+In the grid, + runs dbt show again with twice the limit."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (let ((dbt-executable (expand-file-name "bin/dbt" dbt-test-directory))
+          (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment))
+          (dbt-preview-limit 7))
+      (dbt-cli-show "a_cte" "select 1 as one")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: a_cte*")))
+        (should (equal (append (cadr (car tabulated-list-entries)) nil)
+                       '("show --quiet --output json --limit 7 --inline select 1 as one" "NULL")))
+        (dbt-rows-more)
+        (dbt-test-wait (lambda () (string-search "--limit 14 " (aref (cadr (car tabulated-list-entries)) 0))))
+        (kill-buffer)))))
 
 (defun dbt-test-compilation-messages ()
   "Return the messages of the current compilation buffer.
@@ -117,20 +135,20 @@ The output is that of dbt 2.0.9 on a model that selects a missing column."
     (should (equal (dbt-test-compilation-messages) '(("target/run/shop/models/marts/badcol.sql" nil nil 2))))))
 
 (ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
-  "With TERM naming a colour terminal, the output of dbt is plain and links.
+  "With TERM naming a colour terminal, dbt's JSON reads and its output links.
 Emacs started from a terminal passes its TERM on to dbt, which then
 colours its output and draws progress bars: none of them may reach the
-buffer, and the error must still link to its file."
+rows or the buffer, and the error must still link to its file."
   (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/customers.sql")
     (let ((dbt-executable (getenv "DBT_MODE_TEST_DBT"))
           (process-environment (cons "TERM=xterm-256color" process-environment)))
-      ;; dbt show writes the header of its table in bold even with no colours.
-      (with-current-buffer (dbt-cli-show "select 1 as the_answer" nil)
-        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))) 60)
-        (should (string-match-p "^│ the_answer │$" (buffer-string)))
-        (should-not (string-search "\e" (buffer-string))))
+      (dbt-cli-show "query" "select 42 as the_answer, null as nothing")
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt rows: query*")) 60)
+        (should (equal (mapcar #'car tabulated-list-format) '("the_answer" "nothing")))
+        (should (equal (append (cadr (car tabulated-list-entries)) nil) '("42" "NULL")))
+        (kill-buffer))
       (dbt-test-goto "ref('orders')")
       (replace-match "ref('nope')")
       (save-buffer)

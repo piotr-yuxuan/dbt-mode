@@ -19,6 +19,7 @@
 (require 'compile)
 (require 'dbt-mode)
 (require 'dbt-project)
+(require 'dbt-rows)
 (require 'transient)
 
 (defconst dbt-cli-selecting-commands
@@ -54,6 +55,12 @@ For `compilation-error-regexp-alist'.")
   ;; dbt show writes the header of its table in bold, colours or not.
   (add-hook 'compilation-filter-hook #'ansi-color-compilation-filter nil t))
 
+(defun dbt-cli--save-project (root)
+  "Offer to save the modified buffers of the project at ROOT, as `compile' does.
+dbt reads the project's files, not its buffers."
+  (save-some-buffers (not compilation-ask-about-save)
+                     (lambda () (and buffer-file-name (string-prefix-p root (expand-file-name buffer-file-name))))))
+
 (defun dbt-cli-run (command &optional arguments)
   "Run the dbt COMMAND with ARGUMENTS, a list of strings, in the project.
 It runs at the root of the project of the current buffer, in a
@@ -64,21 +71,56 @@ saving first, under `compilation-ask-about-save'."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
          (default-directory root)
          (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
-    ;; dbt reads the project's files, not its buffers: offer to save them,
-    ;; as `compile' does.
-    (save-some-buffers (not compilation-ask-about-save)
-                       (lambda () (and buffer-file-name (string-prefix-p root (expand-file-name buffer-file-name)))))
+    (dbt-cli--save-project root)
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")
                        #'dbt-compilation-mode
                        (lambda (_mode) (format "*dbt %s: %s*" (dbt-project-name root) command)))))
 
-(defun dbt-cli-show (sql name)
-  "Run `dbt show' on the query SQL, or else on the resource NAME.
-Show at most `dbt-preview-limit' rows."
-  (dbt-cli-run "show" (append (if sql (list "--inline" sql) (list "--select" name))
-                              (list "--limit" (number-to-string dbt-preview-limit)))))
+(defun dbt-cli-show (name sql &optional limit)
+  "Show the rows of the query SQL, as NAME, or else of the resource NAME.
+At most LIMIT rows, `dbt-preview-limit' by default, in the grid of
+`dbt-rows-show'.  dbt prints them as JSON; when it fails, its output
+shows in a buffer whose errors link to their files.  The project's
+modified buffers are offered for saving first."
+  (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
+         (default-directory root)
+         (limit (or limit dbt-preview-limit))
+         (process-environment (append '("NO_COLOR=1" "TERM=dumb") process-environment))
+         (output (generate-new-buffer " *dbt show*"))
+         (errors (make-pipe-process :name "dbt show errors" :buffer (generate-new-buffer " *dbt show errors*")
+                                    :noquery t :sentinel #'ignore)))
+    (dbt-cli--save-project root)
+    (make-process
+     :name "dbt show" :buffer output :stderr errors :noquery t :connection-type 'pipe
+     :command `(,dbt-executable "show" "--quiet" "--output" "json" "--limit" ,(number-to-string limit)
+                ,@(if sql (list "--inline" sql) (list "--select" name)))
+     :sentinel
+     (lambda (process _event)
+       (unless (process-live-p process)
+         (unwind-protect
+             (let ((rows (and (zerop (process-exit-status process))
+                              (dbt-rows-read-json (with-current-buffer output (buffer-string))))))
+               (cond ((not rows)
+                      ;; The errors may still be on their way.
+                      (while (accept-process-output errors 0.05 nil t))
+                      (with-current-buffer (get-buffer-create (format "*dbt show: %s*" name))
+                        (let ((inhibit-read-only t))
+                          (erase-buffer)
+                          (insert-buffer-substring output)
+                          (insert-buffer-substring (process-buffer errors)))
+                        (setq default-directory root)
+                        (dbt-compilation-mode)
+                        (display-buffer (current-buffer))))
+                     ((not (car rows)) (message "dbt show: no rows for %s" name))
+                     (t (dbt-rows-show name (car rows) (cdr rows) limit
+                                       (lambda (limit)
+                                         (let ((default-directory root))
+                                           (dbt-cli-show name sql limit)))))))
+           (kill-buffer output)
+           (kill-buffer (process-buffer errors))
+           (delete-process errors)))))))
 
 (defun dbt-cli-arguments (arguments)
   "Return the command-line arguments that the transient ARGUMENTS mean.
