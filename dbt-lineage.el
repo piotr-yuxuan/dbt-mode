@@ -152,7 +152,8 @@ Point goes to the first line of that node while the tree shows it."
 (defun dbt-lineage-export (file)
   "Write the graph of the lineage within the depth shown to FILE, as Graphviz dot.
 Each node is named by its unique id and labelled by its name.  With the
-executable dot, render it to an SVG beside FILE too."
+executable dot, an SVG beside FILE follows, rendered while you go on;
+the message says when it is there, or why not."
   (interactive (list (read-file-name "Graphviz file: " nil nil nil
                                      (format "%s.dot" (dbt-lineage-label dbt-lineage--focus)))))
   (let ((ids (make-hash-table :test #'equal))
@@ -170,9 +171,18 @@ executable dot, render it to an SVG beside FILE too."
             (when (gethash parent ids)
               (insert (format "  %S -> %S;\n" parent (plist-get node :id)))))))
       (insert "}\n"))
-    (if (and (executable-find "dot") (eql 0 (call-process "dot" nil nil nil "-Tsvg" file "-o" svg)))
-        (message "Wrote %s and %s" file svg)
-      (message "Wrote %s" file))))
+    (if (not (executable-find "dot"))
+        (message "Wrote %s; no dot to render it" file)
+      (message "Wrote %s; dot renders %s..." file svg)
+      (make-process :name "dot" :command (list "dot" "-Tsvg" file "-o" svg) :noquery t
+                    :buffer (generate-new-buffer " *dot*")
+                    :sentinel (lambda (process _event)
+                                (unless (process-live-p process)
+                                  (message (if (zerop (process-exit-status process)) "Wrote %s" "dot failed on %s: %s")
+                                           (if (zerop (process-exit-status process)) svg file)
+                                           (with-current-buffer (process-buffer process)
+                                             (string-trim (buffer-string))))
+                                  (kill-buffer (process-buffer process))))))))
 
 (defvar-keymap dbt-lineage-mode-map
   :doc "Keymap of `dbt-lineage-mode'."

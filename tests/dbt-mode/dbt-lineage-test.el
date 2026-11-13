@@ -98,7 +98,9 @@ name, so two nodes of one name stay apart."
       (execute-kbd-macro (kbd "+"))
       (should (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
       (let ((file (expand-file-name "lineage.dot" root)))
-        (dbt-lineage-export file)
+        ;; No dot, whose rendering would outlive the project.
+        (let ((exec-path nil))
+          (dbt-lineage-export file))
         (let ((dot (with-temp-buffer (insert-file-contents file) (buffer-string))))
           (dolist (line '("\"seed.shop.raw_orders\" -> \"model.shop.stg_orders\";"
                           "\"model.shop.stg_orders\" -> \"model.shop.orders\";"
@@ -106,6 +108,35 @@ name, so two nodes of one name stay apart."
                           "\"model.shop.orders\" [label=\"orders\"];"))
             (should (string-search line dot)))))
       (kill-buffer))))
+
+(ert-deftest dbt-lineage-renders-the-graph-while-emacs-goes-on ()
+  "With dot, e renders an SVG while Emacs goes on, and says when it is there, or why not."
+  (dbt-test-with-project root
+    (let* ((bin (make-temp-file "dot" t))
+           (dot (expand-file-name "dot" bin))
+           (exec-path (cons bin exec-path))
+           (messages (with-current-buffer (messages-buffer) (point-max-marker)))
+           (said (lambda (regexp)
+                   (dbt-test-wait (lambda () (with-current-buffer (messages-buffer)
+                                               (save-excursion
+                                                 (goto-char messages)
+                                                 (re-search-forward regexp nil t))))))))
+      (unwind-protect
+          (progn
+            ;; dot -Tsvg FILE -o SVG
+            (write-region "#!/bin/sh\necho '<svg/>' > \"$4\"\n" nil dot)
+            (set-file-modes dot #o755)
+            (dbt-test-visit root "models/staging/stg_orders.sql")
+            (dbt-lineage "stg_orders")
+            (with-current-buffer "*dbt lineage: stg_orders*"
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (funcall said "^Wrote .*/lineage\\.svg$")
+              (should (file-exists-p (expand-file-name "lineage.svg" root)))
+              (write-region "#!/bin/sh\necho 'syntax error in line 3' >&2\nexit 1\n" nil dot)
+              (dbt-lineage-export (expand-file-name "lineage.dot" root))
+              (funcall said "^dot failed on .*/lineage\\.dot: syntax error in line 3$")
+              (kill-buffer)))
+        (delete-directory bin t)))))
 
 (provide 'dbt-lineage-test)
 ;;; dbt-lineage-test.el ends here
