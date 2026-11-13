@@ -235,6 +235,21 @@ Jinja's rules see that /- and -* start no comment."
     (should-not (nth 3 (syntax-ppss)))
     (should (eq (dbt-test-face "and x") 'font-lock-keyword-face))))
 
+(ert-deftest dbt-mode-finds-no-tag-at-once-between-many ()
+  "Between the tags of a file dense with them, no tag is found at once.
+Font lock asks at each change, twice; a model of 3,000 lines with a tag
+on each takes well under a second for 3,000 such questions."
+  (with-temp-buffer
+    (dotimes (i 3000) (insert (format "    {{ ref('m_%d') }} as c_%d,\n" i i)))
+    (dbt-mode)
+    (let ((start (float-time)))
+      (goto-char (point-min))
+      (while (not (eobp))
+        (end-of-line)
+        (should-not (dbt-mode-jinja-bounds))
+        (forward-line 1))
+      (should (< (- (float-time) start) 1.0)))))
+
 (ert-deftest dbt-mode-ends-a-tag-at-its-own-closer ()
   "A closer that ends a nested dict, or in a string, does not end the tag."
   (with-temp-buffer

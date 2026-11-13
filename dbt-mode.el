@@ -164,17 +164,22 @@ closing delimiter, or nil when the tag is not closed yet."
   (save-excursion
     (let* ((position (or position (point)))
            (limit dbt-mode-jinja-max-tag-length)
-           bounds)
+           bounds done)
       (goto-char position)
       ;; The nearest opener may be that of a tag in a string of the tag
       ;; around POSITION, which ends before it.
-      (while (and (not bounds) (re-search-backward "{[{%]" (max (point-min) (- position limit)) t))
-        (let ((start (point)))
-          (unless (nth 4 (syntax-ppss))
+      (while (and (not (or bounds done)) (re-search-backward "{[{%]" (max (point-min) (- position limit)) t))
+        (let ((start (point))
+              (state (syntax-ppss)))
+          (unless (nth 4 state)
             (forward-char 2)
             (let ((end (dbt-mode--tag-end (min (point-max) (+ position limit)))))
-              (when (if end (> end position) (>= (point) position))
-                (setq bounds (cons start end)))))
+              (cond ((if end (> end position) (>= (point) position))
+                     (setq bounds (cons start end)))
+                    ;; Outside a string, a tag that ends before POSITION is
+                    ;; in no other tag: no opener further back holds it.
+                    ((not (nth 3 state))
+                     (setq done t)))))
           (goto-char start)))
       bounds)))
 
