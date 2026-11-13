@@ -201,7 +201,8 @@ in any order, give the other properties."
   '(("name" :name nil) ("target-path" :target-path "target")
     ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
-    ("analysis-paths" :analysis-paths ("analyses")))
+    ("analysis-paths" :analysis-paths ("analyses")) ("macro-paths" :macro-paths ("macros"))
+    ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests")))
   "The keys of dbt_project.yml that the configuration keeps.
 Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
 list of paths.")

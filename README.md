@@ -8,7 +8,8 @@ lineage, and the full language server of dbt 2 through
 `dbt-mode` is `sql-mode` that also reads Jinja. A `.sql` file below a
 `dbt_project.yml` opens in it, unless it lies under the project's
 `target-path` (`target/` by default) or `logs/`, where dbt writes plain SQL.
-It keeps every key of `sql-mode`.
+It keeps the keys of `sql-mode`, but for `C-M-a` and `C-M-e`, which move by
+CTE rather than by statement.
 
 ## What it does
 
@@ -27,6 +28,31 @@ Without any dbt executable, dbt-mode reads the project's files:
   a tag;
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
 - the lineage of a model, from its `ref` and `source` calls.
+
+Writing and moving:
+
+- typing `{` then `{`, `%` or `#` gives `{{ | }}`, `{% | %}` or `{# | #}`,
+  point in the middle, when only blanks, a closing bracket or a comma
+  follow, with or without `electric-pair-mode`. A `-` or `+` typed next
+  sticks to the opener, `{%- | %}`; a tag typed in full out of habit, its
+  spaces and its closer included, comes out as typed, but for a space too
+  many before the closer with `electric-pair-mode`; `DEL` deletes an empty
+  pair.
+  `dbt-edit-pair-jinja` turns all of it off;
+- `C-c /` closes the innermost open Jinja block, `{% endif %}` and the like,
+  and `C-c %` moves between a block's opening and closing tags;
+- CTEs are the defuns of a model: `C-M-a`, `C-M-e`, `C-M-h` and `C-x n d`
+  work on them; with [expreg](https://elpa.gnu.org/packages/expreg.html),
+  `expreg-expand` also selects the Jinja tag and its contents, the block and
+  the CTE around point, once `dbt-edit-expreg-regions` is in
+  `expreg-functions` (see Installation);
+- `C-c C-a` writes a new staging model from a source table, as dbt Labs'
+  style guide lays it out with its YAML entry, a model, an incremental
+  model, a macro, a snapshot defined in YAML, the YAML entry of the current
+  model, seed, snapshot or analysis, or a unit test of the model, named
+  `test_MODEL` by default, with an input for each model and source it
+  reads. An entry joins its list as the file writes its items, and a name
+  that the list has already is refused.
 
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
@@ -58,12 +84,18 @@ need a dbt account: without one, the server says nothing about columns.
 | Key           | Command                | What it does                                                     |
 |---------------|------------------------|------------------------------------------------------------------|
 | `C-c C-d`     | `dbt-dispatch`         | Run a dbt command, by default on the current model               |
-| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model                                    |
+| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL of the model; with `C-u`, the SQL of the last run (`dbt-visit-run`) |
 | `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
 | `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, analysis, macro, docs block or source |
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion                             |
+| `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
+| `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
+| `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s MODEL`; with `C-u`, `+MODEL+`               |
+| `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
+| `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |
+| `C-c %`       | `dbt-jump-to-matching-tag` | Move between a block's opening and closing tags              |
 | `M-.`, `M-?`  | `xref`                 | Definition and uses of what point is on                          |
 
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
@@ -96,6 +128,17 @@ With [straight.el](https://github.com/radian-software/straight.el) and
   :straight (dbt-mode :type git :host github :repo "piotr-yuxuan/dbt-mode")
   :hook ((dbt-mode . dbt-lsp-deferred)
          ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe)))
+```
+
+With expreg, the regions of dbt-mode join its own:
+
+```elisp
+(use-package expreg
+  :config
+  ;; expreg-functions is local to each buffer once set: change its default.
+  (setq-default expreg-functions
+                (cons #'dbt-edit-expreg-regions
+                      (remq #'dbt-edit-expreg-regions (default-value 'expreg-functions)))))
 ```
 
 `dbt-lsp-deferred` makes the root of the dbt project a folder of the lsp

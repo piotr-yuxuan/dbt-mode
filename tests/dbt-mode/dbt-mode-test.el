@@ -534,5 +534,91 @@
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_customers.sql" . 1))))))
 
+(ert-deftest dbt-mode-copies-relations-from-the-manifest ()
+  "The relation of the model, or of the ref or source at point, comes from the manifest.
+It is that of the node with this very id, not a list of its children,
+nor a node whose id it begins."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-copy-relation) :type 'user-error)
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"child_map\": {\"model.shop.orders\": [\"model.shop.x\"]},"
+                          " \"nodes\": {\"model.shop.orders_v2\": {\"relation_name\": \"wrong\"},"
+                          " \"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"main\\\".\\\"orders\\\"\"},"
+                          " \"model.shop.stg_orders\": {\"relation_name\": null}},"
+                          " \"sources\": {\"source.shop.raw.raw_orders\": {\"relation_name\": \"raw.main.raw_orders\"}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (goto-char (point-max))
+    (dbt-copy-relation)
+    (should (equal (current-kill 0) "\"db\".\"main\".\"orders\""))
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should-error (dbt-copy-relation) :type 'user-error)
+    (dbt-test-visit root "models/staging/stg_customers.sql")
+    (goto-char (point-max))
+    (insert "union all select * from {{ source('raw', 'raw_orders') }}\n")
+    (dbt-test-goto "raw_orders")
+    (dbt-copy-relation)
+    (should (equal (current-kill 0) "raw.main.raw_orders"))))
+
+(ert-deftest dbt-mode-copies-the-build-command ()
+  "The build command selects the model, or with a prefix its family."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (dbt-copy-build-command)
+    (should (equal (current-kill 0) "dbt build -s orders"))
+    (dbt-copy-build-command t)
+    (should (equal (current-kill 0) "dbt build -s +orders+"))))
+
+(ert-deftest dbt-mode-lists-the-tests-of-a-model ()
+  "The tests of a model are its YAML entries, the data tests that name it and
+the singular tests that read it; an exposure or another model's unit test
+that reads it are none of its tests."
+  (dbt-test-with-project root
+    (write-region (concat "exposures:\n  - name: board\n    depends_on:\n      - ref('stg_orders')\n"
+                          "models:\n  - name: orders\n    columns:\n      - name: order_id\n        data_tests:\n"
+                          "          - relationships:\n              to: ref('stg_orders')\n              field: order_id\n"
+                          "unit_tests:\n  - name: test_orders\n    model: orders\n    given:\n"
+                          "      - input: ref('stg_orders')\n")
+                  nil (expand-file-name "models/marts/_marts.yml" root))
+    ;; tests: is the older name of data_tests.
+    (write-region (concat "models:\n  - name: orders\n    columns:\n      - name: customer_id\n        tests:\n"
+                          "          - relationships:\n              to: ref('stg_orders')\n")
+                  nil (expand-file-name "models/marts/_legacy.yml" root))
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let* (shown
+           (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher)))))
+      (dbt-visit-tests)
+      (should (equal (sort (dbt-test-xref-files shown root) (lambda (a b) (string< (format "%S" a) (format "%S" b))))
+                     '(("models/marts/_legacy.yml" . 7) ("models/marts/_marts.yml" . 11)
+                       ("models/staging/_staging.yml" . 4) ("tests/assert_positive_amount.sql" . 1)))))
+    (dbt-test-visit root "models/marts/customers.sql")
+    (should-error (dbt-visit-tests) :type 'user-error)))
+
+(ert-deftest dbt-mode-visits-the-sql-of-the-last-run ()
+  "With a prefix, C-c C-v shows what the last run ran, or says there was none."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-visit-compiled t) :type 'user-error)
+    (let ((run (expand-file-name "target/run/shop/models/marts/orders.sql" root)))
+      (make-directory (file-name-directory run) t)
+      (write-region "create table x as select 1" nil run)
+      (dbt-visit-compiled t)
+      (should (get-file-buffer run))
+      (with-current-buffer (get-file-buffer run)
+        (should buffer-read-only)))))
+
+(ert-deftest dbt-mode-binds-the-editing-commands ()
+  "The keys that the README lists run their commands, and sql-mode keeps its own.
+C-M-a and C-M-e move by CTE, where `sql-mode' moves by statement."
+  (with-temp-buffer
+    (dbt-mode)
+    (dolist (binding '(("C-c /" . dbt-close-block) ("C-c %" . dbt-jump-to-matching-tag)
+                       ("C-c C-t" . dbt-visit-tests) ("C-c C-w" . dbt-copy-relation)
+                       ("C-c M-w" . dbt-copy-build-command) ("C-c C-a" . dbt-new)
+                       ("C-c C-n" . sql-send-line-and-next) ("C-c C-c" . sql-send-paragraph)
+                       ("C-M-a" . beginning-of-defun) ("C-M-e" . end-of-defun)
+                       ("DEL" . dbt-edit-delete-backward)))
+      (should (eq (key-binding (kbd (car binding))) (cdr binding))))))
+
 (provide 'dbt-mode-test)
 ;;; dbt-mode-test.el ends here

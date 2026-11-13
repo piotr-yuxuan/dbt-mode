@@ -63,6 +63,22 @@
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
+(autoload 'dbt-new "dbt-new" nil t)
+(autoload 'dbt-new-staging-model "dbt-new" nil t)
+(autoload 'dbt-new-model "dbt-new" nil t)
+(autoload 'dbt-new-incremental-model "dbt-new" nil t)
+(autoload 'dbt-new-macro "dbt-new" nil t)
+(autoload 'dbt-new-snapshot "dbt-new" nil t)
+(autoload 'dbt-add-properties "dbt-new" nil t)
+(autoload 'dbt-add-unit-test "dbt-new" nil t)
+(autoload 'dbt-close-block "dbt-edit" nil t)
+(autoload 'dbt-jump-to-matching-tag "dbt-edit" nil t)
+(autoload 'dbt-edit-delete-backward "dbt-edit" nil t)
+(autoload 'dbt-edit-pair-jinja-opener "dbt-edit")
+(autoload 'dbt-edit-join-jinja-sign "dbt-edit")
+(autoload 'dbt-edit-skip-jinja-closer "dbt-edit")
+(autoload 'dbt-edit-beginning-of-cte "dbt-edit")
+(autoload 'dbt-edit-end-of-cte "dbt-edit")
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
@@ -528,31 +544,48 @@ or not a language server runs."
                         entries))
      nil)))
 
-(defun dbt-visit-compiled ()
+(defun dbt-mode-compiled-file (directory)
+  "Return the file of the current model's SQL that dbt wrote in DIRECTORY.
+DIRECTORY is \"compiled\", where `dbt compile' and every run write the
+compiled SQL, or \"run\", where a run writes the SQL it ran, its DDL
+included.  Return nil when dbt has not written it."
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         ;; dbt writes the SQL of a file under the directory of its
+         ;; package, at its path from the root of the project.
+         (file (expand-file-name
+                (file-relative-name (plist-get resource :file) root)
+                (expand-file-name (concat directory "/" (plist-get resource :package))
+                                  (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
+         ;; dbt 2 writes that of a snapshot in a directory of that path,
+         ;; named after the snapshot.
+         (file (if (file-directory-p file)
+                   (expand-file-name (concat (plist-get resource :name) ".sql") file)
+                 file)))
+    (and (file-regular-p file) file)))
+
+(defun dbt-visit-run ()
+  "Show the SQL that the last `dbt run' or `dbt build' ran for the current model.
+That is its compiled SQL within the DDL that dbt ran."
+  (interactive)
+  (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "run")
+                                               (user-error "Not run yet: run dbt run or dbt build")))
+    (read-only-mode 1)
+    (pop-to-buffer (current-buffer))))
+
+(defun dbt-visit-compiled (&optional run)
   "Show the SQL that the current model compiles to.
 With dbt lsp, the buffer is saved and the server compiles it.
-Otherwise, show what the last `dbt compile' or `dbt run' wrote."
-  (interactive)
-  (if (dbt-mode-server-p)
-      (dbt-lsp-compile-file)
-    (let* ((root (dbt-mode--root))
-           (resource (or (dbt-mode-current-resource) (user-error "No model here")))
-           ;; dbt writes the SQL of a file under the directory of its
-           ;; package, at its path from the root of the project.
-           (file (expand-file-name
-                  (file-relative-name (plist-get resource :file) root)
-                  (expand-file-name (concat "compiled/" (plist-get resource :package))
-                                    (expand-file-name (plist-get (dbt-project-config root) :target-path) root))))
-           ;; dbt 2 writes that of a snapshot in a directory of that path,
-           ;; named after the snapshot.
-           (file (if (file-directory-p file)
-                     (expand-file-name (concat (plist-get resource :name) ".sql") file)
-                   file)))
-      (unless (file-regular-p file)
-        (user-error "Not compiled yet: run dbt compile, or start dbt lsp"))
-      (with-current-buffer (find-file-noselect file)
-        (read-only-mode 1)
-        (pop-to-buffer (current-buffer))))))
+Otherwise, show what the last `dbt compile' or run wrote.  With RUN,
+interactively a prefix argument, show the SQL of the last run instead,
+as `dbt-visit-run' does."
+  (interactive "P")
+  (cond (run (dbt-visit-run))
+        ((dbt-mode-server-p) (dbt-lsp-compile-file))
+        (t (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "compiled")
+                                                        (user-error "Not compiled yet: run dbt compile, or start dbt lsp")))
+             (read-only-mode 1)
+             (pop-to-buffer (current-buffer))))))
 
 (defun dbt-preview (&optional start end cte)
   "Show the rows of the current model, of the SQL from START to END, or a CTE's.
@@ -603,6 +636,84 @@ not the default: a model that refers to itself is a cycle."
                  (format "ref('%s', '%s')" (plist-get entity :package) name))))
     (insert (if (dbt-mode-jinja-bounds) call (format "{{ %s }}" call)))))
 
+(defun dbt-copy-relation ()
+  "Copy the relation, database.schema.alias, of what point is on.
+That is the model, seed, snapshot or source table that the `ref' or
+`source' at point names, or else the current model.  It comes from
+target/manifest.json, which `dbt parse', `dbt compile' and every run
+write; the message says when it was written."
+  (interactive)
+  (let* ((root (dbt-mode--root))
+         (target (dbt-mode-target-at-point))
+         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+                     (dbt-mode-current-resource)
+                     (user-error "No model or source here")))
+         (file (expand-file-name "manifest.json"
+                                 (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
+         (id (dbt-project-node-id entity))
+         ;; Only the node is parsed, as a manifest grows to tens of MB.
+         ;; Its id is a key of an object in "nodes" or "sources" only:
+         ;; elsewhere, as in "child_map", its value is an array.
+         (node (with-temp-buffer
+                 (unless (ignore-errors (insert-file-contents file) t)
+                   (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
+                 (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+                      (progn (backward-char)
+                             (ignore-errors (json-parse-buffer :null-object nil))))))
+         ;; The manifest is dbt's, read as it is: anything but a table
+         ;; holding a string is no relation.
+         (relation (and (hash-table-p node) (gethash "relation_name" node))))
+    (unless (stringp relation)
+      (user-error "%s has no relation in the manifest: run dbt parse again" id))
+    (kill-new relation)
+    (message "Copied %s, from the manifest written at %s" relation
+             (format-time-string "%F %R" (file-attribute-modification-time (file-attributes file))))))
+
+(defun dbt-copy-build-command (&optional family)
+  "Copy the command that builds the current model, dbt build -s MODEL.
+With FAMILY, interactively a prefix argument, the selection takes in
+its upstream and downstream: +MODEL+."
+  (interactive "P")
+  (let* ((name (plist-get (or (dbt-mode-current-resource) (user-error "No model here")) :name))
+         (command (format "dbt build -s %s" (if family (format "+%s+" name) name))))
+    (kill-new command)
+    (message "Copied %s" command)))
+
+(defun dbt-visit-tests ()
+  "Show the tests of the current model.
+They are its YAML entries, where its data tests sit, the data tests
+elsewhere that name it, such as a relationships test, and the singular
+tests of the project's test paths that read it.  Its unit tests are not
+listed: their `model' key is not a call."
+  (interactive)
+  (let* ((root (dbt-mode--root))
+         (resource (or (dbt-mode-current-resource) (user-error "No model here")))
+         (directories (mapcar (lambda (path) (file-name-as-directory (expand-file-name path root)))
+                              (plist-get (dbt-project-config root) :test-paths)))
+         (scans (make-hash-table :test #'equal))
+         (items (seq-filter
+                 (lambda (item)
+                   (let* ((location (xref-item-location item))
+                          (file (xref-location-group location)))
+                     (if (string-match-p "\\.ya?ml\\'" file)
+                         ;; The keys that hold the line tell what it is.
+                         (let ((path (plist-get (seq-find (lambda (line)
+                                                            (= (plist-get line :line) (xref-location-line location)))
+                                                          (with-memoization (gethash file scans)
+                                                            (dbt-project-yaml-scan
+                                                             (with-temp-buffer
+                                                               (insert-file-contents file)
+                                                               (buffer-string)))))
+                                                :path)))
+                           (or (seq-intersection path '("data_tests" "tests"))
+                               (and (equal (length path) 1) (member (car path) dbt-project-resource-sections))))
+                       (seq-some (lambda (directory) (string-prefix-p directory file)) directories))))
+                 (xref-backend-references
+                  'dbt (dbt-mode-identifier (dbt-mode-entity-target resource (plist-get resource :package)))))))
+    (unless items
+      (user-error "No test reads %s" (plist-get resource :name)))
+    (xref-show-xrefs (lambda () items) nil)))
+
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
 For `after-save-hook', so that the index sees what was just saved."
@@ -612,14 +723,26 @@ For `after-save-hook', so that the index sees what was just saved."
 ;;;; The mode
 
 (defvar-keymap dbt-mode-map
-  :doc "Keymap of `dbt-mode'.  It keeps the keys of `sql-mode'."
+  :doc "Keymap of `dbt-mode'.
+It keeps the keys of `sql-mode', but for C-M-a and C-M-e, which move by
+CTE rather than by statement."
   "C-c C-d" #'dbt-dispatch
   "C-c C-v" #'dbt-visit-compiled
   "C-c C-p" #'dbt-preview
   "C-c C-g" #'dbt-lineage
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
-  "C-c C-e" #'dbt-insert-ref)
+  "C-c C-e" #'dbt-insert-ref
+  "C-c C-t" #'dbt-visit-tests
+  "C-c C-w" #'dbt-copy-relation
+  "C-c M-w" #'dbt-copy-build-command
+  "C-c C-a" #'dbt-new
+  "C-c /" #'dbt-close-block
+  "C-c %" #'dbt-jump-to-matching-tag
+  ;; `sql-mode' remaps them to its statement motions.
+  "<remap> <beginning-of-defun>" #'beginning-of-defun
+  "<remap> <end-of-defun>" #'end-of-defun
+  "<remap> <delete-backward-char>" #'dbt-edit-delete-backward)
 
 (easy-menu-define dbt-mode-menu dbt-mode-map
   "Menu of `dbt-mode'."
@@ -631,6 +754,14 @@ For `after-save-hook', so that the index sees what was just saved."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    ["Tests of this model" dbt-visit-tests]
+    ["SQL of the last run" dbt-visit-run]
+    ["Copy the relation" dbt-copy-relation]
+    ["Copy the build command" dbt-copy-build-command]
+    "---"
+    ["New..." dbt-new]
+    ["Close the Jinja block" dbt-close-block]
+    ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
     ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
     ["Format buffer" dbt-lsp-format-buffer :active (dbt-mode-server-p)]
@@ -667,7 +798,11 @@ commentary of dbt-mode.el for the rest.
               imenu-case-fold-search t)
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend nil 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
-  (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local))
+  (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
+  (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))
+    (add-hook 'post-self-insert-hook function nil 'local))
+  (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte
+              end-of-defun-function #'dbt-edit-end-of-cte))
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 
