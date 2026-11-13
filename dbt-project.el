@@ -522,10 +522,11 @@ highest version."
 (defun dbt-project-resolve (root target &optional caller)
   "Return the entities of ROOT that define TARGET, best first.
 TARGET is a plist (:kind KIND :qualifier QUALIFIER :name NAME :version
-VERSION).  KIND is `ref', `source', `doc' or `macro'.  QUALIFIER is the
-package of a `ref', a `doc' or a macro, or the source of a table, and
-nil for a source itself.  VERSION is that of a `ref', nil for the
-latest.  CALLER is the package of the calling file, for a `ref'."
+VERSION).  KIND is `ref', `source', `doc', `macro' or `analysis', which
+no call names.  QUALIFIER is the package of a `ref', a `doc', a macro
+or an analysis, or the source of a table, and nil for a source itself.
+VERSION is that of a `ref', nil for the latest.  CALLER is the package
+of the calling file, for a `ref'."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
@@ -535,6 +536,7 @@ latest.  CALLER is the package of the calling file, for a `ref'."
                                (dbt-project-entities root '(table) name))
                  (dbt-project-entities root '(source) name)))
       ('doc (dbt-project-entities root '(doc) name qualifier))
+      ('analysis (dbt-project-entities root '(analysis) name qualifier))
       ('macro (dbt-project-entities root '(macro test) name qualifier)))))
 
 ;;;; The lineage that needs no server

@@ -372,6 +372,10 @@ A file made unreadable without changing still gives what it held."
                    8))
     (should (equal (plist-get (car (dbt-project-resolve root '(:kind source :name "events"))) :line) 12))
     (should-not (dbt-project-resolve root '(:kind source :qualifier "events" :name "raw_orders")))
+    (should (equal (mapcar (lambda (entity) (file-relative-name (plist-get entity :file) root))
+                           (dbt-project-resolve root '(:kind analysis :name "order_counts")))
+                   '("analyses/order_counts.sql")))
+    (should-not (dbt-project-resolve root '(:kind ref :name "order_counts")))
     (should (dbt-project-resolve root '(:kind macro :qualifier "shop_utils" :name "is_positive")))
     (should-not (dbt-project-resolve root '(:kind macro :qualifier "shop" :name "is_positive")))))
 
