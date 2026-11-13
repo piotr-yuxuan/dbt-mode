@@ -27,6 +27,25 @@
                  '(("b" . 1) ("c" . 1) ("d" . 2) ("e" . 3))))
   (should (equal (dbt-lineage-depths dbt-test-diamond "e" 'downstream) nil)))
 
+(ert-deftest dbt-lineage-shows-thousands-of-nodes-at-once ()
+  "The lineage of a project of 4,000 models shows at once, not in seconds.
+Each model depends on the one before it and on the one at half its
+rank, so that the first is upstream of all the others and the last
+downstream of all of them."
+  (let ((nodes (mapcar (lambda (rank)
+                         (list :id (format "model.p.m%d" rank) :name (format "m%d" rank) :type 'model
+                               :parents (and (> rank 0) (list (format "model.p.m%d" (1- rank))
+                                                              (format "model.p.m%d" (/ rank 2))))))
+                       (number-sequence 0 3999)))
+        (start (float-time)))
+    (dbt-lineage-show "/" "m0" nodes "a test" #'ignore)
+    (dbt-lineage-show "/" "m3999" nodes "a test" #'ignore)
+    (should (< (- (float-time) start) 1.5))
+    (dolist (name '("m0" "m3999"))
+      (with-current-buffer (format "*dbt lineage: %s*" name)
+        (should (= (length tabulated-list-entries) 3999))
+        (kill-buffer)))))
+
 (ert-deftest dbt-lineage-shows-the-project-lineage ()
   "C-c C-g without a server lists upstream and downstream rows."
   (dbt-test-with-project root

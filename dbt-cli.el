@@ -15,27 +15,31 @@
 
 ;;; Code:
 
+(require 'ansi-color)
 (require 'compile)
+(require 'dbt-mode)
 (require 'dbt-project)
 (require 'transient)
 
-(declare-function dbt-mode-current-resource "dbt-mode")
-
-(defcustom dbt-preview-limit 50
-  "The number of rows that a preview of a model or a query shows."
-  :type 'natnum
-  :group 'dbt)
-
 (defconst dbt-cli-selecting-commands
-  '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint" "clone"
-    "freshness")
-  "The commands of dbt that take a selection and the options of `dbt-dispatch'.")
+  '("build" "run" "test" "compile" "show" "seed" "snapshot" "list" "format" "lint")
+  "The commands of dbt that take a selection.")
+
+(defconst dbt-cli-option-commands
+  `(("--select" . ,dbt-cli-selecting-commands)
+    ("--exclude" . ,dbt-cli-selecting-commands)
+    ("--full-refresh" "build" "run" "compile" "seed")
+    ("--limit" "build" "run" "test" "compile" "show" "list"))
+  "The options of `dbt-dispatch' that only some commands take, with these commands.
+dbt 2.0.9 rejects --full-refresh and --limit on any other command.  The
+other options, --target and --fail-fast, go to every command.")
 
 (defconst dbt-cli-error-regexp-alist
   ;; dbt 2 prints an error or a warning as a line "[error] [Name (dbtNNNN)]:
-  ;; message", then, within a few lines, " --> FILE:LINE:COLUMN".
+  ;; message", then, within a few lines that start no other, " -->
+  ;; FILE:LINE:COLUMN", or " --> FILE" alone.
   '((dbt-location
-     "^\\[\\(?:error\\|\\(warning\\)\\)\\][^\n]*\n\\(?:[^\n]*\n\\)\\{0,3\\}?[ \t]*--> \\([^:\n]+\\):\\([0-9]+\\):\\([0-9]+\\)"
+     "^\\[\\(?:error\\|\\(warning\\)\\)\\][^\n]*\n\\(?:\\(?:[^[\n][^\n]*\\)?\n\\)\\{0,3\\}?[ \t]*--> \\([^:\n]+\\)\\(?::\\([0-9]+\\):\\([0-9]+\\)\\)?"
      2 3 4 (1)))
   "The errors and warnings of dbt's output.
 For `compilation-error-regexp-alist'.")
@@ -43,14 +47,19 @@ For `compilation-error-regexp-alist'.")
 (define-compilation-mode dbt-compilation-mode "dbt"
   "The output of a dbt command, whose errors link to their files."
   (setq-local compilation-error-regexp-alist-alist dbt-cli-error-regexp-alist
-              compilation-error-regexp-alist (mapcar #'car dbt-cli-error-regexp-alist)))
+              compilation-error-regexp-alist (mapcar #'car dbt-cli-error-regexp-alist))
+  ;; dbt show writes the header of its table in bold, colours or not.
+  (add-hook 'compilation-filter-hook #'ansi-color-compilation-filter nil t))
 
 (defun dbt-cli-run (command &optional arguments)
   "Run the dbt COMMAND with ARGUMENTS, a list of strings, in the project.
 It runs at the root of the project of the current buffer, in a
-compilation buffer of `dbt-compilation-mode'."
+compilation buffer of `dbt-compilation-mode'.  dbt runs without colours
+or progress bars, which it would otherwise draw when Emacs passes on the
+TERM of a terminal."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
-         (default-directory root))
+         (default-directory root)
+         (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")
@@ -80,10 +89,15 @@ add a `+' before or after the selection."
             arguments)))
 
 (defun dbt-cli-dispatch (command)
-  "Run the dbt COMMAND with the arguments of `dbt-dispatch'.
-A command that takes no selection gets none of them."
-  (dbt-cli-run command (and (member command dbt-cli-selecting-commands)
-                            (dbt-cli-arguments (transient-args 'dbt-dispatch)))))
+  "Run the dbt COMMAND with those arguments of `dbt-dispatch' that it takes.
+See `dbt-cli-option-commands'."
+  (dbt-cli-run command
+               (dbt-cli-arguments
+                (seq-filter (lambda (argument)
+                              (let ((commands (assoc (car (split-string argument "="))
+                                                     dbt-cli-option-commands)))
+                                (or (not commands) (member command (cdr commands)))))
+                            (transient-args 'dbt-dispatch)))))
 
 ;;;###autoload (autoload 'dbt-dispatch "dbt-cli" nil t)
 (transient-define-prefix dbt-dispatch ()
@@ -91,8 +105,7 @@ A command that takes no selection gets none of them."
   ["Selection"
    ("-s" "Select" "--select="
     :init-value (lambda (option)
-                  (oset option value (and (fboundp 'dbt-mode-current-resource)
-                                          (dbt-project-root)
+                  (oset option value (and (dbt-project-root)
                                           (plist-get (dbt-mode-current-resource) :name)))))
    ("-u" "With its upstream" "--upstream")
    ("-d" "With its downstream" "--downstream")
