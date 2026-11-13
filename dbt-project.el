@@ -25,10 +25,12 @@
 ;; KIND is one of `model', `seed', `snapshot', `analysis', `macro', `test'
 ;; (a generic test), `doc', `source', `table' (a table of the source
 ;; SOURCE), `exposure' and `properties' (an entry of the YAML section
-;; SECTION, such as "models").  LINE counts from 1.
+;; SECTION, such as "models").  LINE counts from 1.  A snapshot written
+;; in YAML has :relation, the text of its relation.
 ;;
 ;; `dbt-project-graph' reads the `ref' and `source' calls of every model,
-;; snapshot and analysis, for a lineage that needs no server.  Its nodes
+;; snapshot and analysis, or the relation of a snapshot written in YAML,
+;; for a lineage that needs no server.  Its nodes
 ;; have the shape that dbt-lineage.el shows: a plist with :id, :name,
 ;; :type, :package, :file and :parents, the identifiers of the nodes it
 ;; depends on.
@@ -151,37 +153,45 @@ gives the properties of a resource that a file defines.")
 (defconst dbt-project-resource-sections '("models" "seeds" "snapshots" "analyses")
   "The sections whose entries describe a model, a seed, a snapshot or an analysis.")
 
+(defconst dbt-project-yaml-lists
+  '((("tables" "sources") "tables" :source))
+  "The lists within an entry whose items are entries too.
+Each is (PATH SECTION PROPERTY): PATH names the keys that hold the list,
+innermost first, SECTION is that of its entries, and PROPERTY keeps the
+name of the entry that holds the list.")
+
+(defconst dbt-project-yaml-properties
+  '(("name" . :name) ("relation" . :relation))
+  "Alist from the keys of an entry that the index keeps to their property.")
+
 (defun dbt-project-yaml-entries (text)
   "Return the entries of TEXT, the contents of a dbt properties file.
-Each entry is a plist (:section SECTION :name NAME :line LINE :source
-SOURCE): an item of a top-level section of `dbt-project-yaml-sections',
-or, with SECTION \"tables\", a table of the source SOURCE.  LINE counts
-from 1.  An item is an entry when its `name' key sits at the first level
-of its section, or right under the `tables' of a source."
-  (let ((number 0) section source keys entries)
-    ;; KEYS holds the open keys other than `name', innermost first, as
-    ;; (COLUMN . KEY); a line closes those at its column or deeper.
-    ;; SOURCE is the name of the last item at the first level.
-    (dolist (line (split-string text "\n"))
-      (setq number (1+ number))
-      (when-let* ((parsed (dbt-project-yaml-line line)))
-        (let ((column (plist-get parsed :column))
-              (key (plist-get parsed :key))
-              (name (plist-get parsed :value)))
-          (while (and keys (>= (car (car keys)) column))
-            (pop keys))
-          (cond ((zerop column)
-                 (setq section (car (member key dbt-project-yaml-sections)) keys nil))
-                ((not (equal key "name"))
-                 (push (cons column key) keys))
-                ((null keys)
-                 (push (list :section section :name name :line number) entries)
-                 (setq source name))
-                ((equal (list section (cdr (car keys))) '("sources" "tables"))
-                 (push (list :section "tables" :name name :line number :source source)
-                       entries))))))
-    (seq-filter (lambda (entry) (and (plist-get entry :section) (plist-get entry :name)))
-                (nreverse entries))))
+Each entry is a plist (:section SECTION :line LINE :name NAME ...): an
+item of a top-level section of `dbt-project-yaml-sections', or of a list
+of `dbt-project-yaml-lists', such as a table of the source SOURCE, with
+SECTION \"tables\".  LINE is that of its name, from 1.  The keys of
+`dbt-project-yaml-properties' at the first level of the item, in any
+order, give the other properties."
+  (let (open entries)
+    ;; OPEN maps the path of each list whose items are entries to the
+    ;; entry being read there.
+    (dolist (line (dbt-project-yaml-scan text))
+      (let* ((path (plist-get line :path))
+             (list (assoc path dbt-project-yaml-lists))
+             (section (if list
+                          (nth 1 list)
+                        (and (null (cdr path)) (car (member (car path) dbt-project-yaml-sections))))))
+        (when (and section (plist-get line :item))
+          (push (append (list :section section :line (plist-get line :line))
+                        (and list (list (nth 2 list) (plist-get (cdr (assoc (cdr path) open)) :name))))
+                entries)
+          (setf (alist-get path open nil nil #'equal) (car entries)))
+        (when-let* ((entry (cdr (assoc path open)))
+                    (property (cdr (assoc (plist-get line :key) dbt-project-yaml-properties))))
+          (plist-put entry property (plist-get line :value))
+          (when (eq property :name)
+            (plist-put entry :line (plist-get line :line))))))
+    (seq-filter (lambda (entry) (plist-get entry :name)) (nreverse entries))))
 
 (defconst dbt-project-config-keys
   '(("name" :name nil) ("target-path" :target-path "target")
@@ -363,7 +373,9 @@ Each is a target plist (:kind KIND :qualifier QUALIFIER :name NAME), as
 (defun dbt-project-file-contents (file)
   "Return what FILE defines and calls, as (:entities ENTITIES :calls CALLS).
 ENTITIES are its Jinja blocks and, in a YAML file, its entries, as
-entities without :package and :file; CALLS are as `dbt-project-calls'
+entities without :package and :file: an entry defines a source, a table,
+an exposure or a snapshot that has a relation, and gives the properties
+of any other resource; CALLS are as `dbt-project-calls'
 returns them.  What a Jinja comment holds is left out.  FILE is read
 again only when its modification time or its size changed.  A file that
 cannot be read holds nothing."
@@ -390,7 +402,10 @@ cannot be read holds nothing."
           (when (string-match-p "\\.ya?ml\\'" file)
             (dolist (entry (dbt-project-yaml-entries (buffer-string)))
               (let ((kind (alist-get (plist-get entry :section) dbt-project-section-kinds nil nil #'equal)))
-                (push (append (list :kind (if (memq kind '(source table exposure)) kind 'properties)) entry)
+                (push (append (list :kind (if (or (plist-get entry :relation) (memq kind '(source table exposure)))
+                                              kind
+                                            'properties))
+                              entry)
                       entities))))
           (let ((contents (list :entities (nreverse entities) :calls (dbt-project-calls))))
             (puthash file (cons stamp contents) dbt-project--files)
@@ -434,8 +449,9 @@ is looked up in a table, built once for each index."
 (defun dbt-project-file-entity (root file)
   "Return the model, seed, snapshot or analysis that FILE of ROOT defines.
 FILE need not exist yet, nor the index know it: a model, a seed or an
-analysis is told by its place alone.  A snapshot is the first that FILE
-defines, by the index."
+analysis is told by its place alone.  A snapshot is the first of a Jinja
+block that FILE defines, by the index: a YAML file defines no resource
+of its own."
   (let* ((file (expand-file-name file))
          (package (seq-find (lambda (package) (string-prefix-p (nth 1 package) file))
                             (reverse (dbt-project-packages root))))
@@ -443,7 +459,8 @@ defines, by the index."
     (if kind
         (list :kind kind :name (file-name-base file) :package (car package) :file file :line 1)
       (seq-find (lambda (entity)
-                  (and (eq (plist-get entity :kind) 'snapshot) (equal (plist-get entity :file) file)))
+                  (and (eq (plist-get entity :kind) 'snapshot) (equal (plist-get entity :file) file)
+                       (not (plist-get entity :relation))))
                 (dbt-project-index root)))))
 
 (defun dbt-project-resolve-ref (root package name &optional caller)
@@ -496,8 +513,12 @@ itself.  CALLER is the package of the calling file, for a `ref'."
      (mapcar
       (lambda (entity)
         (let ((table (eq (plist-get entity :kind) 'table))
-              (calls (unless (memq (plist-get entity :kind) '(seed table))
-                       (plist-get (dbt-project-file-contents (plist-get entity :file)) :calls))))
+              (calls (cond ((memq (plist-get entity :kind) '(seed table)) nil)
+                           ((plist-get entity :relation)
+                            (with-temp-buffer
+                              (insert (plist-get entity :relation))
+                              (dbt-project-calls)))
+                           (t (plist-get (dbt-project-file-contents (plist-get entity :file)) :calls)))))
           (list :id (dbt-project-node-id entity)
                 :name (if table
                           (format "%s.%s" (plist-get entity :source) (plist-get entity :name))

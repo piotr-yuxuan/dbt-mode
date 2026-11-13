@@ -63,18 +63,18 @@
                      "unknown:"
                      "  - name: ignored")
                    "\n"))
-                 '((:section "models" :name "first" :line 4)
-                   (:section "models" :name "second" :line 7)
-                   (:section "sources" :name "raw" :line 11)
-                   (:section "tables" :name "orders" :line 13 :source "raw")
-                   (:section "tables" :name "customers" :line 16 :source "raw")
-                   (:section "sources" :name "events" :line 17))))
+                 '((:section "models" :line 4 :name "first")
+                   (:section "models" :line 7 :name "second")
+                   (:section "sources" :line 11 :name "raw")
+                   (:section "tables" :line 13 :source "raw" :name "orders")
+                   (:section "tables" :line 16 :source "raw" :name "customers")
+                   (:section "sources" :line 17 :name "events"))))
   (should-not (dbt-project-yaml-entries "models:\n  shop:\n    +materialized: view\n"))
   (should (equal (dbt-project-yaml-entries
                   "sources:\n  - name: crm\n    tables:\n      - {name: accounts}\n      - {name: contacts, identifier: c}\n")
-                 '((:section "sources" :name "crm" :line 2)
-                   (:section "tables" :name "accounts" :line 4 :source "crm")
-                   (:section "tables" :name "contacts" :line 5 :source "crm")))))
+                 '((:section "sources" :line 2 :name "crm")
+                   (:section "tables" :line 4 :source "crm" :name "accounts")
+                   (:section "tables" :line 5 :source "crm" :name "contacts")))))
 
 (ert-deftest dbt-project-call-regexp-reads-calls ()
   "A complete call gives its name and qualifier; a call being typed, what is typed."
@@ -98,6 +98,20 @@
     (should-not (funcall typed (dbt-project-call-regexp 'ref 'required t) "ref('ord"))
     (should (equal (funcall typed (dbt-project-call-regexp 'source nil t) "source('ra") '("ra" nil)))
     (should (equal (alist-get 'source dbt-project-call-regexps) (dbt-project-call-regexp 'source 'required)))))
+
+(ert-deftest dbt-project-yaml-entries-keep-the-relation-of-a-snapshot ()
+  "A snapshot written in YAML keeps its relation, before or after its name."
+  (should (equal (dbt-project-yaml-entries
+                  (string-join '("snapshots:"
+                                 "  - name: first"
+                                 "    relation: ref('stg_customers')  # the model"
+                                 "    config:"
+                                 "      relation: not_this_one"
+                                 "  - relation: \"source('raw', 'raw_orders')\""
+                                 "    name: second")
+                               "\n"))
+                 '((:section "snapshots" :line 2 :name "first" :relation "ref('stg_customers')")
+                   (:section "snapshots" :line 7 :relation "source('raw', 'raw_orders')" :name "second")))))
 
 (ert-deftest dbt-project-config-reads-paths ()
   "dbt_project.yml gives the name and paths, in either list form; dbt's defaults otherwise."
@@ -257,6 +271,25 @@ A file made unreadable without changing still gives what it held."
     (should (dbt-project-entities root '(macro) "cents_to_dollars"))
     (should (dbt-project-entities root '(macro) "renamed"))
     (should-not (dbt-project-entities root '(macro) "is_positive"))))
+
+(ert-deftest dbt-project-index-finds-snapshots-written-in-yaml ()
+  "A snapshot of a YAML file is a snapshot, whose parents its relation names."
+  (dbt-test-with-project root
+    (write-region (concat "snapshots:\n  - name: customers_snapshot\n    relation: ref('stg_customers')\n"
+                          "    config:\n      unique_key: customer_id\n      strategy: check\n      check_cols: all\n")
+                  nil (expand-file-name "snapshots/_snapshots.yml" root))
+    (write-region "select * from {{ ref('customers_snapshot') }}" nil
+                  (expand-file-name "models/marts/from_snap.sql" root))
+    (should (equal (dbt-test-entity root 'snapshot "customers_snapshot")
+                   '(snapshot "customers_snapshot" "shop" "snapshots/_snapshots.yml" 2)))
+    (should (equal (plist-get (car (dbt-project-resolve root '(:kind ref :name "customers_snapshot"))) :kind)
+                   'snapshot))
+    (let ((parents (lambda (id) (plist-get (seq-find (lambda (node) (equal (plist-get node :id) id))
+                                                     (dbt-project-graph root))
+                                           :parents))))
+      (should (equal (funcall parents "model.shop.from_snap") '("snapshot.shop.customers_snapshot")))
+      (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
+    (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
 
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
