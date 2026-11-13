@@ -175,12 +175,6 @@ The rows of a model come from its buffer, unsaved changes included."
       (insert-file-contents (expand-file-name "models/staging/_staging.yml" root))
       (should (string-match-p "- name: stg_clients" (buffer-string))))))
 
-(defun dbt-test-file-text (root file)
-  "Return the text of FILE, relative to ROOT, as it is on disk."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file root))
-    (buffer-string)))
-
 (ert-deftest dbt-lsp-live-formats-and-reports-errors ()
   "Formatting and fixing save first, then format; an unknown ref is a diagnostic of its line."
   (let ((dbt-lsp-enable-linter t)

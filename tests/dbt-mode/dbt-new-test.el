@@ -12,12 +12,6 @@
 (require 'dbt-mode-test-helpers)
 (require 'dbt-new)
 
-(defun dbt-test-file-text (root file)
-  "Return the contents of FILE, relative to ROOT, as saved on disk."
-  (with-temp-buffer
-    (insert-file-contents (expand-file-name file root))
-    (buffer-string)))
-
 (ert-deftest dbt-new-writes-a-staging-model-and-its-entry ()
   "A staging model reads its source table; its entry goes beside it."
   (dbt-test-with-project root
