@@ -695,13 +695,21 @@ nor a node whose id it begins."
     (should (equal (current-kill 0) "raw.main.raw_orders"))))
 
 (ert-deftest dbt-mode-copies-the-build-command ()
-  "The build command selects the model, or with a prefix its family."
+  "The build command selects the model, or with a prefix its family.
+On a ref or a source, it selects what they name."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
+    (goto-char (point-max))
     (dbt-copy-build-command)
     (should (equal (current-kill 0) "dbt build -s orders"))
     (dbt-copy-build-command t)
-    (should (equal (current-kill 0) "dbt build -s +orders+"))))
+    (should (equal (current-kill 0) "dbt build -s +orders+"))
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (dbt-copy-build-command)
+    (should (equal (current-kill 0) "dbt build -s stg_orders"))
+    (insert "{{ source('raw', 'raw_orders') }} ")
+    (dbt-test-goto "raw_orders')")
+    (should (equal (dbt-mode-selection-at-point) "source:raw.raw_orders"))))
 
 (ert-deftest dbt-mode-lists-the-tests-of-a-model ()
   "The tests of a model are its YAML entries, the data tests that name it and

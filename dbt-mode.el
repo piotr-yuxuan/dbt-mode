@@ -590,6 +590,19 @@ In a YAML file, it is the resource whose entry holds point."
   (concat (plist-get resource :name)
           (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
 
+(defun dbt-mode-selection-at-point ()
+  "Return dbt's selector of what point is on, else of the current resource.
+On a `ref', it is the model, seed or snapshot that it names, as NAME or
+NAME.vVERSION; on a `source', source:SOURCE.TABLE.  Nil when point is on
+none of these, and the buffer holds no resource."
+  (let* ((target (dbt-mode-target-at-point))
+         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+                     (dbt-mode-current-resource))))
+    (pcase (plist-get entity :kind)
+      ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
+      ('source (format "source:%s" (plist-get entity :name)))
+      ((pred identity) (dbt-mode-resource-selector entity)))))
+
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).
 SELECTOR is NAME, or NAME.vVERSION for a version of a model; VERSION is
@@ -778,12 +791,15 @@ write; the message says when it was written."
              (format-time-string "%F %R" (file-attribute-modification-time (file-attributes file))))))
 
 (defun dbt-copy-build-command (&optional family)
-  "Copy the command that builds the current model, dbt build -s MODEL.
-With FAMILY, interactively a prefix argument, the selection takes in
-its upstream and downstream: +MODEL+."
+  "Copy the command that builds what point is on, dbt build -s SELECTOR.
+That is the model, seed or snapshot of the `ref' at point, the source
+of the `source' at point, or else the current resource, as
+`dbt-mode-selection-at-point' selects it.  With FAMILY, interactively a
+prefix argument, the selection takes in its upstream and downstream:
++SELECTOR+."
   (interactive "P")
-  (let* ((name (plist-get (or (dbt-mode-current-resource) (user-error "No model here")) :name))
-         (command (format "dbt build -s %s" (if family (format "+%s+" name) name))))
+  (let* ((selector (or (dbt-mode-selection-at-point) (user-error "No model here")))
+         (command (format "dbt build -s %s" (if family (format "+%s+" selector) selector))))
     (kill-new command)
     (message "Copied %s" command)))
 
