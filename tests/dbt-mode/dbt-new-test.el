@@ -184,12 +184,13 @@ A comment after the key is no other list."
       (should (string-match-p "^models:\n" text)))))
 
 (ert-deftest dbt-new-names-each-unit-test ()
-  "The name read is test_MODEL by default; a name the file's unit tests have is refused.
+  "C-c C-a offers test_MODEL; a name the file's unit tests have is refused.
 A list written in flow style is refused rather than doubled."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
-      (execute-kbd-macro (kbd "M-x dbt-add-unit-test RET RET")))
+      ;; RET completes the one choice that starts with Unit.
+      (execute-kbd-macro (kbd "C-c C-a Unit RET RET")))
     (should (string-match-p "  - name: test_orders\n" (dbt-test-file-text root "models/marts/_marts__models.yml")))
     (dbt-test-visit root "models/marts/orders.sql")
     (should-error (dbt-add-unit-test "test_orders") :type 'user-error)

@@ -52,7 +52,6 @@
 
 ;;; Code:
 
-(require 'dbt-edit)
 (require 'dbt-project)
 (require 'sql)
 (require 'xref)
@@ -72,7 +71,14 @@
 (autoload 'dbt-new-snapshot "dbt-new" nil t)
 (autoload 'dbt-add-properties "dbt-new" nil t)
 (autoload 'dbt-add-unit-test "dbt-new" nil t)
-(defvar expreg-functions)
+(autoload 'dbt-close-block "dbt-edit" nil t)
+(autoload 'dbt-jump-to-matching-tag "dbt-edit" nil t)
+(autoload 'dbt-edit-delete-backward "dbt-edit" nil t)
+(autoload 'dbt-edit-pair-jinja-opener "dbt-edit")
+(autoload 'dbt-edit-join-jinja-sign "dbt-edit")
+(autoload 'dbt-edit-skip-jinja-closer "dbt-edit")
+(autoload 'dbt-edit-beginning-of-cte "dbt-edit")
+(autoload 'dbt-edit-end-of-cte "dbt-edit")
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
@@ -717,7 +723,9 @@ For `after-save-hook', so that the index sees what was just saved."
 ;;;; The mode
 
 (defvar-keymap dbt-mode-map
-  :doc "Keymap of `dbt-mode'.  It keeps the keys of `sql-mode'."
+  :doc "Keymap of `dbt-mode'.
+It keeps the keys of `sql-mode', but for C-M-a and C-M-e, which move by
+CTE rather than by statement."
   "C-c C-d" #'dbt-dispatch
   "C-c C-v" #'dbt-visit-compiled
   "C-c C-p" #'dbt-preview
@@ -728,9 +736,13 @@ For `after-save-hook', so that the index sees what was just saved."
   "C-c C-t" #'dbt-visit-tests
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
-  "C-c C-n" #'dbt-new
+  "C-c C-a" #'dbt-new
   "C-c /" #'dbt-close-block
-  "C-c %" #'dbt-jump-to-matching-tag)
+  "C-c %" #'dbt-jump-to-matching-tag
+  ;; `sql-mode' remaps them to its statement motions.
+  "<remap> <beginning-of-defun>" #'beginning-of-defun
+  "<remap> <end-of-defun>" #'end-of-defun
+  "<remap> <delete-backward-char>" #'dbt-edit-delete-backward)
 
 (easy-menu-define dbt-mode-menu dbt-mode-map
   "Menu of `dbt-mode'."
@@ -787,11 +799,10 @@ commentary of dbt-mode.el for the rest.
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend nil 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
-  (add-hook 'post-self-insert-hook #'dbt-edit-pair-jinja nil 'local)
+  (dolist (function '(dbt-edit-pair-jinja-opener dbt-edit-join-jinja-sign dbt-edit-skip-jinja-closer))
+    (add-hook 'post-self-insert-hook function nil 'local))
   (setq-local beginning-of-defun-function #'dbt-edit-beginning-of-cte
-              end-of-defun-function #'dbt-edit-end-of-cte)
-  (when (boundp 'expreg-functions)
-    (setq-local expreg-functions (cons #'dbt-edit-expreg-regions expreg-functions))))
+              end-of-defun-function #'dbt-edit-end-of-cte))
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 

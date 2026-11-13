@@ -17,6 +17,8 @@ that the live tests run against the real server.
 ```
 dbt-project.el             the project model: root, configuration, index, ref graph; no dbt needed
 dbt-mode.el                the major mode: Jinja syntax and font lock, xref, completion, imenu, commands
+dbt-edit.el                typing and moving: Jinja pairs and blocks, CTEs as defuns, expreg's regions
+dbt-new.el                 new models, macros, snapshots, YAML entries and unit tests
 dbt-lineage.el             the table of a model's upstream and downstream
 dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer
 dbt-lsp.el                 the lsp-mode client of dbt lsp and its custom commands

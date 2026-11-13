@@ -608,10 +608,17 @@ that reads it are none of its tests."
         (should buffer-read-only)))))
 
 (ert-deftest dbt-mode-binds-the-editing-commands ()
-  "The keys that the README lists run their commands."
-  (dolist (binding '(("C-c /" . dbt-close-block) ("C-c %" . dbt-jump-to-matching-tag) ("C-c C-t" . dbt-visit-tests)
-                     ("C-c C-w" . dbt-copy-relation) ("C-c M-w" . dbt-copy-build-command) ("C-c C-n" . dbt-new)))
-    (should (eq (keymap-lookup dbt-mode-map (car binding)) (cdr binding)))))
+  "The keys that the README lists run their commands, and sql-mode keeps its own.
+C-M-a and C-M-e move by CTE, where `sql-mode' moves by statement."
+  (with-temp-buffer
+    (dbt-mode)
+    (dolist (binding '(("C-c /" . dbt-close-block) ("C-c %" . dbt-jump-to-matching-tag)
+                       ("C-c C-t" . dbt-visit-tests) ("C-c C-w" . dbt-copy-relation)
+                       ("C-c M-w" . dbt-copy-build-command) ("C-c C-a" . dbt-new)
+                       ("C-c C-n" . sql-send-line-and-next) ("C-c C-c" . sql-send-paragraph)
+                       ("C-M-a" . beginning-of-defun) ("C-M-e" . end-of-defun)
+                       ("DEL" . dbt-edit-delete-backward)))
+      (should (eq (key-binding (kbd (car binding))) (cdr binding))))))
 
 (provide 'dbt-mode-test)
 ;;; dbt-mode-test.el ends here
