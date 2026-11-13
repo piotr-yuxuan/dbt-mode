@@ -110,26 +110,49 @@ finds the tag around point, within this many characters."
   :type 'natnum
   :group 'dbt)
 
+(defun dbt-mode--tag-end (limit)
+  "Return the end of the Jinja tag whose opener ends at point, or nil.
+The closer `}}' or `%}' ends the tag, outside its strings and the braces
+of its dict literals.  When another opener, or LIMIT, comes first, the
+tag is not closed: return nil, with point at that opener or at LIMIT."
+  (let ((depth 0))
+    (catch 'end
+      (while (re-search-forward
+              (concat "{[{%#]\\|[{}]\\|%}\\|\\("
+                      "\"[^\"\\]*\\(?:\\\\\\(?:.\\|\n\\)[^\"\\]*\\)*\""
+                      "\\|'[^'\\]*\\(?:\\\\\\(?:.\\|\n\\)[^'\\]*\\)*'\\)")
+              limit 'move)
+        (cond ((match-beginning 1))
+              ((equal (match-string 0) "{") (setq depth (1+ depth)))
+              ((equal (match-string 0) "}")
+               (if (and (zerop depth) (eq (char-after) ?}))
+                   (throw 'end (1+ (point)))
+                 (setq depth (max 0 (1- depth)))))
+              ((equal (match-string 0) "%}") (when (zerop depth) (throw 'end (point))))
+              (t (goto-char (match-beginning 0))
+                 (throw 'end nil)))))))
+
 (defun dbt-mode-jinja-bounds (&optional position)
   "Return (START . END) of the Jinja tag `{{ }}' or `{% %}' around POSITION.
 POSITION defaults to point.  Return nil outside a tag, or when the tag
 is longer than `dbt-mode-jinja-max-tag-length'.  END is after the
 closing delimiter, or nil when the tag is not closed yet."
   (save-excursion
-    (let ((position (or position (point)))
-          (limit dbt-mode-jinja-max-tag-length))
+    (let* ((position (or position (point)))
+           (limit dbt-mode-jinja-max-tag-length)
+           bounds)
       (goto-char position)
-      ;; Stepping back two characters finds the opening delimiter of a tag
-      ;; that starts at POSITION.
-      (when (and (re-search-backward "{[{%]\\|[}%]}" (max (point-min) (- position limit)) t)
-                 (eq (char-after) ?{)
-                 (not (nth 4 (syntax-ppss))))
+      ;; The nearest opener may be that of a tag in a string of the tag
+      ;; around POSITION, which ends before it.
+      (while (and (not bounds) (re-search-backward "{[{%]" (max (point-min) (- position limit)) t))
         (let ((start (point)))
-          (goto-char (+ start 2))
-          (cons start
-                (and (re-search-forward "[}%]}\\|{[{%]" (min (point-max) (+ position limit)) t)
-                     (eq (char-before) ?})
-                     (point))))))))
+          (unless (nth 4 (syntax-ppss))
+            (forward-char 2)
+            (let ((end (dbt-mode--tag-end (min (point-max) (+ position limit)))))
+              (when (if end (> end position) (>= (point) position))
+                (setq bounds (cons start end)))))
+          (goto-char start)))
+      bounds)))
 
 (defun dbt-mode-cte-regexp (&optional name)
   "Return the regexp of the start of a CTE, up to its parenthesis.
@@ -152,18 +175,20 @@ For `font-lock-extend-region-functions'."
 (defun dbt-mode--match-tag (limit)
   "Find the next Jinja tag before LIMIT, outside a comment, for font lock.
 Group 1 matches its contents, and groups 2 and 3 its delimiters.  An
-opener that meets another before any closer is still being typed: it
+opener that meets another before its closer is still being typed: it
 makes no tag, so that it does not swallow the next tag's closer."
-  (let (found)
-    (while (and (not found)
-                (re-search-forward "\\({[{%]-?\\)\\(\\(?:[^{]\\|{[^{%]\\)*?\\)\\(-?[}%]}\\)" limit t))
-      (setq found (not (nth 4 (save-excursion (syntax-ppss (match-beginning 0))))))
-      (unless found
-        (goto-char (1+ (match-beginning 0)))))
-    (when found
-      (set-match-data (list (match-beginning 0) (match-end 0) (match-beginning 2) (match-end 2)
-                            (match-beginning 1) (match-end 1) (match-beginning 3) (match-end 3))))
-    found))
+  (let (end)
+    (while (and (not end) (re-search-forward "{[{%]-?" limit t))
+      (let ((start (match-beginning 0))
+            (open (match-end 0)))
+        (setq end (and (not (nth 4 (save-excursion (syntax-ppss start))))
+                       (dbt-mode--tag-end limit)))
+        (if (not end)
+            (goto-char (1+ start))
+          (let ((close (- end (if (eq (char-before (- end 2)) ?-) 3 2))))
+            (goto-char end)
+            (set-match-data (list start end open (max open close) start open close end))))))
+    end))
 
 (defconst dbt-mode--font-lock-keywords
   (let ((within '(progn (goto-char (match-beginning 1)) (match-end 1)))

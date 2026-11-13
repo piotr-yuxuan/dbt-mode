@@ -169,6 +169,25 @@
     (goto-char (point-max))
     (should (equal (dbt-mode-jinja-bounds) (cons 30 nil)))))
 
+(ert-deftest dbt-mode-ends-a-tag-at-its-own-closer ()
+  "A closer that ends a nested dict, or in a string, does not end the tag."
+  (with-temp-buffer
+    (insert "{{ config(meta={'owner': {'team': 'x'}}, post_hook=audit_hook()) }}\n"
+            "{% set m = {'a': {'b': 1}} %}\n"
+            "{{ config(materialized='table', post_hook=\"grant select on {{ this }} to role r\") }}\n"
+            "{{ log('}}', info=true) }}\n")
+    (dbt-mode)
+    (font-lock-ensure)
+    (dolist (case '(("audit_hook" . "'x'}}") ("'b': 1" . "1}}") ("materialized" . "this }}") ("info" . "'}}")))
+      (dbt-test-goto (car case))
+      (should (equal (dbt-mode-jinja-bounds) (cons (line-beginning-position) (line-end-position))))
+      (should (eq (get-text-property (- (line-end-position) 2) 'face) 'dbt-jinja-delimiter-face))
+      (dbt-test-goto (cdr case) (1- (length (cdr case))))
+      (should-not (eq (get-text-property (point) 'face) 'dbt-jinja-delimiter-face)))
+    (dbt-test-goto "audit_hook")
+    (should (equal (dbt-mode-target-at-point) '(:kind macro :qualifier nil :name "audit_hook" :version nil)))
+    (should (eq (dbt-test-face "config(materialized") 'font-lock-builtin-face))))
+
 (ert-deftest dbt-mode-target-at-point-names-calls-and-entries ()
   "Calls of ref, source, doc and macros, and YAML entries, are targets."
   (with-temp-buffer
