@@ -151,21 +151,24 @@ Point goes to the first line of that node while the tree shows it."
 
 (defun dbt-lineage-export (file)
   "Write the graph of the lineage within the depth shown to FILE, as Graphviz dot.
-With the executable dot, render it to an SVG beside FILE too."
+Each node is named by its unique id and labelled by its name.  With the
+executable dot, render it to an SVG beside FILE too."
   (interactive (list (read-file-name "Graphviz file: " nil nil nil
                                      (format "%s.dot" (dbt-lineage-label dbt-lineage--focus)))))
-  (let* ((ids (cons dbt-lineage--focus (mapcar #'car (append (dbt-lineage--within 'upstream)
-                                                             (dbt-lineage--within 'downstream)))))
-         (name (lambda (id) (format "%S" (dbt-lineage-label id))))
-         (nodes dbt-lineage--nodes)
-         (svg (concat (file-name-sans-extension file) ".svg")))
+  (let ((ids (make-hash-table :test #'equal))
+        (nodes dbt-lineage--nodes)
+        (svg (concat (file-name-sans-extension file) ".svg")))
+    (dolist (id (cons dbt-lineage--focus (mapcar #'car (append (dbt-lineage--within 'upstream)
+                                                               (dbt-lineage--within 'downstream)))))
+      (puthash id t ids))
     (with-temp-file file
       (insert "digraph lineage {\n  rankdir=LR;\n")
+      (maphash (lambda (id _) (insert (format "  %S [label=%S];\n" id (dbt-lineage-label id)))) ids)
       (dolist (node nodes)
-        (when (member (plist-get node :id) ids)
+        (when (gethash (plist-get node :id) ids)
           (dolist (parent (plist-get node :parents))
-            (when (member parent ids)
-              (insert (format "  %s -> %s;\n" (funcall name parent) (funcall name (plist-get node :id))))))))
+            (when (gethash parent ids)
+              (insert (format "  %S -> %S;\n" parent (plist-get node :id)))))))
       (insert "}\n"))
     (if (and (executable-find "dot") (eql 0 (call-process "dot" nil nil nil "-Tsvg" file "-o" svg)))
         (message "Wrote %s and %s" file svg)

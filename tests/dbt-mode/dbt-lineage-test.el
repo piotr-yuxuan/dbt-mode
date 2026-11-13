@@ -79,7 +79,9 @@ A node is under the node through which it is nearest."
       (kill-buffer "*dbt lineage: stg_orders*"))))
 
 (ert-deftest dbt-lineage-folds-limits-and-exports-the-tree ()
-  "TAB folds a node; - and + show one level less and more, point on its node; e writes the graph as dot."
+  "TAB folds a node; - and + show one level less and more, point on its node; e writes the graph as dot.
+Each node of the graph is named by its unique id and labelled by its
+name, so two nodes of one name stay apart."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (dbt-lineage "stg_orders")
@@ -98,9 +100,11 @@ A node is under the node through which it is nearest."
       (let ((file (expand-file-name "lineage.dot" root)))
         (dbt-lineage-export file)
         (let ((dot (with-temp-buffer (insert-file-contents file) (buffer-string))))
-          (dolist (edge '("\"raw_orders\" -> \"stg_orders\";" "\"stg_orders\" -> \"orders\";"
-                          "\"orders\" -> \"customers\";"))
-            (should (string-search edge dot)))))
+          (dolist (line '("\"seed.shop.raw_orders\" -> \"model.shop.stg_orders\";"
+                          "\"model.shop.stg_orders\" -> \"model.shop.orders\";"
+                          "\"model.shop.orders\" -> \"model.shop.customers\";"
+                          "\"model.shop.orders\" [label=\"orders\"];"))
+            (should (string-search line dot)))))
       (kill-buffer))))
 
 (provide 'dbt-lineage-test)
