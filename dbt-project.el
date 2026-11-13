@@ -393,10 +393,12 @@ entities without :package and :file: an entry defines a source, a table,
 an exposure or a snapshot that has a relation, and gives the properties
 of any other resource; CALLS are as `dbt-project-calls'
 returns them.  What a Jinja comment holds is left out.  FILE is read
-again only when its modification time or its size changed.  A file that
+again only when its modification time, its size or its mode changed,
+the mode telling when an unreadable file becomes readable.  A file that
 cannot be read holds nothing."
   (let* ((attributes (file-attributes (file-chase-links file)))
-         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)))
+         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)
+                      (file-attribute-modes attributes)))
          (cached (gethash file dbt-project--files)))
     (if (equal (car cached) stamp)
         (cdr cached)

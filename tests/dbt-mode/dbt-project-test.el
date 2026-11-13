@@ -288,14 +288,19 @@ A package whose dbt_project.yml cannot be read is named after its directory."
 
 (ert-deftest dbt-project-index-reads-again-only-the-files-that-changed ()
   "Once forgotten, the index reads the files that changed, and those alone.
-A file made unreadable without changing still gives what it held."
+A file rewritten with its size, time and mode kept still gives what it held."
   (dbt-test-with-project root
     (should (dbt-project-entities root '(macro) "cents_to_dollars"))
-    (set-file-modes (expand-file-name "macros/cents_to_dollars.sql" root) 0)
+    (let* ((file (expand-file-name "macros/cents_to_dollars.sql" root))
+           (time (file-attribute-modification-time (file-attributes file)))
+           (text (with-temp-buffer (insert-file-contents file) (buffer-string))))
+      (write-region (string-replace "cents_to_dollars" "cents_to_dollarz" text) nil file)
+      (set-file-times file time))
     (write-region "{% macro renamed(x) %}{{ x }}{% endmacro %}" nil
                   (expand-file-name "dbt_packages/shop_utils/macros/is_positive.sql" root))
     (dbt-project-forget root)
     (should (dbt-project-entities root '(macro) "cents_to_dollars"))
+    (should-not (dbt-project-entities root '(macro) "cents_to_dollarz"))
     (should (dbt-project-entities root '(macro) "renamed"))
     (should-not (dbt-project-entities root '(macro) "is_positive"))))
 
@@ -317,6 +322,20 @@ A file made unreadable without changing still gives what it held."
       (should (equal (funcall parents "model.shop.from_snap") '("snapshot.shop.customers_snapshot")))
       (should (equal (funcall parents "snapshot.shop.customers_snapshot") '("model.shop.stg_customers"))))
     (should-not (dbt-project-file-entity root (expand-file-name "snapshots/_snapshots.yml" root)))))
+
+(ert-deftest dbt-project-index-reads-a-file-that-becomes-readable ()
+  "A file unreadable when indexed is read once its mode lets it be."
+  (dbt-test-with-project root
+    (let ((file (expand-file-name "macros/secret.sql" root)))
+      (write-region "{% macro secret_macro() %}1{% endmacro %}\n" nil file)
+      (set-file-modes file #o000)
+      (unwind-protect
+          (progn
+            (should-not (dbt-project-entities root '(macro) "secret_macro"))
+            (set-file-modes file #o644)
+            (dbt-project-forget root)
+            (should (dbt-project-entities root '(macro) "secret_macro")))
+        (set-file-modes file #o644)))))
 
 (ert-deftest dbt-project-index-skips-python-environments ()
   "A virtual environment or a conda environment in the project is not read."
