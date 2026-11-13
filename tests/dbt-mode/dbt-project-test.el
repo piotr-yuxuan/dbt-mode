@@ -28,7 +28,9 @@
                  '(:column 4 :key "name" :item t :value "events")))
   (should (equal (dbt-project-yaml-line "version: 2") '(:column 0 :key "version" :item nil :value "2")))
   (should (equal (dbt-project-yaml-line "    tables:") '(:column 4 :key "tables" :item nil :value nil)))
-  (should-not (dbt-project-yaml-line "# models:")))
+  (should (equal (dbt-project-yaml-line "- models  # sql models") '(:column 2 :key nil :item t :value "models")))
+  (should-not (dbt-project-yaml-line "# models:"))
+  (should-not (dbt-project-yaml-line "   ")))
 
 (ert-deftest dbt-project-yaml-line-reads-the-name-of-a-flow-mapping ()
   "An item written as a flow mapping gives its name, wherever it stands."
@@ -90,6 +92,22 @@
       (should (equal (plist-get config :seed-paths) '("data" "seeds")))
       (should (equal (plist-get config :analysis-paths) '("analyses")))
       (should (equal (plist-get config :target-path) "build")))))
+
+(ert-deftest dbt-project-config-reads-block-lists-as-yaml-does ()
+  "Items of a path list may carry comments, sit at column 0 or among blank lines.
+An empty list is empty, as dbt keeps its default for a missing key only."
+  (dbt-test-with-project root
+    (with-temp-file (expand-file-name "dbt_project.yml" root)
+      (insert "name: shop\nmodel-paths:\n  - models  # sql models\n\n  # more below\n  - \"more\"\n"
+              "seed-paths:\n- data\n- seeds\nanalysis-paths: []\nvars:\n  model-paths: not_a_key\n"))
+    (let ((config (dbt-project-config root)))
+      (should (equal (plist-get config :model-paths) '("models" "more")))
+      (should (equal (plist-get config :seed-paths) '("data" "seeds")))
+      (should (equal (plist-get config :analysis-paths) nil)))
+    (with-temp-file (expand-file-name "dbt_project.yml" root)
+      (insert "name: shop\nmodel-paths:\n  - models  # sql models\n"))
+    (dbt-project-forget root)
+    (should (dbt-project-entities root '(model) "orders"))))
 
 (ert-deftest dbt-project-root-is-the-outermost-project ()
   "A package's file belongs to the project that installed it."

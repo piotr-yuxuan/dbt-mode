@@ -86,19 +86,39 @@ installed under dbt_packages has one of its own."
         (t value)))
 
 (defun dbt-project-yaml-line (line)
-  "Return the key of the YAML LINE as a plist, or nil when it holds none.
-The plist has :column, the column of the key, which follows the \"- \"
-of a list item, :key, :item, non-nil when the line starts a list item,
-and :value, unquoted and nil when empty.  A comment after the value is
-dropped.  Of an item written as a flow mapping, such as \"- {name: x}\",
-the key is its `name'."
+  "Return the key or the list item of the YAML LINE as a plist, or nil.
+The plist has :column, the column of the key or the value, which follows
+the \"- \" of a list item, :key, nil for an item that is a scalar,
+:item, non-nil when the line starts a list item, and :value, unquoted
+and nil when empty.  A comment after the value is dropped.  Of an item
+written as a flow mapping, such as \"- {name: x}\", the key is its `name'.
+A blank line or a comment gives nil."
   (when (seq-find (lambda (regexp) (string-match regexp line))
                   '("\\`\\(?1: *\\(?4:- +\\)\\){\\(?:[^}]*,\\)? *\\(?2:name\\): *\\(?3:[^,}]*?\\) *[,}]"
-                    "\\`\\(?1: *\\(?4:- +\\)?\\)\\(?2:[A-Za-z_][A-Za-z0-9_-]*\\): *\\(?3:.*?\\) *\\(?:#.*\\)?\\'"))
+                    "\\`\\(?1: *\\(?4:- +\\)?\\)\\(?2:[A-Za-z_][A-Za-z0-9_-]*\\): *\\(?3:.*?\\) *\\(?:#.*\\)?\\'"
+                    "\\`\\(?1: *\\(?4:- +\\)\\)\\(?3:.*?\\) *\\(?:#.*\\)?\\'"))
     (list :column (match-end 1)
           :key (match-string 2 line)
           :item (and (match-beginning 4) t)
           :value (dbt-project-yaml-unquote (match-string 3 line)))))
+
+(defun dbt-project-yaml-scan (text)
+  "Return the keys and list items of TEXT, a YAML document, in order.
+Each is the plist of `dbt-project-yaml-line' with :line, its number from
+1, and :path, the keys that hold it, innermost first: those of the lines
+above whose column is lower, up to the last line at column 0."
+  (let ((number 0) keys lines)
+    ;; KEYS holds the open keys, innermost first, as (COLUMN . KEY); a
+    ;; line closes those at its column or deeper.
+    (dolist (line (split-string text "\n"))
+      (setq number (1+ number))
+      (when-let* ((parsed (dbt-project-yaml-line line)))
+        (while (and keys (>= (car (car keys)) (plist-get parsed :column)))
+          (pop keys))
+        (push (append (list :line number :path (mapcar #'cdr keys)) parsed) lines)
+        (when (plist-get parsed :key)
+          (push (cons (plist-get parsed :column) (plist-get parsed :key)) keys))))
+    (nreverse lines)))
 
 (defconst dbt-project-yaml-sections
   '("models" "seeds" "snapshots" "analyses" "macros" "sources" "exposures"
@@ -137,32 +157,38 @@ of its section, or right under the `tables' of a source."
     (seq-filter (lambda (entry) (and (plist-get entry :section) (plist-get entry :name)))
                 (nreverse entries))))
 
+(defconst dbt-project-config-keys
+  '(("name" :name nil) ("target-path" :target-path "target")
+    ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
+    ("analysis-paths" :analysis-paths ("analyses")))
+  "The keys of dbt_project.yml that the configuration keeps.
+Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
+list of paths.")
+
 (defun dbt-project-config (root)
   "Return the configuration of the project at ROOT as a plist.
-The plist has :name, nil when dbt_project.yml sets none, and :model-paths,
-:seed-paths, :analysis-paths and :target-path, with dbt's defaults when
-it does not set them."
-  (let ((text (with-temp-buffer
-                (insert-file-contents (expand-file-name dbt-project-file root))
-                (buffer-string)))
-        (config (list :name nil :target-path "target" :model-paths '("models")
-                      :seed-paths '("seeds") :analysis-paths '("analyses"))))
-    (dolist (key '(:name :target-path))
-      (when (string-match (format "^%s: *\\([^#\n]*?\\) *\\(?:#.*\\)?$" (substring (symbol-name key) 1))
-                          text)
-        (setq config (plist-put config key (dbt-project-yaml-unquote (match-string 1 text))))))
-    ;; A list of paths is either [a, b] on the key's line, or items below it.
-    (dolist (key '(:model-paths :seed-paths :analysis-paths))
-      (when (string-match (format "^%s:\\(?: *\\[\\([^]\n]*\\)\\]\\| *\\(?:#.*\\)?\\(\\(?:\n +- +.*\\)+\\)\\)"
-                                  (substring (symbol-name key) 1))
-                          text)
-        (let ((flow (match-string 1 text)))
-          (setq config
-                (plist-put config key
-                           (mapcar (lambda (path) (dbt-project-yaml-unquote (string-trim path "[ \t-]+")))
-                                   (split-string (or flow (match-string 2 text)) (if flow "," "\n") t
-                                                 "[ \t]+")))))))
-    config))
+The plist has a property for each key of `dbt-project-config-keys', with
+dbt's default when dbt_project.yml does not set it.  A list of paths is
+either [a, b] on the line of its key, or the items below it."
+  (let ((lines (dbt-project-yaml-scan (with-temp-buffer
+                                        (insert-file-contents (expand-file-name dbt-project-file root))
+                                        (buffer-string)))))
+    (mapcan
+     (pcase-lambda (`(,key ,property ,default))
+       (let ((value (plist-get (seq-find (lambda (line)
+                                           (and (null (plist-get line :path)) (equal (plist-get line :key) key)))
+                                         lines)
+                               :value))
+             (items (delq nil (mapcar (lambda (line)
+                                        (and (plist-get line :item) (equal (plist-get line :path) (list key))
+                                             (plist-get line :value)))
+                                      lines))))
+         (list property
+               (cond ((not (consp default)) (or value default))
+                     ((and value (string-match "\\`\\[\\(.*\\)\\]\\'" value))
+                      (mapcar #'dbt-project-yaml-unquote (split-string (match-string 1 value) "," t "[ \t]+")))
+                     (t (or items default))))))
+     dbt-project-config-keys)))
 
 ;;;; Reading Jinja
 
