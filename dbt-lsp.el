@@ -118,7 +118,8 @@ and formats, also from the file on disk; `dbt-lsp-fix-all' saves first."
   "Return the folders whose files belong to the workspace of their project.
 They are the packages that dbt installs, opened read-only."
   (when-let* ((root (dbt-project-root)))
-    (list (expand-file-name "dbt_packages" root) (expand-file-name "dbt_internal_packages" root))))
+    (list (expand-file-name (plist-get (dbt-project-config root) :packages-install-path) root)
+          (expand-file-name "dbt_internal_packages" root))))
 
 ;;;###autoload
 (defun dbt-lsp-add-project-folder ()
