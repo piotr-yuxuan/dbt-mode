@@ -339,6 +339,8 @@ another model, seed or snapshot of the package."
       (user-error "A model, seed or snapshot named %s exists already" name))
     (save-buffer)
     (rename-visited-file new)
+    ;; The next rename's check must know the new name.
+    (dbt-project-forget root)
     (message "Renamed to %s; save the buffers it edited with C-x s" name)))
 
 (defun dbt-lsp-format-buffer ()

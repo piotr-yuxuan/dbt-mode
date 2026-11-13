@@ -399,14 +399,17 @@ their files are."
     (should-not (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))))
 
 (ert-deftest dbt-lsp-rename-model-renames-the-file ()
-  "Renaming a model renames its file, which lsp-mode tells the server first."
+  "Renaming a model renames its file, which lsp-mode tells the server first.
+The new name is then taken, before any buffer is saved."
   (dbt-lsp-test-with-server root nil
     (with-current-buffer (dbt-test-visit root "models/staging/stg_customers.sql")
       (dbt-lsp)
       (dbt-lsp-rename-model "stg_clients")
       (should (equal buffer-file-name (expand-file-name "models/staging/stg_clients.sql" root)))
       (should-not (file-exists-p (expand-file-name "models/staging/stg_customers.sql" root))))
-    (should (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))))
+    (should (member "workspace/willRenameFiles" (dbt-lsp-test-methods)))
+    (should-error (dbt-lsp-rename-model "stg_clients") :type 'user-error)
+    (should (equal buffer-file-name (expand-file-name "models/marts/orders.sql" root)))))
 
 (ert-deftest dbt-lsp-format-buffer-saves-then-formats ()
   "Formatting saves the buffer, then applies the edits of the server."
