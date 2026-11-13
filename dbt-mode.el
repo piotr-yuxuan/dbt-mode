@@ -314,35 +314,40 @@ a snapshot."
 Group 1 matches the name of the macro, and group 2 its package, when the
 call gives one.")
 
-(defun dbt-mode-target-at-point ()
-  "Return what point is on, as a target plist, or nil.
+(defun dbt-mode-call-at-point ()
+  "Return the call that point is on, as a target plist, or nil.
 The plist is (:kind KIND :qualifier QUALIFIER :name NAME :version
 VERSION), as `dbt-project-resolve' reads it: a call of `ref', `source'
-or `doc', or, within a Jinja tag, of a macro.  In a YAML file, the
-`name' of an entry stands for what it describes, as
-`dbt-mode-entity-target' tells: the index of the project gives the entry
-of the line, as last saved."
+or `doc', or, within a Jinja tag, of a macro."
   (let ((position (point))
-        (line (line-number-at-pos))
         (limit dbt-mode-jinja-max-tag-length))
     (save-excursion
-      (or (seq-some
-           (pcase-lambda (`(,kind . ,regexp))
-             (let ((bound (min (point-max) (+ position limit)))
-                   matched)
-               (goto-char (max (point-min) (- position limit)))
-               (while (and (setq matched (re-search-forward regexp bound t)) (< (match-end 0) position)))
-               (and matched (<= (match-beginning 0) position)
-                    (list :kind kind :qualifier (match-string-no-properties 2)
-                          :name (match-string-no-properties 1) :version (match-string-no-properties 3)))))
-           (append dbt-project-call-regexps
-                   (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp)))))
-          (when-let* ((root (dbt-project-root))
-                      (entity (seq-find (lambda (entity)
-                                          (and (equal (plist-get entity :file) buffer-file-name)
-                                               (eql (plist-get entity :line) line)))
-                                        (dbt-project-entities root '(properties source table exposure snapshot)))))
-            (dbt-mode-entity-target entity (dbt-project-name root)))))))
+      (seq-some
+       (pcase-lambda (`(,kind . ,regexp))
+         (let ((bound (min (point-max) (+ position limit)))
+               matched)
+           (goto-char (max (point-min) (- position limit)))
+           (while (and (setq matched (re-search-forward regexp bound t)) (< (match-end 0) position)))
+           (and matched (<= (match-beginning 0) position)
+                (list :kind kind :qualifier (match-string-no-properties 2)
+                      :name (match-string-no-properties 1) :version (match-string-no-properties 3)))))
+       (append dbt-project-call-regexps
+               (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp))))))))
+
+(defun dbt-mode-target-at-point ()
+  "Return what point is on, as a target plist, or nil.
+It is the call of `dbt-mode-call-at-point', or else, in a YAML file, the
+`name' of an entry, which stands for what it describes, as
+`dbt-mode-entity-target' tells: the index of the project gives the entry
+of the line, as last saved."
+  (or (dbt-mode-call-at-point)
+      (let ((line (line-number-at-pos)))
+        (when-let* ((root (dbt-project-root))
+                    (entity (seq-find (lambda (entity)
+                                        (and (equal (plist-get entity :file) buffer-file-name)
+                                             (eql (plist-get entity :line) line)))
+                                      (dbt-project-entities root '(properties source table exposure snapshot)))))
+          (dbt-mode-entity-target entity (dbt-project-name root))))))
 
 ;;;; Cross-references
 
@@ -393,7 +398,14 @@ macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
 the version of a `ref' and resolves no `doc'."
   (and (dbt-project-root)
        (or (not (dbt-mode-server-p))
-           (let ((target (dbt-mode-target-at-point)))
+           ;; dbt lsp serves SQL buffers alone, where a target that no
+           ;; call names is on the line of a snapshot block only: the
+           ;; index is not read for the rest, which the server answers.
+           (let ((target (if (save-excursion
+                               (forward-line 0)
+                               (looking-at-p (concat "[^\n]*" (alist-get 'snapshot dbt-project-block-regexps))))
+                             (dbt-mode-target-at-point)
+                           (dbt-mode-call-at-point))))
              (and target (dbt-mode-definitions target))))
        'dbt))
 
