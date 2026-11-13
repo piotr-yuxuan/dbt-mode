@@ -88,13 +88,16 @@ installed under dbt_packages has one of its own."
 (defun dbt-project-yaml-line (line)
   "Return the key of the YAML LINE as a plist, or nil when it holds none.
 The plist has :column, the column of the key, which follows the \"- \"
-of a list item, :key and :value, unquoted and nil when empty.  A comment
-after the value is dropped."
-  (when (string-match
-         "\\`\\( *\\(?:- +\\)?\\)\\([A-Za-z_][A-Za-z0-9_-]*\\): *\\(.*?\\) *\\(?:#.*\\)?\\'"
-         line)
+of a list item, :key, :item, non-nil when the line starts a list item,
+and :value, unquoted and nil when empty.  A comment after the value is
+dropped.  Of an item written as a flow mapping, such as \"- {name: x}\",
+the key is its `name'."
+  (when (seq-find (lambda (regexp) (string-match regexp line))
+                  '("\\`\\(?1: *\\(?4:- +\\)\\){\\(?:[^}]*,\\)? *\\(?2:name\\): *\\(?3:[^,}]*?\\) *[,}]"
+                    "\\`\\(?1: *\\(?4:- +\\)?\\)\\(?2:[A-Za-z_][A-Za-z0-9_-]*\\): *\\(?3:.*?\\) *\\(?:#.*\\)?\\'"))
     (list :column (match-end 1)
           :key (match-string 2 line)
+          :item (and (match-beginning 4) t)
           :value (dbt-project-yaml-unquote (match-string 3 line)))))
 
 (defconst dbt-project-yaml-sections

@@ -25,11 +25,17 @@
 (ert-deftest dbt-project-yaml-line-reads-keys ()
   "A key's column follows the dash of a list item; quotes and comments go."
   (should (equal (dbt-project-yaml-line "  - name: \"events\"  # a comment")
-                 '(:column 4 :key "name" :value "events")))
-  (should (equal (dbt-project-yaml-line "version: 2") '(:column 0 :key "version" :value "2")))
-  (should (equal (dbt-project-yaml-line "    tables:") '(:column 4 :key "tables" :value nil)))
-  (should-not (dbt-project-yaml-line "      - unique"))
+                 '(:column 4 :key "name" :item t :value "events")))
+  (should (equal (dbt-project-yaml-line "version: 2") '(:column 0 :key "version" :item nil :value "2")))
+  (should (equal (dbt-project-yaml-line "    tables:") '(:column 4 :key "tables" :item nil :value nil)))
   (should-not (dbt-project-yaml-line "# models:")))
+
+(ert-deftest dbt-project-yaml-line-reads-the-name-of-a-flow-mapping ()
+  "An item written as a flow mapping gives its name, wherever it stands."
+  (should (equal (dbt-project-yaml-line "      - {name: accounts}")
+                 '(:column 8 :key "name" :item t :value "accounts")))
+  (should (equal (dbt-project-yaml-line "      - {identifier: tbl_contacts, name: 'contacts'}")
+                 '(:column 8 :key "name" :item t :value "contacts"))))
 
 (ert-deftest dbt-project-yaml-entries-keep-sections-and-tables ()
   "Entries are the items of a section and the tables of a source, with lines."
@@ -61,7 +67,12 @@
                    (:section "tables" :name "orders" :line 13 :source "raw")
                    (:section "tables" :name "customers" :line 16 :source "raw")
                    (:section "sources" :name "events" :line 17))))
-  (should-not (dbt-project-yaml-entries "models:\n  shop:\n    +materialized: view\n")))
+  (should-not (dbt-project-yaml-entries "models:\n  shop:\n    +materialized: view\n"))
+  (should (equal (dbt-project-yaml-entries
+                  "sources:\n  - name: crm\n    tables:\n      - {name: accounts}\n      - {name: contacts, identifier: c}\n")
+                 '((:section "sources" :name "crm" :line 2)
+                   (:section "tables" :name "accounts" :line 4 :source "crm")
+                   (:section "tables" :name "contacts" :line 5 :source "crm")))))
 
 (ert-deftest dbt-project-config-reads-paths ()
   "dbt_project.yml gives the name and paths, in either list form; dbt's defaults otherwise."
