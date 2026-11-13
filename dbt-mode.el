@@ -64,6 +64,14 @@
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
+(autoload 'dbt-new "dbt-new" nil t)
+(autoload 'dbt-new-staging-model "dbt-new" nil t)
+(autoload 'dbt-new-model "dbt-new" nil t)
+(autoload 'dbt-new-incremental-model "dbt-new" nil t)
+(autoload 'dbt-new-macro "dbt-new" nil t)
+(autoload 'dbt-new-snapshot "dbt-new" nil t)
+(autoload 'dbt-add-properties "dbt-new" nil t)
+(autoload 'dbt-add-unit-test "dbt-new" nil t)
 (defvar expreg-functions)
 (declare-function dbt-cli-show "dbt-cli")
 (declare-function dbt-lineage-show "dbt-lineage")
@@ -622,6 +630,7 @@ For `after-save-hook', so that the index sees what was just saved."
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
   "C-c C-e" #'dbt-insert-ref
+  "C-c C-n" #'dbt-new
   "C-c /" #'dbt-close-block
   "C-c %" #'dbt-jump-to-matching-tag)
 
@@ -636,6 +645,7 @@ For `after-save-hook', so that the index sees what was just saved."
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
     "---"
+    ["New..." dbt-new]
     ["Close the Jinja block" dbt-close-block]
     ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
