@@ -43,6 +43,16 @@
     (dbt-test-goto " t\n")
     (should-not (nth 8 (syntax-ppss)))))
 
+(ert-deftest dbt-mode-keeps-the-comments-of-sql-mode ()
+  "As in sql-mode, neither /- nor -* starts a comment."
+  (with-temp-buffer
+    (insert "select revenue/-1 as neg, b from t\nselect 1 as a -*\nfrom x */ select 2 as two\n")
+    (dbt-mode)
+    (dbt-test-goto "b from")
+    (should-not (nth 4 (syntax-ppss)))
+    (dbt-test-goto "from x")
+    (should-not (nth 4 (syntax-ppss)))))
+
 (ert-deftest dbt-mode-reads-a-long-jinja-comment-in-pieces ()
   "A comment that the chunks of syntax and font lock cut is still a comment."
   (with-temp-buffer

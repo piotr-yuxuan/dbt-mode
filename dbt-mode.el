@@ -587,7 +587,15 @@ the project defines for `xref', completion and `imenu'.  See the
 commentary of dbt-mode.el for the rest.
 
 \\{dbt-mode-map}"
-  (setq-local syntax-propertize-function dbt-mode--syntax-propertize)
+  (let ((sql-propertize syntax-propertize-function))
+    ;; Jinja first, as dbt renders it before SQL is read; then the rules
+    ;; of `sql-mode', which must not meet the states that `syntax-ppss'
+    ;; cached without their own properties.
+    (setq-local syntax-propertize-function
+                (lambda (start end)
+                  (funcall dbt-mode--syntax-propertize start end)
+                  (syntax-ppss-flush-cache start)
+                  (funcall sql-propertize start end))))
   (add-hook 'font-lock-extend-region-functions #'dbt-mode--extend-region 'append 'local)
   (setq-local imenu-generic-expression dbt-mode-imenu-generic-expression
               imenu-case-fold-search t)
