@@ -245,6 +245,19 @@ A package whose dbt_project.yml cannot be read is named after its directory."
           (should (= (dbt-project-cached "/slow/" 'value slow) 1)))
       (dbt-project-forget "/slow/"))))
 
+(ert-deftest dbt-project-index-reads-again-only-the-files-that-changed ()
+  "Once forgotten, the index reads the files that changed, and those alone.
+A file made unreadable without changing still gives what it held."
+  (dbt-test-with-project root
+    (should (dbt-project-entities root '(macro) "cents_to_dollars"))
+    (set-file-modes (expand-file-name "macros/cents_to_dollars.sql" root) 0)
+    (write-region "{% macro renamed(x) %}{{ x }}{% endmacro %}" nil
+                  (expand-file-name "dbt_packages/shop_utils/macros/is_positive.sql" root))
+    (dbt-project-forget root)
+    (should (dbt-project-entities root '(macro) "cents_to_dollars"))
+    (should (dbt-project-entities root '(macro) "renamed"))
+    (should-not (dbt-project-entities root '(macro) "is_positive"))))
+
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
   (dbt-test-with-project root

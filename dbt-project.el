@@ -271,14 +271,21 @@ which."
 (defvar dbt-project--cache (make-hash-table :test #'equal)
   "What was read of projects, from (ROOT . WHAT) to (TIME . VALUE).")
 
+(defvar dbt-project--files (make-hash-table :test #'equal)
+  "What was read of each file, from its name to (STAMP . CONTENTS).
+STAMP is the modification time and size of the file when it was read.")
+
 (defun dbt-project-forget (&optional root)
   "Forget what was read of the project at ROOT, or of every project.
-Interactively, ROOT is the project of the current buffer."
+Interactively, ROOT is the project of the current buffer.  What a file
+holds is kept until the file changes, unless every project is forgotten,
+so that reading a project again reads only the files that changed."
   (interactive (list (dbt-project-root)))
   (if root
       (dolist (key (hash-table-keys dbt-project--cache))
         (when (equal (car key) root) (remhash key dbt-project--cache)))
-    (clrhash dbt-project--cache)))
+    (clrhash dbt-project--cache)
+    (clrhash dbt-project--files)))
 
 (defun dbt-project-cached (root what compute)
   "Return the value of WHAT for the project at ROOT, from the cache if fresh.
@@ -341,6 +348,47 @@ the lock files .#NAME of the buffers being edited."
                       dbt-project-skipped-directories)
               (file-exists-p (expand-file-name dbt-project-file subdirectory)))))))
 
+(defun dbt-project-calls ()
+  "Return the calls of `ref' and `source' in the current buffer, in order.
+Each is a target plist (:kind KIND :qualifier QUALIFIER :name NAME), as
+`dbt-project-resolve' reads it; the calls of `ref' come first."
+  (let (calls)
+    (dolist (kind '(ref source))
+      (goto-char (point-min))
+      (while (re-search-forward (alist-get kind dbt-project-call-regexps) nil t)
+        (push (list :kind kind :qualifier (match-string-no-properties 2) :name (match-string-no-properties 1))
+              calls)))
+    (nreverse calls)))
+
+(defun dbt-project-file-contents (file)
+  "Return what FILE defines and calls, as (:entities ENTITIES :calls CALLS).
+ENTITIES are its Jinja blocks and, in a YAML file, its entries, as
+entities without :package and :file; CALLS are as `dbt-project-calls'
+returns them.  FILE is read again only when its modification time or
+its size changed.  A file that cannot be read holds nothing."
+  (let* ((attributes (file-attributes (file-chase-links file)))
+         (stamp (list (file-attribute-modification-time attributes) (file-attribute-size attributes)))
+         (cached (gethash file dbt-project--files)))
+    (if (equal (car cached) stamp)
+        (cdr cached)
+      (with-temp-buffer
+        (ignore-error file-error (insert-file-contents file))
+        (let (entities)
+          (pcase-dolist (`(,kind . ,regexp) dbt-project-block-regexps)
+            (goto-char (point-min))
+            (while (re-search-forward regexp nil t)
+              (push (list :kind kind :name (match-string-no-properties 1)
+                          :line (line-number-at-pos (match-beginning 0)))
+                    entities)))
+          (when (string-match-p "\\.ya?ml\\'" file)
+            (dolist (entry (dbt-project-yaml-entries (buffer-string)))
+              (let ((kind (alist-get (plist-get entry :section) dbt-project-section-kinds nil nil #'equal)))
+                (push (append (list :kind (if (memq kind '(source table exposure)) kind 'properties)) entry)
+                      entities))))
+          (let ((contents (list :entities (nreverse entities) :calls (dbt-project-calls))))
+            (puthash file (cons stamp contents) dbt-project--files)
+            contents))))))
+
 (defun dbt-project-index (root)
   "Return the entities that the project at ROOT and its packages define.
 A file that cannot be read defines what its place tells only."
@@ -350,26 +398,11 @@ A file that cannot be read defines what its place tells only."
      (let (entities)
        (pcase-dolist (`(,package ,directory ,config) (dbt-project-packages root))
          (dolist (file (dbt-project-source-files directory))
-           (let ((extension (file-name-extension file))
-                 (head (list :package package :file file)))
-             (when-let* ((kind (dbt-project-file-kind file directory config)))
-               (push (append (list :kind kind :name (file-name-base file) :line 1) head) entities))
-             (unless (equal extension "csv")
-               (with-temp-buffer
-                 (ignore-error file-error (insert-file-contents file))
-                 (pcase-dolist (`(,kind . ,regexp) dbt-project-block-regexps)
-                   (goto-char (point-min))
-                   (while (re-search-forward regexp nil t)
-                     (push (append (list :kind kind :name (match-string-no-properties 1)
-                                         :line (line-number-at-pos (match-beginning 0)))
-                                   head)
-                           entities)))
-                 (when (string-prefix-p "y" extension)
-                   (dolist (entry (dbt-project-yaml-entries (buffer-string)))
-                     (let ((kind (alist-get (plist-get entry :section) dbt-project-section-kinds nil nil #'equal)))
-                       (push (append (list :kind (if (memq kind '(source table exposure)) kind 'properties))
-                                     entry head)
-                             entities)))))))))
+           (let ((kind (dbt-project-file-kind file directory config)))
+             (dolist (entity (append (and kind (list (list :kind kind :name (file-name-base file) :line 1)))
+                                     (unless (string-suffix-p ".csv" file)
+                                       (plist-get (dbt-project-file-contents file) :entities))))
+               (push (append entity (list :package package :file file)) entities)))))
        (nreverse entities)))))
 
 (defvar dbt-project--names (make-hash-table :test #'eq :weakness 'key)
@@ -456,18 +489,8 @@ itself.  CALLER is the package of the calling file, for a `ref'."
      (mapcar
       (lambda (entity)
         (let ((table (eq (plist-get entity :kind) 'table))
-              parents)
-          (unless (memq (plist-get entity :kind) '(seed table))
-            (with-temp-buffer
-              (ignore-error file-error (insert-file-contents (plist-get entity :file)))
-              (pcase-dolist (`(,kind . ,regexp) dbt-project-call-regexps)
-                (goto-char (point-min))
-                (while (re-search-forward regexp nil t)
-                  (when-let* ((target (car (dbt-project-resolve
-                                            root (list :kind kind :qualifier (match-string 2) :name (match-string 1))
-                                            (plist-get entity :package))))
-                              ((not (eq kind 'doc))))
-                    (push (dbt-project-node-id target) parents))))))
+              (calls (unless (memq (plist-get entity :kind) '(seed table))
+                       (plist-get (dbt-project-file-contents (plist-get entity :file)) :calls))))
           (list :id (dbt-project-node-id entity)
                 :name (if table
                           (format "%s.%s" (plist-get entity :source) (plist-get entity :name))
@@ -476,7 +499,12 @@ itself.  CALLER is the package of the calling file, for a `ref'."
                 :package (plist-get entity :package)
                 :file (plist-get entity :file)
                 :line (plist-get entity :line)
-                :parents (seq-uniq (nreverse parents)))))
+                :parents (seq-uniq
+                          (delq nil (mapcar (lambda (call)
+                                              (when-let* ((target (car (dbt-project-resolve
+                                                                        root call (plist-get entity :package)))))
+                                                (dbt-project-node-id target)))
+                                            calls))))))
       (dbt-project-entities root '(model seed snapshot analysis table))))))
 
 (provide 'dbt-project)
