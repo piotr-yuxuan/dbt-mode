@@ -266,7 +266,7 @@ It reads KIND:NAME, or KIND:QUALIFIER/NAME."
 (defun dbt-mode-parse-identifier (identifier)
   "Return the target plist of IDENTIFIER, as `dbt-mode-identifier' writes it.
 Return nil when IDENTIFIER is not one."
-  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\):\\(?:\\([^/]+\\)/\\)?\\(.+\\)\\'" identifier)
+  (when (string-match "\\`\\(ref\\|source\\|doc\\|macro\\|analysis\\):\\(?:\\([^/]+\\)/\\)?\\(.+\\)\\'" identifier)
     (list :kind (intern (match-string 1 identifier))
           :qualifier (match-string 2 identifier)
           :name (match-string 3 identifier))))
@@ -280,11 +280,9 @@ than PROJECT is qualified by its package."
                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
                 (plist-get entity :kind)))
         (package (and (not (equal (plist-get entity :package) project)) (plist-get entity :package))))
-    (list :kind (pcase kind
-                  ((or 'table 'source) 'source)
-                  ((or 'macro 'test) 'macro)
-                  ('doc 'doc)
-                  (_ 'ref))
+    (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
+                                  (doc . doc) (analysis . analysis))
+                           'ref)
           :qualifier (pcase kind
                        ('table (plist-get entity :source))
                        ('source nil)
@@ -410,7 +408,7 @@ In a YAML file, it is the resource whose entry holds point."
   (let ((root (dbt-mode--root)))
     (or (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
         (when-let* ((target (dbt-mode-target-at-point))
-                    ((eq (plist-get target :kind) 'ref)))
+                    ((memq (plist-get target :kind) '(ref analysis))))
           (car (dbt-mode-definitions target))))))
 
 (defun dbt-mode-read-resource (prompt)

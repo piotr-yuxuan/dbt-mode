@@ -175,6 +175,20 @@
     (should (member "ref:stg_orders" (xref-backend-identifier-completion-table 'dbt)))
     (should (member "macro:shop_utils/is_positive" (xref-backend-identifier-completion-table 'dbt)))))
 
+(ert-deftest dbt-mode-finds-analyses ()
+  "C-c C-f visits an analysis, and so does M-. on its YAML entry."
+  (dbt-test-with-project root
+    (write-region "analyses:\n  - name: order_counts\n" nil (expand-file-name "analyses/_analyses.yml" root))
+    (dbt-test-visit root "models/marts/orders.sql")
+    (dbt-find-resource
+     (seq-find (lambda (identifier) (string-suffix-p ":order_counts" identifier))
+               (xref-backend-identifier-completion-table 'dbt)))
+    (should (equal (file-relative-name buffer-file-name root) "analyses/order_counts.sql"))
+    (dbt-test-visit root "analyses/_analyses.yml")
+    (dbt-test-goto "order_counts")
+    (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("analyses/order_counts.sql" . 1))))))
+
 (ert-deftest dbt-mode-xref-finds-references ()
   "M-? lists the calls of a model, and its YAML entry; the calls of a macro."
   (dbt-test-with-project root
