@@ -534,5 +534,36 @@
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_customers.sql" . 1))))))
 
+(ert-deftest dbt-mode-copies-relations-from-the-manifest ()
+  "The relation of the model, or of the ref or source at point, comes from the manifest."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (should-error (dbt-copy-relation) :type 'user-error)
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"nodes\": {\"model.shop.orders\": {\"relation_name\": \"\\\"db\\\".\\\"main\\\".\\\"orders\\\"\"},"
+                          " \"model.shop.stg_orders\": {\"relation_name\": null}},"
+                          " \"sources\": {\"source.shop.raw.raw_orders\": {\"relation_name\": \"raw.main.raw_orders\"}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (goto-char (point-max))
+    (dbt-copy-relation)
+    (should (equal (current-kill 0) "\"db\".\"main\".\"orders\""))
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should-error (dbt-copy-relation) :type 'user-error)
+    (dbt-test-visit root "models/staging/stg_customers.sql")
+    (goto-char (point-max))
+    (insert "union all select * from {{ source('raw', 'raw_orders') }}\n")
+    (dbt-test-goto "raw_orders")
+    (dbt-copy-relation)
+    (should (equal (current-kill 0) "raw.main.raw_orders"))))
+
+(ert-deftest dbt-mode-copies-the-build-command ()
+  "The build command selects the model, or with a prefix its family."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (dbt-copy-build-command)
+    (should (equal (current-kill 0) "dbt build -s orders"))
+    (dbt-copy-build-command t)
+    (should (equal (current-kill 0) "dbt build -s +orders+"))))
+
 (provide 'dbt-mode-test)
 ;;; dbt-mode-test.el ends here

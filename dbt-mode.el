@@ -613,6 +613,48 @@ not the default: a model that refers to itself is a cycle."
                  (format "ref('%s', '%s')" (plist-get entity :package) name))))
     (insert (if (dbt-mode-jinja-bounds) call (format "{{ %s }}" call)))))
 
+(defun dbt-copy-relation ()
+  "Copy the relation, database.schema.alias, of what point is on.
+That is the model, seed, snapshot or source table that the `ref' or
+`source' at point names, or else the current model.  It comes from
+target/manifest.json, which `dbt parse', `dbt compile' and every run
+write; the message says when it was written."
+  (interactive)
+  (let* ((root (dbt-mode--root))
+         (target (dbt-mode-target-at-point))
+         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+                     (dbt-mode-current-resource)
+                     (user-error "No model or source here")))
+         (file (expand-file-name "manifest.json"
+                                 (expand-file-name (plist-get (dbt-project-config root) :target-path) root)))
+         (manifest (or (ignore-errors (with-temp-buffer
+                                        (insert-file-contents file)
+                                        (json-parse-buffer :null-object nil)))
+                       (user-error "No readable %s: run dbt parse first" (file-relative-name file root))))
+         (id (dbt-project-node-id entity))
+         ;; The manifest is dbt's, read as it is: anything but a table of
+         ;; tables holding a string is no relation.
+         (node (seq-some (lambda (section)
+                           (let ((nodes (and (hash-table-p manifest) (gethash section manifest))))
+                             (and (hash-table-p nodes) (gethash id nodes))))
+                         '("nodes" "sources")))
+         (relation (and (hash-table-p node) (gethash "relation_name" node))))
+    (unless (stringp relation)
+      (user-error "%s has no relation in the manifest: run dbt parse again" id))
+    (kill-new relation)
+    (message "Copied %s, from the manifest written at %s" relation
+             (format-time-string "%F %R" (file-attribute-modification-time (file-attributes file))))))
+
+(defun dbt-copy-build-command (&optional family)
+  "Copy the command that builds the current model, dbt build -s MODEL.
+With FAMILY, interactively a prefix argument, the selection takes in
+its upstream and downstream: +MODEL+."
+  (interactive "P")
+  (let* ((name (plist-get (or (dbt-mode-current-resource) (user-error "No model here")) :name))
+         (command (format "dbt build -s %s" (if family (format "+%s+" name) name))))
+    (kill-new command)
+    (message "Copied %s" command)))
+
 (defun dbt-mode--forget-project ()
   "Forget what was read of the project of the current buffer.
 For `after-save-hook', so that the index sees what was just saved."
@@ -630,6 +672,8 @@ For `after-save-hook', so that the index sees what was just saved."
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
   "C-c C-e" #'dbt-insert-ref
+  "C-c C-w" #'dbt-copy-relation
+  "C-c M-w" #'dbt-copy-build-command
   "C-c C-n" #'dbt-new
   "C-c /" #'dbt-close-block
   "C-c %" #'dbt-jump-to-matching-tag)
@@ -644,6 +688,8 @@ For `after-save-hook', so that the index sees what was just saved."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    ["Copy the relation" dbt-copy-relation]
+    ["Copy the build command" dbt-copy-build-command]
     "---"
     ["New..." dbt-new]
     ["Close the Jinja block" dbt-close-block]
