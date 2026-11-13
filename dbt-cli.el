@@ -15,6 +15,7 @@
 
 ;;; Code:
 
+(require 'ansi-color)
 (require 'compile)
 (require 'dbt-mode)
 (require 'dbt-project)
@@ -45,14 +46,19 @@ For `compilation-error-regexp-alist'.")
 (define-compilation-mode dbt-compilation-mode "dbt"
   "The output of a dbt command, whose errors link to their files."
   (setq-local compilation-error-regexp-alist-alist dbt-cli-error-regexp-alist
-              compilation-error-regexp-alist (mapcar #'car dbt-cli-error-regexp-alist)))
+              compilation-error-regexp-alist (mapcar #'car dbt-cli-error-regexp-alist))
+  ;; dbt show writes the header of its table in bold, colours or not.
+  (add-hook 'compilation-filter-hook #'ansi-color-compilation-filter nil t))
 
 (defun dbt-cli-run (command &optional arguments)
   "Run the dbt COMMAND with ARGUMENTS, a list of strings, in the project.
 It runs at the root of the project of the current buffer, in a
-compilation buffer of `dbt-compilation-mode'."
+compilation buffer of `dbt-compilation-mode'.  dbt runs without colours
+or progress bars, which it would otherwise draw when Emacs passes on the
+TERM of a terminal."
   (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
-         (default-directory root))
+         (default-directory root)
+         (compilation-environment (append '("NO_COLOR=1" "TERM=dumb") compilation-environment)))
     (compilation-start (mapconcat #'shell-quote-argument (append (list dbt-executable) (split-string command)
                                                                  arguments)
                                   " ")

@@ -71,5 +71,44 @@ command, the selection only to the commands that select resources."
           (should (equal (compilation--loc->line location) 12))
           (should (equal (compilation--loc->col location) 19)))))))
 
+(defun dbt-test-compilation-messages ()
+  "Return the messages of the current compilation buffer.
+Each is a list (FILE LINE COLUMN TYPE), where TYPE is 2 for an error and
+1 for a warning."
+  (compilation--ensure-parse (point-max))
+  (let ((position (point-min))
+        messages)
+    (while (setq position (next-single-property-change position 'compilation-message))
+      (when-let* ((message (get-text-property position 'compilation-message))
+                  (location (compilation--message->loc message)))
+        (push (list (caar (compilation--loc->file-struct location)) (compilation--loc->line location)
+                    (compilation--loc->col location) (compilation--message->type message))
+              messages)))
+    (nreverse messages)))
+
+(ert-deftest dbt-cli-links-the-errors-of-dbt-in-a-colour-terminal ()
+  "With TERM naming a colour terminal, the output of dbt is plain and links.
+Emacs started from a terminal passes its TERM on to dbt, which then
+colours its output and draws progress bars: none of them may reach the
+buffer, and the error must still link to its file."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/customers.sql")
+    (let ((dbt-executable (getenv "DBT_MODE_TEST_DBT"))
+          (process-environment (cons "TERM=xterm-256color" process-environment)))
+      ;; dbt show writes the header of its table in bold even with no colours.
+      (with-current-buffer (dbt-cli-show "select 1 as the_answer" nil)
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))) 60)
+        (should (string-match-p "^│ the_answer │$" (buffer-string)))
+        (should-not (string-search "\e" (buffer-string))))
+      (dbt-test-goto "ref('orders')")
+      (replace-match "ref('nope')")
+      (save-buffer)
+      (with-current-buffer (dbt-cli-run "parse")
+        (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))) 60)
+        (should (string-search "Ref 'nope' not found" (buffer-string)))
+        (should-not (string-search "\e" (buffer-string)))
+        (should (member '("models/marts/customers.sql" 4 6 2) (dbt-test-compilation-messages)))))))
+
 (provide 'dbt-cli-test)
 ;;; dbt-cli-test.el ends here
