@@ -463,6 +463,8 @@ saved; dbt's runs leave no buffer behind."
           (execute-kbd-macro (kbd "C-c C-q"))
           (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n-- edited\n" (buffer-string))))
           (should-not (buffer-modified-p))
+          ;; The artifacts of the last build stay the dashboard's.
+          (should-not (file-exists-p (expand-file-name "target/run_results.json" root)))
           (let ((start (with-current-buffer (messages-buffer) (point-max))))
             (execute-kbd-macro (kbd "C-c C-q"))
             (insert "-- typed meanwhile\n")

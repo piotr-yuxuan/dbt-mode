@@ -11,7 +11,8 @@
 # error; any other command prints one row of JSON, as `dbt show -q
 # --output json' does, holding its arguments and a null, or else
 # FAKE_DBT_OUTPUT when it is set; each writes a warning on stderr, and
-# succeeds.  Otherwise it prints its arguments, then an error as dbt 2
+# target/run_results.json unless given --no-write-json, as dbt does,
+# and succeeds.  Otherwise it prints its arguments, then an error as dbt 2
 # prints one, and fails.  Either way, it first waits FAKE_DBT_SLEEP
 # seconds when that is set.
 [ -n "$FAKE_DBT_SLEEP" ] && sleep "$FAKE_DBT_SLEEP"
@@ -22,6 +23,10 @@ esac
 if [ -n "$FAKE_DBT_SUCCEED" ]; then
   exec python3 -I -c 'import json, os, sys
 arguments = " ".join(sys.argv[1:])
+if "--no-write-json" not in sys.argv:
+    os.makedirs("target", exist_ok=True)
+    with open("target/run_results.json", "w", encoding="utf-8") as file:
+        json.dump({"args": {"which": sys.argv[1]}, "results": []}, file)
 if sys.argv[1] == "compile":
     print(json.dumps({"info": {"name": "MainReportVersion"}, "data": {}}))
     print(json.dumps({"info": {"name": "CompiledNode"}, "data": {"compiled": arguments}}))
