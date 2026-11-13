@@ -55,6 +55,11 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   "The number of rows that a preview of a model or a query shows."
   :type 'natnum)
 
+(defcustom dbt-protected-targets '("prod")
+  "The targets on which a command that runs SQL asks before it runs.
+Such as an Org Babel block of dbt."
+  :type '(repeat string))
+
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
 Saving a buffer of the project forgets the index at once; this bounds how
@@ -198,7 +203,7 @@ in any order, give the other properties."
     (seq-filter (lambda (entry) (plist-get entry :name)) (nreverse entries))))
 
 (defconst dbt-project-config-keys
-  '(("name" :name nil) ("target-path" :target-path "target")
+  '(("name" :name nil) ("profile" :profile nil) ("target-path" :target-path "target")
     ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
     ("analysis-paths" :analysis-paths ("analyses")) ("macro-paths" :macro-paths ("macros"))
@@ -387,6 +392,27 @@ is."
          (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
          (progn (backward-char)
                 (ignore-errors (json-parse-buffer :null-object nil))))))
+
+(defun dbt-project-default-target (root)
+  "Return the target that dbt runs on in ROOT when none is given, or nil.
+It is that of DBT_TARGET, else the target of the project's profile in
+the profiles.yml of DBT_PROFILES_DIR, else of ROOT, else of ~/.dbt, as
+dbt looks for them.  Nil when they do not tell, as when the target is
+Jinja."
+  (or (getenv "DBT_TARGET")
+      (let* ((profile (plist-get (dbt-project-config root) :profile))
+             (file (seq-find #'file-readable-p
+                             (mapcar (lambda (directory) (expand-file-name "profiles.yml" directory))
+                                     (delq nil (list (getenv "DBT_PROFILES_DIR") root "~/.dbt")))))
+             (target (and profile file
+                          (plist-get (seq-find (lambda (line)
+                                                 (and (equal (plist-get line :key) "target")
+                                                      (equal (plist-get line :path) (list profile))))
+                                               (dbt-project-yaml-scan (with-temp-buffer
+                                                                        (insert-file-contents file)
+                                                                        (buffer-string))))
+                                     :value))))
+        (and target (not (string-search "{{" target)) target))))
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.
