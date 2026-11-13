@@ -234,7 +234,7 @@ Its one code action, which fixes and formats, is hidden too."
                     (string-search "before-save" (buffer-substring dbt-lsp-test-messages-start (point-max))))))))
 
 (ert-deftest dbt-lsp-leaves-xref-to-dbt-mode-where-it-resolves ()
-  "With the server, M-. and M-? on a ref are dbt-mode's; elsewhere, the server's.
+  "With the server, M-. and M-? on a ref or a snapshot are dbt-mode's; elsewhere, the server's.
 Choosing the server reads nothing of the project."
   (dbt-lsp-test-with-server root nil
     (dbt-test-goto "ref('stg_orders')" 6)
@@ -242,7 +242,11 @@ Choosing the server reads nothing of the project."
     (dbt-project-forget (dbt-project-root))
     (dbt-test-goto "customers.first_name")
     (should (eq (xref-find-backend) 'xref-lsp))
-    (should-not (gethash (cons (dbt-project-root) 'index) dbt-project--cache))))
+    (should-not (seq-some (lambda (key) (equal (car key) root)) (hash-table-keys dbt-project--cache)))
+    (with-current-buffer (dbt-test-visit root "snapshots/orders_snapshot.sql")
+      (dbt-lsp)
+      (dbt-test-goto "orders_snapshot %}")
+      (should (eq (xref-find-backend) 'dbt)))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.
