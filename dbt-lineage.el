@@ -73,13 +73,13 @@ node through which the walk first reached ID, FOCUS at depth 1."
   "The deepest level that this buffer shows, or nil for every one.")
 
 (defvar-local dbt-lineage--reach nil
-  "The reach of this buffer's focus, as (UPSTREAM . DOWNSTREAM).
+  "The reach of this buffer's focus, as an alist from a direction.
 Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
 
 (defun dbt-lineage--within (direction)
   "Return the reach of this buffer's focus in DIRECTION, within its depth."
   (seq-filter (lambda (entry) (or (null dbt-lineage--depth) (<= (nth 1 entry) dbt-lineage--depth)))
-              (if (eq direction 'upstream) (car dbt-lineage--reach) (cdr dbt-lineage--reach))))
+              (alist-get direction dbt-lineage--reach)))
 
 (defun dbt-lineage--render ()
   "Write the tree of this buffer's lineage, within its depth."
@@ -117,7 +117,7 @@ Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
 
 (defun dbt-lineage--deepest ()
   "Return the depth of the deepest node of this buffer's lineage."
-  (apply #'max 0 (mapcar #'cadr (append (car dbt-lineage--reach) (cdr dbt-lineage--reach)))))
+  (apply #'max 0 (mapcar #'cadr (apply #'append (mapcar #'cdr dbt-lineage--reach)))))
 
 (defun dbt-lineage--show-depth (depth)
   "Show the lineage to DEPTH, nil for every depth, point kept on its node.
@@ -220,7 +220,8 @@ already keeps its depth."
             dbt-lineage--root root
             dbt-lineage--nodes nodes
             dbt-lineage--focus id
-            dbt-lineage--reach (cons (dbt-lineage-reach nodes id 'upstream) (dbt-lineage-reach nodes id 'downstream)))
+            dbt-lineage--reach (mapcar (lambda (direction) (cons direction (dbt-lineage-reach nodes id direction)))
+                                       '(upstream downstream)))
       (dbt-lineage--render)
       (display-buffer (current-buffer))
       (message "Lineage of %s %s, from %s" (plist-get focus :type) (dbt-lineage-label id) description))))
