@@ -56,8 +56,9 @@ The language server needs dbt 2.0 or later, which runs it as `dbt lsp'."
   :type 'natnum)
 
 (defcustom dbt-protected-targets '("prod")
-  "The targets on which a command that runs SQL asks before it runs.
-Such as an Org Babel block of dbt."
+  "The targets on which an Org Babel block of dbt asks before it runs.
+While any target is protected, a block whose default target dbt-mode
+cannot read asks too."
   :type '(repeat string))
 
 (defun dbt-project-executable ()
@@ -404,8 +405,10 @@ is."
   "Return the target that dbt runs on in ROOT when none is given, or nil.
 It is that of DBT_TARGET, else the target of the project's profile in
 the profiles.yml of DBT_PROFILES_DIR, else of ROOT, else of ~/.dbt, as
-dbt looks for them.  Nil when they do not tell, as when the target is
-Jinja."
+dbt looks for them.  A target that is a call of env_var, with or
+without a default, is read as dbt reads it, from Emacs's environment,
+which dbt inherits.  Nil when they do not tell, as when the target is
+other Jinja."
   (or (getenv "DBT_TARGET")
       (let* ((profile (plist-get (dbt-project-config root) :profile))
              (file (seq-find #'file-readable-p
@@ -419,7 +422,26 @@ Jinja."
                                                                         (insert-file-contents file)
                                                                         (buffer-string))))
                                      :value))))
-        (and target (not (string-search "{{" target)) target))))
+        (cond ((not (and target (string-search "{{" target))) target)
+              ((string-match (concat "\\`{{[ \t]*env_var([ \t]*['\"]\\([^'\"]+\\)['\"][ \t]*"
+                                     "\\(?:,[ \t]*['\"]\\([^'\"]*\\)['\"][ \t]*\\)?)[ \t]*}}\\'")
+                             target)
+               (or (getenv (match-string 1 target)) (match-string 2 target)))))))
+
+(defun dbt-project-confirm-target (root target)
+  "Ask before SQL runs on TARGET in ROOT when it is protected; return its label.
+TARGET is the one given to dbt, or nil for dbt's default, which
+`dbt-project-default-target' reads.  The question comes on a target of
+`dbt-protected-targets', or on a default target that dbt-mode cannot
+read while a target is protected; a no is a `user-error'.  The label
+names the target for messages, as \"target dev\"."
+  (let* ((target (or target (dbt-project-default-target root)))
+         (label (if target (concat "target " target) "dbt's default target, which dbt-mode cannot read")))
+    (when (and (if target (member target dbt-protected-targets) dbt-protected-targets)
+               (not (yes-or-no-p (format "Protected: %s.  Run on %s? "
+                                         (string-join dbt-protected-targets ", ") label))))
+      (user-error "Not run on %s" label))
+    label))
 
 (defun dbt-project-calls ()
   "Return the calls of `ref' and `source' in the current buffer, in order.

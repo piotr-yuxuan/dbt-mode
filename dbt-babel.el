@@ -25,32 +25,28 @@
 (defun dbt-babel--call (params arguments)
   "Run dbt with ARGUMENTS in the project of the block, and return its output.
 Babel's PARAMS give the target, `:target', and the variables, `:var'.
-On a target of `dbt-protected-targets', ask first.  When dbt fails, its
-errors show in Babel's error buffer."
+A protected target asks first, as `dbt-project-confirm-target' says.
+When dbt fails, its errors show in Babel's error buffer."
   (let* ((root (or (dbt-project-root default-directory) (user-error "Not in a dbt project: give the block a :dir")))
          (default-directory root)
-         (named (cdr (assq :target params)))
-         (target (or named (dbt-project-default-target root)))
-         (label (or target "dbt's default"))
+         (target (cdr (assq :target params)))
          (vars (org-babel--get-vars params))
-         (errors (make-temp-file "dbt-babel")))
-    (when (and (member target dbt-protected-targets)
-               (not (yes-or-no-p (format "Run this block on the protected target %s? " target))))
-      (user-error "Not run on %s" target))
-    (unwind-protect
-        (with-temp-buffer
-          (let ((status (apply #'call-process dbt-executable nil (list t errors) nil
-                               (append arguments
-                                       (and named (list "--target" named))
-                                       (and vars (list "--vars" (json-serialize vars)))))))
-            (unless (eql status 0)
-              (org-babel-eval-error-notify status (with-temp-buffer
-                                                    (insert-file-contents errors)
-                                                    (buffer-string)))
-              (user-error "The dbt %s of the block failed on target %s" (car arguments) label))
-            (message "Ran dbt %s on target %s" (car arguments) label)
-            (buffer-string)))
-      (delete-file errors))))
+         (label (dbt-project-confirm-target root target)))
+    (let ((errors (make-temp-file "dbt-babel")))
+      (unwind-protect
+          (with-temp-buffer
+            (let ((status (apply #'call-process dbt-executable nil (list t errors) nil
+                                 (append arguments
+                                         (and target (list "--target" target))
+                                         (and vars (list "--vars" (json-serialize vars)))))))
+              (unless (eql status 0)
+                (org-babel-eval-error-notify status (with-temp-buffer
+                                                      (insert-file-contents errors)
+                                                      (buffer-string)))
+                (user-error "The dbt %s of the block failed on %s" (car arguments) label))
+              (message "Ran dbt %s on %s" (car arguments) label)
+              (buffer-string)))
+        (delete-file errors)))))
 
 ;;;###autoload
 (defun org-babel-execute:dbt (body params)

@@ -53,10 +53,47 @@ The default target is the profile's, unless DBT_TARGET says otherwise."
       (should (equal (dbt-project-default-target root) "prod"))
       (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil)))
         (should-error (dbt-test-babel root "" "select 1") :type 'user-error))
-      (should (string-match-p "protected target prod" asked)))
+      (should (string-match-p "Run on target prod" asked)))
     (let ((dbt-protected-targets '("dev")))
       (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_prompt) t)))
         (should (dbt-test-babel root "" "select 1"))))))
+
+(defun dbt-test-profile-target (root target)
+  "Make TARGET the target of the profile of ROOT, as written in profiles.yml."
+  (with-temp-file (expand-file-name "profiles.yml" root)
+    (insert-file-contents (expand-file-name "profiles.yml" root))
+    (goto-char (point-min))
+    (re-search-forward "^  target: .*$")
+    (replace-match (concat "  target: " target) t t)))
+
+(ert-deftest dbt-babel-asks-before-a-named-or-unread-protected-target ()
+  "A block asks before a protected :target, and before a default target that dbt-mode cannot read.
+The profile's target written as a call of env_var reads as dbt reads
+it.  With no target protected, nothing asks.  A refusal runs nothing and
+leaves no file behind."
+  (dbt-test-with-project root
+    (let (asked)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (prompt) (setq asked prompt) nil)))
+        (let ((files (directory-files temporary-file-directory nil "\\`dbt-babel")))
+          (should-error (dbt-test-babel root ":target prod" "select 1") :type 'user-error)
+          (should (string-match-p "Run on target prod" asked))
+          (should (equal (directory-files temporary-file-directory nil "\\`dbt-babel") files)))
+        (dbt-test-profile-target root "\"{{ env_var('DBT_SHOP_TARGET', 'prod') }}\"")
+        (setq asked nil)
+        (should-error (dbt-test-babel root "" "select 1") :type 'user-error)
+        (should (string-match-p "Run on target prod" asked))
+        (let ((process-environment (cons "DBT_SHOP_TARGET=dev" process-environment)))
+          (setq asked nil)
+          (should (dbt-test-babel root "" "select 1"))
+          (should-not asked))
+        (dbt-test-profile-target root "\"{{ var('target', 'dev') }}\"")
+        (setq asked nil)
+        (should-error (dbt-test-babel root "" "select 1") :type 'user-error)
+        (should (string-match-p "dbt's default target, which dbt-mode cannot read" asked))
+        (let ((dbt-protected-targets nil))
+          (setq asked nil)
+          (should (dbt-test-babel root ":target prod" "select 1"))
+          (should-not asked))))))
 
 (ert-deftest dbt-babel-writes-each-cell-on-one-line ()
   "A name or a value that holds a newline or a | stays in its cell of the table."
