@@ -359,6 +359,20 @@ The project's namesakes and their uses come after, or not at all."
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/pkg_src.sql" . 1))))))
 
+(ert-deftest dbt-mode-visits-the-properties-of-its-own-package ()
+  "C-c C-y visits the YAML entry of the model in its own package, never that of a namesake in another."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "models:\n  - name: stg_orders\n" nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/staging/stg_orders.sql"))
+      (execute-kbd-macro (kbd "C-c C-y"))
+      (should (equal (file-relative-name buffer-file-name root) "models/staging/_staging.yml"))
+      (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/stg_orders.sql"))
+      (execute-kbd-macro (kbd "C-c C-y"))
+      (should (equal (file-relative-name buffer-file-name root) "dbt_packages/shop_utils/models/_props.yml")))))
+
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
   (dolist (target '((:kind ref :qualifier nil :name "orders" :version nil)

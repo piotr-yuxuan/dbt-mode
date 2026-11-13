@@ -710,12 +710,14 @@ or not a language server runs."
     (xref-find-definitions identifier)))
 
 (defun dbt-visit-properties ()
-  "Visit the YAML entry of the current model, seed, snapshot or analysis."
+  "Visit the YAML entry of the current model, seed, snapshot or analysis.
+It is an entry of the resource's own package, as dbt 2.0.9 reads one."
   (interactive)
   (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (entries (seq-filter (lambda (entity)
                                 (member (plist-get entity :section) dbt-project-resource-sections))
-                              (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)))))
+                              (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)
+                                                    (plist-get resource :package)))))
     (unless entries
       (user-error "No YAML entry names %s" (plist-get resource :name)))
     (xref-show-definitions-completing-read
