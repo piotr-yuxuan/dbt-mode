@@ -442,7 +442,8 @@ it.  The YAML entries of what IDENTIFIER resolves to count as uses."
     (pcase-dolist (`(,package ,directory) (dbt-project-packages root))
       (dolist (file (seq-remove (lambda (file) (string-suffix-p ".csv" file)) (dbt-project-source-files directory)))
         (with-temp-buffer
-          (insert-file-contents file)
+          ;; A dangling link or an unreadable file holds no use.
+          (ignore-error file-error (insert-file-contents file))
           (while (re-search-forward regexp nil t)
             (let ((call (if source
                             (list :kind kind :name (match-string 2))

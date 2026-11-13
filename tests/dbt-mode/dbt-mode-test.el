@@ -325,8 +325,10 @@
                    '(("analyses/order_counts.sql" . 1))))))
 
 (ert-deftest dbt-mode-xref-finds-references ()
-  "M-? lists the calls of a model, and its YAML entry; the calls of a macro, not its definition."
+  "M-? lists the calls of a model, and its YAML entry; the calls of a macro, not its definition.
+A dangling link among the project's files holds none and stops nothing."
   (dbt-test-with-project root
+    (make-symbolic-link "/nonexistent/model.sql" (expand-file-name "models/dangling.sql" root))
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (should (equal (sort (mapcar #'car (dbt-test-xref-files (xref-backend-references 'dbt "ref:stg_orders") root))
                          #'string<)
