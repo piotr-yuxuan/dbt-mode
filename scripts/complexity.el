@@ -17,8 +17,10 @@
 ;; nested lambdas included, by `repo-complexity-rules':
 ;;
 ;; - 1 for each if, when, unless, while, dolist, dotimes, seq-doseq,
-;;   cl-dolist, pcase-dolist, if-let, if-let*, when-let, when-let*, and-let*
-;;   and while-let;
+;;   cl-dolist and pcase-dolist;
+;; - 1 for each binding of if-let, if-let*, when-let, when-let*, and-let*
+;;   and while-let, as each binding may stop the form: (if-let* ((a x) (b
+;;   y)) ...) adds 2, and the old single binding (if-let (a x) ...) adds 1;
 ;; - 1 for each cl-loop, plus 1 for each of its when, if, unless, while,
 ;;   until, always, never and thereis clauses;
 ;; - 1 for each clause of cond, except a last clause whose test is t;
@@ -54,11 +56,16 @@
                    (seq-count (lambda (clause)
                                 (not (memq (car-safe clause) '(_ t otherwise))))
                               (cdr arguments))))
-        (operands (lambda (arguments) (max 0 (1- (length arguments))))))
+        (operands (lambda (arguments) (max 0 (1- (length arguments)))))
+        (bindings (lambda (arguments) (safe-length (car-safe arguments))))
+        (old-bindings (lambda (arguments)
+                        (let ((spec (car-safe arguments)))
+                          (if (and (car-safe spec) (symbolp (car spec))) 1 (safe-length spec))))))
     (append
      (mapcar (lambda (head) (cons head one))
-             '(if when unless while dolist dotimes seq-doseq cl-dolist pcase-dolist
-                  if-let if-let* when-let when-let* and-let* while-let))
+             '(if when unless while dolist dotimes seq-doseq cl-dolist pcase-dolist))
+     (mapcar (lambda (head) (cons head bindings)) '(if-let* when-let* and-let* while-let))
+     (mapcar (lambda (head) (cons head old-bindings)) '(if-let when-let))
      (mapcar (lambda (head) (cons head clauses))
              '(pcase pcase-exhaustive cl-case cl-ecase cl-typecase cl-etypecase))
      `((and . ,operands)
