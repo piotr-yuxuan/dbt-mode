@@ -150,7 +150,14 @@ its own, which the echo area would cut."
       (goto-char (point-min))
       (move-to-column column)
       (execute-kbd-macro (kbd "RET"))
-      (should (equal (with-current-buffer "*dbt value*" (buffer-string)) (make-string (* 2 (frame-width)) ?x))))))
+      (should (equal (with-current-buffer "*dbt value*" (buffer-string)) (make-string (* 2 (frame-width)) ?x)))))
+  ;; A header line would read the % of a column's name as a construct.
+  (save-window-excursion
+    (switch-to-buffer (dbt-rows-show "test" '("growth %b") (list (list (make-string 200 ?1))) 5 #'ignore))
+    (goto-char (point-min))
+    (execute-kbd-macro (kbd "RET"))
+    (should (equal (with-current-buffer "*dbt value*" header-line-format) " growth %%b, row 1"))
+    (kill-buffer)))
 
 (ert-deftest dbt-rows-reads-what-dbt-show-prints-around-its-rows ()
   "Lines before the rows, a column name twice, and text beyond ASCII read as dbt means them.

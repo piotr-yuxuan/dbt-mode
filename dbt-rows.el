@@ -255,7 +255,8 @@ A value of several lines, or wider than the frame, shows in the buffer
           (erase-buffer)
           (insert value))
         (special-mode)
-        (setq header-line-format (format " %s, row %d" column (1+ id)))
+        ;; A header line reads % as a construct of its own.
+        (setq header-line-format (string-replace "%" "%%" (format " %s, row %d" column (1+ id))))
         (display-buffer (current-buffer))))))
 
 (defvar-keymap dbt-rows-mode-map
