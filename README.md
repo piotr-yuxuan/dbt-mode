@@ -126,7 +126,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion                             |
 | `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
 | `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
-| `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s MODEL`; with `C-u`, `+MODEL+`               |
+| `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s` of what point is on, a `ref` or a `source`, else the model; with `C-u`, `+…+` |
 | `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
 | `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |
 | `C-c %`       | `dbt-jump-to-matching-tag` | Move between a block's opening and closing tags              |
@@ -135,16 +135,30 @@ need a dbt account: without one, the server says nothing about columns.
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
 `show`, `list`, `lint`, `format`, `parse`, `deps`, `debug`, `retry` and
 `docs generate` in a compilation buffer whose errors link to their files.
-Its selection defaults to the current model, and two switches add its
-upstream (`+model`) or its downstream (`model+`). Each command gets only the
-options dbt takes for it: `--full-refresh` goes to `build`, `run`, `compile`
-and `seed`, the limit to `build`, `run`, `test`, `compile`, `show` and
-`list`. dbt runs without colours or progress bars, whatever `TERM` Emacs
-passes on, and the project's modified buffers are offered for saving first,
-as `compile` does.
+Its selection defaults to what point is on, a `ref` or a `source` as dbt
+selects it (`orders.v2`, `source:raw.orders`), else the current model; two
+switches add its upstream (`+model`) or its downstream (`model+`), and
+"Changed on the branch" selects instead the models, seeds and snapshots
+whose files git sees changed since the merge base with the default branch
+(`origin/HEAD`, else `main`), uncommitted and new ones included. Each command
+gets only the options dbt takes for it: `--full-refresh` goes to `build`,
+`run`, `compile` and `seed`, the limit to `build`, `run`, `test`, `compile`,
+`show` and `list`, `--defer`, `--state` and `--vars` to all but `docs
+generate`. `.` runs the project's last dbt command again, and transient's
+`C-M-p` and `C-M-n` recall earlier options. dbt runs without colours or
+progress bars, whatever `TERM` Emacs passes on, and the project's modified
+buffers are offered for saving first, as `compile` does.
 
-In the lineage, `RET` visits a node's file; in the lineage and the rows,
-`g` asks again, and without a server the lineage reads the project again.
+The mode line shows the target that dbt runs on and the model's
+materialization, from its `config()` call or else the manifest of your
+runs, and `compiling` while dbt lsp compiles.
+
+The lineage is a tree, upstream above and downstream below: each node shows
+once, under the node through which it is nearest. `TAB` folds a node, `+`
+and `-` show one level more or less, `e` writes the graph within that depth
+as Graphviz dot, with an SVG beside it when `dot` is installed, and `RET`
+visits a node's file. In the lineage and the rows, `g` asks again, and
+without a server the lineage reads the project again.
 The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
 JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
@@ -190,6 +204,7 @@ on `M-.`, `M-?` and completion in the YAML files of a dbt project.
 | `dbt-executable`               | `"dbt"` | The dbt executable                                              |
 | `dbt-lsp-arguments`            | `nil`   | More arguments of `dbt lsp`, such as `("--profiles-dir" "dir")` |
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
+| `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
 | `dbt-protected-targets`        | `("prod")` | The targets on which an Org block asks before it runs; an unread default asks too |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
