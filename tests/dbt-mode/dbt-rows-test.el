@@ -163,6 +163,22 @@ whoever read the JSON."
     (should (equal (dbt-rows-cell value nil) "{\"name\":\"Zoë\",\"n\":null}"))
     (should-not (dbt-rows-cell nil nil))))
 
+(ert-deftest dbt-rows-filters-with-a-regexp-and-a-column-it-has ()
+  "An invalid regexp is refused, the filter as it was; a filter whose column a new query lacks goes.
+As in `occur', a regexp in lower case ignores case, and an upper-case
+letter makes it matter."
+  (dbt-rows-test-with-grid dbt-rows-test-rows
+    (execute-kbd-macro (kbd "/ ada RET"))
+    (should (equal (mapcar #'car (dbt-rows-test-shown)) '("Ada")))
+    (execute-kbd-macro (kbd "/ ADA RET"))
+    (should-not (dbt-rows-test-shown))
+    (should-error (execute-kbd-macro (kbd "/ [ RET")) :type 'user-error)
+    (should-not (dbt-rows-test-shown))
+    (execute-kbd-macro (kbd "C-u / name RET A RET"))
+    (should (equal (mapcar #'car (dbt-rows-test-shown)) '("Ada" "Alan")))
+    (dbt-rows-show "test" '("n" "note") '(("1" "x") ("2" "y")) 5 #'ignore)
+    (should (equal (dbt-rows-test-shown) '(("1" "x") ("2" "y"))))))
+
 (ert-deftest dbt-rows-sizes-and-prints-columns-as-they-show ()
   "A column is as wide as its text shows, wide characters included; widening it prints its rows again."
   (dbt-rows-test-with-grid '(("日本語" "1" "x"))

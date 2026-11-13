@@ -166,6 +166,8 @@ filter and its order."
                     columns)))
     (unless (member (car tabulated-list-sort-key) columns)
       (setq tabulated-list-sort-key nil))
+    (unless (member (car dbt-rows--filter) (cons nil columns))
+      (setq dbt-rows--filter nil))
     (tabulated-list-init-header)
     (dbt-rows--print)
     (display-buffer (current-buffer))
@@ -180,6 +182,9 @@ in `occur', an upper-case letter in REGEXP makes the case matter."
    (let ((column (and current-prefix-arg (completing-read "Column: " dbt-rows--columns nil t))))
      (list (read-regexp (if column (format "Rows whose %s matches" column) "Rows with a cell that matches"))
            column)))
+  (condition-case err
+      (string-match-p regexp "")
+    (invalid-regexp (user-error "Not a regexp, %s: %s" (cadr err) regexp)))
   (setq dbt-rows--filter (and (not (string-empty-p regexp)) (cons column regexp)))
   (dbt-rows--print))
 
