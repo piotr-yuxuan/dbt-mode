@@ -333,7 +333,7 @@ A root entry of a root model finds that model."
                    '(("models/staging/stg_orders.sql" . 1))))))
 
 (ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
-  "A call in a package's YAML properties or singular test resolves in that package first; M-? on its source entry lists its uses.
+  "A call in a package's YAML properties, singular test or macro resolves in that package first; M-? on its source entry lists its uses.
 The project's namesakes and their uses come after, or not at all."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
@@ -348,7 +348,10 @@ The project's namesakes and their uses come after, or not at all."
     (write-region (concat "models:\n  - name: pkg_src\n    data_tests:\n      - relationships:\n"
                           "          arguments:\n            to: ref('stg_orders')\n            field: id\n")
                   nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
-    (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"))
+    (write-region "{% macro pkg_orders() %}\n  select * from {{ ref('stg_orders') }}\n{% endmacro %}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/macros/pkg_orders.sql" root))
+    (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"
+                    "dbt_packages/shop_utils/macros/pkg_orders.sql"))
       (dbt-test-visit root file)
       (dbt-test-goto "stg_orders")
       (should (equal (car (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt))

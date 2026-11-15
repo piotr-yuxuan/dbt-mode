@@ -626,7 +626,8 @@ package that a `ref' or a `source' of CALLER, the package of the calling
 file, looks in, 1 for the second, 2 for the others.  dbt 2.0.9 looks in
 CALLER, then in the project, unless the project's dbt_project.yml sets
 the flag require_ref_searches_node_package_before_root to false, which
-puts the project first."
+puts the project first.  A call in a macro takes the macro's package for
+CALLER, though dbt 2.0.9 takes that of the node calling the macro."
   (let* ((project (car (dbt-project-packages root)))
          (order (if (equal (plist-get (nth 2 project) :package-first) "false")
                     (list (car project) caller)
