@@ -277,7 +277,9 @@ and still fail on another file of the project: the buffer shows the
 file, and dbt's error, which names the file it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
 `dbt-mode-hook`, formats after each save, and with dbt lsp saves again
 when that changed the buffer; a failure to format is a message, and the
-save stands.
+save stands. A dbt with neither a server nor `dbt format`, such as
+`dbt-oss`, cannot format: `C-c C-q` saves, then says so, and
+`dbt-format-on-save-mode` leaves saves as they are.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.

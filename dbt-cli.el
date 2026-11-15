@@ -183,13 +183,16 @@ is read again when the file changed, unless its text changed meanwhile:
 then that text wins the next save, which a message says.  dbt may fail
 on another file of the project and still format this one; its error,
 which names its file, is the last message.  A save of BUFFER waits for
-its format to end."
+its format to end.  A dbt without `dbt format', such as dbt-oss, is an
+error, before anything starts."
   (with-current-buffer buffer
     (let* ((root (or (dbt-project-root) (user-error "Not in a dbt project")))
            (default-directory root)
            (process-environment (append dbt-cli-environment process-environment))
            (command (list (dbt-project-executable) "format" "--no-write-json" (file-relative-name buffer-file-name root)))
            (name (buffer-name)))
+      (unless (dbt-project-command-p "format")
+        (user-error "This dbt cannot format: it has no dbt format, which dbt's proprietary build runs"))
       (dbt-cli--await-format)
       (add-hook 'before-save-hook #'dbt-cli--await-format nil t)
       ;; Read once the format before has ended, which may revert BUFFER.

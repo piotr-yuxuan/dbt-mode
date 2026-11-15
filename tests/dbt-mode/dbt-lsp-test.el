@@ -182,6 +182,30 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
       (should-not (dbt-lsp-server-p))
       (should (< (- (float-time) start) 5)))))
 
+(ert-deftest dbt-lsp-formats-nothing-with-a-dbt-that-cannot ()
+  "With a dbt that runs neither dbt lsp nor dbt format, such as dbt-oss, C-c C-q saves, then says it cannot format.
+A save in `dbt-format-on-save-mode' stays as it is, with no message.
+dbt is only asked whether it runs dbt format, once."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exit 2"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt))
+          (goto-char (point-min))
+          (insert "-- edited\n")
+          (should (string-match-p "\\`This dbt cannot format: it has no dbt format"
+                                  (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
+          (should-not (buffer-modified-p))
+          (goto-char (point-min))
+          (insert "-- edited again\n")
+          (dbt-format-on-save-mode 1)
+          (let ((start (with-current-buffer (messages-buffer) (point-max))))
+            (execute-kbd-macro (kbd "C-x C-s"))
+            (should-not (string-search "format" (with-current-buffer (messages-buffer)
+                                                  (buffer-substring start (point-max))))))
+          (should (equal (dbt-test-file-text root "models/marts/orders.sql") (buffer-string))))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
+
 (ert-deftest dbt-lsp-adds-a-folder-only-for-a-server ()
   "The root of the project becomes a folder of the lsp session only if dbt runs a server.
 The session persists its folders, so it would keep one it cannot use."

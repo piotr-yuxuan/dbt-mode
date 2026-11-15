@@ -967,7 +967,8 @@ A buffer saved meanwhile, as by a timer, is formatted as usual.")
 With dbt lsp, the server formats it as it answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
-dbt ends, unless it was modified meanwhile."
+dbt ends, unless it was modified meanwhile.  A dbt with neither, such
+as dbt-oss, cannot format, which `dbt-cli-format' says."
   (interactive)
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
@@ -980,18 +981,18 @@ dbt ends, unless it was modified meanwhile."
 (defun dbt-mode--format-after-save ()
   "Format the buffer just saved, and save it again when that changed it.
 For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
-message: the save stands."
+message: the save stands.  A dbt that cannot format leaves it alone."
   (unless (eq dbt-mode--formatting (current-buffer))
     (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
-          (if (not (dbt-mode-server-p))
-              (dbt-cli-format (current-buffer))
-            ;; The server answers later: the save that follows its edits
-            ;; formats nothing again.
-            (dbt-lsp-format-buffer (lambda ()
-                                     (when (buffer-modified-p)
-                                       (let ((dbt-mode--formatting (current-buffer)))
-                                         (save-buffer))))))
+          (cond ((dbt-mode-server-p)
+                 ;; The server answers later: the save that follows its
+                 ;; edits formats nothing again.
+                 (dbt-lsp-format-buffer (lambda ()
+                                          (when (buffer-modified-p)
+                                            (let ((dbt-mode--formatting (current-buffer)))
+                                              (save-buffer))))))
+                ((dbt-project-command-p "format") (dbt-cli-format (current-buffer))))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 
 (define-minor-mode dbt-format-on-save-mode
@@ -999,7 +1000,9 @@ message: the save stands."
 With dbt lsp, the formatted buffer is saved again when formatting
 changed it.  Without a server, `dbt format' formats the saved file
 while you go on, and the buffer shows the result unless you modified it
-meanwhile.  A failure to format is a message, and the save stands."
+meanwhile.  A failure to format is a message, and the save stands.  A
+dbt with neither a server nor `dbt format', such as dbt-oss, leaves
+saves as they are."
   :lighter " Fmt"
   (if dbt-format-on-save-mode
       (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)
