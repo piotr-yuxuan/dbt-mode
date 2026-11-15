@@ -94,11 +94,12 @@ list, and a NAME that the list has already."
   "Return the YAML file that holds, or should hold, the entry of RESOURCE.
 SECTION is that of its entry.  It is the file of its entry when it has
 one, else a YAML file of its directory with SECTION, else
-_DIRECTORY__SECTION.yml there, as dbt Labs' style guide names them."
+_DIRECTORY__SECTION.yml there, as dbt Labs' style guide names them.  An
+entry is one of the resource's own package, as dbt 2.0.9 reads one."
   (let* ((root (dbt-mode--root))
          (directory (file-name-directory (plist-get resource :file)))
          (entries (seq-filter (lambda (entity) (equal (plist-get entity :section) section))
-                              (dbt-project-entities root '(properties)))))
+                              (dbt-project-entities root '(properties) nil (plist-get resource :package)))))
     (or (plist-get (seq-find (lambda (entity) (equal (plist-get entity :name) (plist-get resource :name))) entries)
                    :file)
         (plist-get (seq-find (lambda (entity) (equal (file-name-directory (plist-get entity :file)) directory))
@@ -215,7 +216,8 @@ or analyses."
          (section (or (car (rassq (plist-get resource :kind) dbt-project-section-kinds))
                       (user-error "No YAML entry describes a %s" (plist-get resource :kind)))))
     (if (seq-some (lambda (entity) (equal (plist-get entity :section) section))
-                  (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)))
+                  (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)
+                                        (plist-get resource :package)))
         (dbt-visit-properties)
       (pop-to-buffer (dbt-new--append-yaml (dbt-new--properties-file resource section) section
                                            (plist-get resource :name)
