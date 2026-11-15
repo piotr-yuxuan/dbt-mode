@@ -88,10 +88,10 @@ runs `lsp' and `format', which dbt-oss 2.0 and dbt Core 1.x lack.  The
 answer is kept for each command while the executable's file stays the
 same, as `dbt-project--commands' says.  A dbt that does not answer
 within `dbt-project--probe-seconds' runs none; nil without dbt."
-  (when-let* ((executable (executable-find dbt-executable))
-              (file (file-truename executable)))
+  (when-let* ((executable (executable-find dbt-executable)))
     (eq 'yes
-        (with-memoization (gethash (list file (file-attribute-modification-time (file-attributes file)) command)
+        (with-memoization (gethash (let ((file (file-truename executable)))
+                                     (list file (file-attribute-modification-time (file-attributes file)) command))
                                    dbt-project--commands)
           (let ((process (ignore-errors
                            (make-process :name (format "dbt %s --help" command)
