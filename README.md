@@ -208,9 +208,10 @@ JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
 dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one
 dbt you have. `dbt-oss`, the open-source build of dbt 2, runs all but the
-language server and the formatter: `dbt lsp`, `dbt format` and `dbt
-lint` come with dbt 2's proprietary build only, and dbt Core 1.x has
-none of them. dbt-mode asks dbt once whether it has them, and does
+language server, the formatter and the linter: `dbt lsp` and `dbt format`
+come with dbt 2's proprietary build only, and `dbt lint` runs only there;
+dbt Core 1.x has none of them. dbt-mode asks dbt once whether it has the
+server and the formatter, asks again once dbt is replaced, and does
 without. It was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and

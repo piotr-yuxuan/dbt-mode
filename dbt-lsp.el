@@ -7,13 +7,14 @@
 
 ;;; Commentary:
 
-;; dbt 2.0 and later run a language server, `dbt lsp', on the standard
-;; input and output.  This client registers it with lsp-mode for
-;; `dbt-mode' buffers, which then get from it what lsp-mode offers:
-;; definitions and references of models and macros, hover with a model's
-;; parents, children and columns, completion, diagnostics, semantic
-;; tokens, and code lenses that preview a CTE.  Column-level features
-;; need a dbt account; the server says nothing about them otherwise.
+;; dbt 2's proprietary build runs a language server, `dbt lsp', on the
+;; standard input and output; dbt-oss has none.  This client registers
+;; it with lsp-mode for `dbt-mode' buffers, which then get from it what
+;; lsp-mode offers: definitions and references of models and macros,
+;; hover with a model's parents, children and columns, completion,
+;; diagnostics, semantic tokens, and code lenses that preview a CTE.
+;; Column-level features need a dbt account; the server says nothing
+;; about them otherwise.
 ;;
 ;; What lsp-mode does not do by itself, this client does with the
 ;; server's own requests and commands:

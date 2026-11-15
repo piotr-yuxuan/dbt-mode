@@ -9,8 +9,9 @@ SQL and Jinja of dbt projects with a client of `dbt lsp` for lsp-mode.
 Every change follows the skill `workflow:plans`; load it before the first
 edit. In this repository: plans are `docs/work/plans/NNN-slug.md`, not
 tracked; the check is `make check`, run in `nix develop`, and, before a
-merge, `make test` with `DBT_MODE_TEST_DBT` naming a dbt 2 executable, so
-that the live tests run against the real server.
+merge, `make test` with `DBT_MODE_TEST_DBT` naming each build of dbt 2 at
+hand in turn, dbt-oss and the proprietary one, so that the live tests run
+against both, and against the real server with the proprietary one.
 
 ## Layout
 

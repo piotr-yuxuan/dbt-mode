@@ -43,11 +43,11 @@
 ;; - `dbt-lineage', the upstream and downstream of a model;
 ;; - `dbt-find-resource', `dbt-visit-properties' and `dbt-insert-ref'.
 ;;
-;; With dbt 2.0 or later, `dbt-lsp-deferred' starts `dbt lsp' through
-;; lsp-mode, which then takes over definitions, references, hover,
-;; completion and diagnostics, and the commands above use the server
-;; where it knows better: compiled SQL, previews of results and lineage.
-;; dbt-lsp.el is that client.  `dbt-dispatch' runs dbt's commands on the
+;; With dbt 2's proprietary build, `dbt-lsp-deferred' starts `dbt lsp'
+;; through lsp-mode, which then takes over definitions, references,
+;; hover, completion and diagnostics, and the commands above use the
+;; server where it knows better: compiled SQL, previews of results and
+;; lineage.  dbt-lsp.el is that client.  `dbt-dispatch' runs dbt's commands on the
 ;; current model.
 
 ;;; Code:
