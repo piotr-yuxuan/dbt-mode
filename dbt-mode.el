@@ -530,15 +530,18 @@ it.  The YAML entries of what IDENTIFIER resolves to count as uses."
           (when (search-forward (plist-get target :name) nil t)
             (goto-char (point-min))
             (while (re-search-forward regexp nil t)
+              ;; Resolving the call may read the index anew, which
+              ;; changes the match data: the call's place is taken first.
               (let ((call (if source
                               (list :kind kind :name (match-string 2))
                             (list :kind kind :qualifier (match-string 2) :name (match-string 1)
-                                  :version (match-string 3)))))
+                                  :version (match-string 3))))
+                    (start (match-beginning 0)))
                 (when (and (equal (plist-get call :name) (plist-get target :name))
                            (equal (car (dbt-project-resolve root call package)) definition))
                   (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
-                                   (xref-make-file-location file (line-number-at-pos (match-beginning 0))
-                                                            (- (match-beginning 0) (line-beginning-position))))
+                                   (xref-make-file-location file (line-number-at-pos start)
+                                                            (- start (line-beginning-position))))
                         uses))))))))
     (append (nreverse uses)
             (and definition

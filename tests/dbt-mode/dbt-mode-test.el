@@ -455,6 +455,19 @@ A dangling link among the project's files holds none and stops nothing."
                     ("source:events")))
       (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (car case)) root) (cdr case))))))
 
+(ert-deftest dbt-mode-xref-finds-references-while-the-index-expires ()
+  "M-? lists the calls at their lines though the index expires within its scan.
+A lifetime of 0 makes every call outlive it, as a scan longer than the
+lifetime does on a large project."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let ((dbt-project-index-lifetime 0))
+      (should (equal (sort (dbt-test-xref-files (xref-backend-references 'dbt "ref:stg_orders") root)
+                           (lambda (a b) (string< (car a) (car b))))
+                     '(("analyses/order_counts.sql" . 1) ("models/marts/orders.sql" . 12)
+                       ("models/staging/_staging.yml" . 4) ("snapshots/orders_snapshot.sql" . 3)
+                       ("tests/assert_positive_amount.sql" . 1)))))))
+
 ;; A model with versions, as dbt documents them: one file per version,
 ;; NAME_vVERSION, and the latest version given in its YAML entry.
 (defconst dbt-test-versioned-model
