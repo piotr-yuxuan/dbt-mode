@@ -544,17 +544,22 @@ A dangling link among the project's files holds none and stops nothing."
       (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (car case)) root) (cdr case))))))
 
 (ert-deftest dbt-mode-xref-finds-references-while-the-index-expires ()
-  "M-? lists the calls at their lines though the index expires within its scan.
+  "M-? lists the calls at their lines and columns though the index expires within its scan.
 A lifetime of 0 makes every call outlive it, as a scan longer than the
-lifetime does on a large project."
+lifetime does on a large project.  A call's column is that of its ref."
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/stg_orders.sql")
     (let ((dbt-project-index-lifetime 0))
-      (should (equal (sort (dbt-test-xref-files (xref-backend-references 'dbt "ref:stg_orders") root)
+      (should (equal (sort (mapcar (lambda (item)
+                                     (let ((location (xref-item-location item)))
+                                       (list (file-relative-name (xref-location-group location) root)
+                                             (xref-location-line location)
+                                             (xref-file-location-column location))))
+                                   (xref-backend-references 'dbt "ref:stg_orders"))
                            (lambda (a b) (string< (car a) (car b))))
-                     '(("analyses/order_counts.sql" . 1) ("models/marts/orders.sql" . 12)
-                       ("models/staging/_staging.yml" . 4) ("snapshots/orders_snapshot.sql" . 3)
-                       ("tests/assert_positive_amount.sql" . 1)))))))
+                     '(("analyses/order_counts.sql" 1 32) ("models/marts/orders.sql" 12 21)
+                       ("models/staging/_staging.yml" 4 0) ("snapshots/orders_snapshot.sql" 3 17)
+                       ("tests/assert_positive_amount.sql" 1 17)))))))
 
 ;; A model with versions, as dbt documents them: one file per version,
 ;; NAME_vVERSION, and the latest version given in its YAML entry.
