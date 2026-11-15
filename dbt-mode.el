@@ -411,19 +411,20 @@ An entry of the properties of a resource names what its section holds,
 as `dbt-project-section-kinds' tells, of its own package: dbt 2.0.9
 calls a root entry that names a package's model unused (dbt1089).  An
 item of a model's versions names that version of the model; an entry of
-another section, such as semantic_models, names nothing.  Another
-resource of a package other than PROJECT is qualified by its package,
-and a version of a model by its version."
+another section, such as semantic_models, names nothing, and neither
+does an exposure, which no call names.  Another resource of a package
+other than PROJECT is qualified by its package, and a version of a
+model by its version."
   (let* ((entry (eq (plist-get entity :kind) 'properties))
          (kind (if entry
                    (alist-get (plist-get entity :section) (cons '("versions" . model) dbt-project-section-kinds)
                               nil nil #'equal)
                  (plist-get entity :kind)))
+         (call (alist-get kind '((model . ref) (seed . ref) (snapshot . ref) (analysis . analysis)
+                                 (table . source) (source . source) (macro . macro) (test . macro) (doc . doc))))
          (package (and (or entry (not (equal (plist-get entity :package) project))) (plist-get entity :package))))
-    (when kind
-      (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
-                                    (doc . doc) (analysis . analysis))
-                             'ref)
+    (when call
+      (list :kind call
             :qualifier (pcase kind
                          ('table (plist-get entity :source))
                          ('source nil)
