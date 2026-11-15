@@ -451,8 +451,8 @@ A file rewritten with its size, time and mode kept still gives what it held."
 
 (ert-deftest dbt-project-resolve-reads-the-flag-that-puts-the-project-first ()
   "With require_ref_searches_node_package_before_root false in the project, an unqualified ref or source resolves there first.
-False is YAML's boolean, in any of its spellings, unquoted.  True, a
-quoted string, or no flag, the caller's package comes first; a doc
+False is YAML's boolean, false, False or FALSE, unquoted.  True, another
+spelling, a quoted string, or no flag, the caller's package comes first; a doc
 resolves in the project first whatever the flag, and a package's own
 flags count for nothing."
   (dbt-test-with-project root
@@ -470,7 +470,8 @@ flags count for nothing."
                       ("flags:\n  require_ref_searches_node_package_before_root: false\n" "shop")
                       ("flags:\n  require_ref_searches_node_package_before_root: False\n" "shop")
                       ("flags:\n  require_ref_searches_node_package_before_root: FALSE  # root first\n" "shop")
-                      ;; Quoted, a string, which dbt 2.0.9 ignores.
+                      ;; Another spelling, or quoted, a string, which dbt 2.0.9 ignores.
+                      ("flags:\n  require_ref_searches_node_package_before_root: fAlse\n" "shop_utils")
                       ("flags:\n  require_ref_searches_node_package_before_root: 'false'\n" "shop_utils")
                       ("flags:\n  require_ref_searches_node_package_before_root: \"false\"\n" "shop_utils")))
         (with-temp-file project-file
