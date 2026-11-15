@@ -174,8 +174,10 @@ need a dbt account: without one, the server says nothing about columns.
 
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
 `show`, `list`, `lint`, `format`, `parse`, `deps`, `debug`, `retry` and
-`docs generate` in a compilation buffer whose errors link to their files.
-Its selection defaults to what point is on, a `ref` or a `source` as dbt
+`docs generate` in a compilation buffer whose errors link to their files;
+with a dbt that cannot format, such as `dbt-oss`, it greys out `lint` and
+`format`, which only dbt 2's proprietary build runs. Its selection
+defaults to what point is on, a `ref` or a `source` as dbt
 selects it (`orders.v2`, `source:raw.orders`), else the current model, else
 the file by path (`path:tests/assert_positive_amount.sql`) for a file that
 holds no model, such as a singular test or a properties file; two switches
@@ -215,8 +217,9 @@ JSON `false` as null, so it shows as `NULL` with dbt lsp.
 dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one
 dbt you have. `dbt-oss`, the open-source build of dbt 2, runs all but the
 language server, the formatter and the linter: `dbt lsp` and `dbt format`
-come with dbt 2's proprietary build only, and `dbt lint` runs only there;
-dbt Core 1.x has none of them. dbt-mode asks dbt once whether it has the
+come with dbt 2's proprietary build only, and `dbt lint` runs only there,
+which `dbt system upgrade-distribution` turns `dbt-oss` into; dbt Core
+1.x has none of the three. dbt-mode asks dbt once whether it has the
 server and the formatter, asks again once dbt is replaced, and does
 without. It was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
 
@@ -291,7 +294,8 @@ file, and dbt's error, which names the file it is about, is the message. `dbt-fo
 when that changed the buffer; a failure to format is a message, and the
 save stands. A dbt with neither a server nor `dbt format`, such as
 `dbt-oss`, cannot format: `C-c C-q` saves, then says so, and
-`dbt-format-on-save-mode` leaves saves as they are.
+`dbt-format-on-save-mode` leaves saves as they are, which it says once
+for each dbt.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.
