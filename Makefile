@@ -7,8 +7,8 @@
 # executable, runs the tests against the real dbt too, and against its
 # dbt lsp when it is dbt 2's proprietary build, which dbt-oss is not.
 # DBT_MODE_TEST_DBT_CACHE, a cache of dbt's database drivers such as
-# ~/.cache/com.getdbt, is copied into the scratch home, so that dbt
-# downloads none.
+# ~/.cache/com.getdbt, is copied into the scratch home of the tests, so
+# that dbt downloads none.
 
 EMACS ?= emacs
 DEPS ?=
@@ -54,5 +54,6 @@ complexity:
 	  $(wildcard tests/*/*-test.el)
 
 test:
-	@DBT_MODE_TEST_ALLOW_SKIP="$(SKIP)" $(SCRATCH) $(EMACS) -Q --batch $(LOAD) -L tests/helpers \
-	  -l tests/run-ert.el tests
+	@DBT_MODE_TEST_ALLOW_SKIP="$(SKIP)" \
+	  $(SCRATCH) $(if $(DBT_MODE_TEST_DBT_CACHE),--dbt-cache $(call quote,$(DBT_MODE_TEST_DBT_CACHE))) \
+	  $(EMACS) -Q --batch $(LOAD) -L tests/helpers -l tests/run-ert.el tests
