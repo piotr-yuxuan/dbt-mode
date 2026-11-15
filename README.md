@@ -2,7 +2,7 @@
 
 Edit [dbt](https://www.getdbt.com/) projects in Emacs: SQL with Jinja,
 navigation across models, sources, macros and docs, previews of rows,
-lineage, and the full language server of dbt 2 through
+lineage, and, with dbt 2's proprietary build, its language server through
 [lsp-mode](https://emacs-lsp.github.io/lsp-mode/).
 
 `dbt-mode` is `sql-mode` that also reads Jinja. A `.sql` file below a
@@ -22,7 +22,7 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
   `dbt_utils.star(…)` included, goes to its definition, and on
   `ref('m', v=2)` to that version; a `ref` or a `source` resolves as dbt
-  2.0.9 resolves it, in the calling file's package first (in a macro, the
+  2.0.11 resolves it, in the calling file's package first (in a macro, the
   macro's, as dbt-mode cannot know the node that calls it), or in the
   project first when its `dbt_project.yml` sets the flag
   `require_ref_searches_node_package_before_root: false`, and a YAML entry
@@ -205,9 +205,12 @@ JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
 ## Installation
 
-dbt-mode needs Emacs 31.1 or later and lsp-mode 9. The language server
-needs dbt 2.0 or later, the `dbt` distribution (dbt Core 1.x and `dbt-oss`
-have no `dbt lsp`); it was tested with dbt 2.0.9.
+dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one
+dbt you have. `dbt-oss`, the open-source build of dbt 2, runs all but the
+language server and the formatter: `dbt lsp`, `dbt format` and `dbt
+lint` come with dbt 2's proprietary build only, and dbt Core 1.x has
+none of them. dbt-mode asks dbt once whether it has them, and does
+without. It was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:
