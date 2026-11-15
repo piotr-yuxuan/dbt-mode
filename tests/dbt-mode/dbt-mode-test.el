@@ -316,21 +316,109 @@ tags are code, in SQL strings or in comments."
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
 
+(ert-deftest dbt-mode-target-at-point-is-no-model-of-a-semantic-entry ()
+  "The name of a semantic model, a metric or a saved query names no model, though a package's model has it; its ref does."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/util_orders.sql" root))
+    (write-region (concat "semantic_models:\n  - name: util_orders\n    model: ref('util_orders')\n"
+                          "metrics:\n  - name: order_total\n"
+                          "saved_queries:\n  - name: weekly_orders\n")
+                  nil (expand-file-name "models/_semantic.yml" root))
+    (dbt-test-visit root "models/_semantic.yml")
+    (dolist (name '("util_orders" "order_total" "weekly_orders"))
+      (dbt-test-goto name)
+      (should-not (dbt-mode-target-at-point)))
+    (dbt-test-goto "util_orders')")
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "util_orders" :version nil)))))
+
 (ert-deftest dbt-mode-finds-no-package-model-from-a-root-entry ()
   "M-. on a root YAML entry that names only a package's model finds nothing, as dbt 2.0.9 calls the entry unused.
-A root entry of a root model finds that model."
+It says which package defines the model instead.  A root entry of a
+root model finds that model."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/util_orders.sql" root))
     (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
     (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
-    (dbt-test-visit root "models/_utils.yml")
-    (dbt-test-goto "util_orders")
-    (should-not (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/_utils.yml"))
+      ;; As the hook of YAML files does.
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "util_orders")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No util_orders in package shop, only in shop_utils")))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_orders.sql" . 1))))))
+
+(ert-deftest dbt-mode-names-each-package-that-defines-the-name ()
+  "M-. on a root YAML entry of a name that two packages define names both, each once."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (make-directory (expand-file-name "dbt_packages/aaa_utils/models" root) t)
+    (make-directory (expand-file-name "dbt_packages/aaa_utils/seeds" root))
+    (write-region "name: 'aaa_utils'\n" nil (expand-file-name "dbt_packages/aaa_utils/dbt_project.yml" root))
+    (dolist (file '("dbt_packages/shop_utils/models/util_orders.sql" "dbt_packages/aaa_utils/models/util_orders.sql"))
+      (write-region "select 1 as id" nil (expand-file-name file root)))
+    (write-region "id\n1\n" nil (expand-file-name "dbt_packages/aaa_utils/seeds/util_orders.csv" root))
+    (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/_utils.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "util_orders")
+      ;; In either order.
+      (should (string-match-p "\\`No util_orders in package shop, only in \\(aaa_utils, shop_utils\\|shop_utils, aaa_utils\\)\\'"
+                              (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)))))))
+
+(ert-deftest dbt-mode-finds-no-source-named-as-a-package ()
+  "M-. on source('shop_utils', 'events') finds nothing: no source is shop_utils, and a package of that name is no source.
+The project has a source events, which a message taking shop_utils for
+a package would name."
+  (dbt-test-with-project root
+    (write-region "select * from {{ source('shop_utils', 'events') }}\n" nil
+                  (expand-file-name "models/from_utils.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/from_utils.sql"))
+      (dbt-test-goto "events")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No definitions found for: source:shop_utils/events")))))
+
+(ert-deftest dbt-mode-finds-no-macro-of-a-package-the-index-lacks ()
+  "M-. on a macro of dbt's own package finds nothing, though a package defines a namesake.
+So does a macro of a package that is not installed, while the project,
+whose package lacks the macro, says where it is."
+  (dbt-test-with-project root
+    (write-region "{% macro date_spine() %}select 1{% endmacro %}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/macros/date_spine.sql" root))
+    (write-region "{{ dbt.date_spine() }} {{ codegen.date_spine() }} {{ shop.date_spine() }}\n" nil
+                  (expand-file-name "models/spine.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/spine.sql"))
+      (dolist (case '(("dbt.date_spine" . "No definitions found for: macro:dbt/date_spine")
+                      ("codegen.date_spine" . "No definitions found for: macro:codegen/date_spine")
+                      ("shop.date_spine" . "No date_spine in package shop, only in shop_utils")))
+        (dbt-test-goto (car case) (1+ (string-search "." (car case))))
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)) (cdr case)))))))
+
+(ert-deftest dbt-mode-names-the-version-a-package-lacks ()
+  "M-. on a version of a package's model that only the project has says that the package lacks that version."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (dolist (file '("dbt_packages/shop_utils/models/v_v1" "dbt_packages/shop_utils/models/v_v2" "models/marts/v_v3"))
+      (write-region "select 1" nil (expand-file-name (concat file ".sql") root)))
+    (write-region "models:\n  - name: v\n    versions:\n      - v: 1\n      - v: 2\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_v.yml" root))
+    (write-region "models:\n  - name: v\n    versions:\n      - v: 3\n" nil
+                  (expand-file-name "models/marts/_v.yml" root))
+    (write-region "select * from {{ ref('shop_utils', 'v', v=3) }}\n" nil
+                  (expand-file-name "models/marts/uses_v.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/uses_v.sql"))
+      (dbt-test-goto "'v'" 1)
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No v.v3 in package shop_utils, only in shop")))))
 
 (ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
   "A call in a package's YAML properties, singular test or macro resolves in that package first; M-? on its source entry lists its uses.
@@ -455,6 +543,24 @@ A dangling link among the project's files holds none and stops nothing."
                     ("source:events")))
       (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (car case)) root) (cdr case))))))
 
+(ert-deftest dbt-mode-xref-finds-references-while-the-index-expires ()
+  "M-? lists the calls at their lines and columns though the index expires within its scan.
+A lifetime of 0 makes every call outlive it, as a scan longer than the
+lifetime does on a large project.  A call's column is that of its ref."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/stg_orders.sql")
+    (let ((dbt-project-index-lifetime 0))
+      (should (equal (sort (mapcar (lambda (item)
+                                     (let ((location (xref-item-location item)))
+                                       (list (file-relative-name (xref-location-group location) root)
+                                             (xref-location-line location)
+                                             (xref-file-location-column location))))
+                                   (xref-backend-references 'dbt "ref:stg_orders"))
+                           (lambda (a b) (string< (car a) (car b))))
+                     '(("analyses/order_counts.sql" 1 32) ("models/marts/orders.sql" 12 21)
+                       ("models/staging/_staging.yml" 4 0) ("snapshots/orders_snapshot.sql" 3 17)
+                       ("tests/assert_positive_amount.sql" 1 17)))))))
+
 ;; A model with versions, as dbt documents them: one file per version,
 ;; NAME_vVERSION, and the latest version given in its YAML entry.
 (defconst dbt-test-versioned-model
@@ -479,6 +585,18 @@ A dangling link among the project's files holds none and stops nothing."
                      (list (cons (cdr case) 1)))))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt "ref:dim_customers@1") root)
                    '(("models/marts/dim_customers_v1.sql" . 1))))))
+
+(ert-deftest dbt-mode-goes-to-the-version-of-an-item-of-versions ()
+  "M-. on an item of a model's versions in its YAML entry goes to that version."
+  (dbt-test-with-project root
+    (pcase-dolist (`(,file . ,text) dbt-test-versioned-model)
+      (write-region text nil (expand-file-name file root)))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/_dim_customers.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "v: 1" 3)
+      (execute-kbd-macro (kbd "M-."))
+      (should (equal (file-relative-name buffer-file-name root) "models/marts/dim_customers_v1.sql")))))
 
 (ert-deftest dbt-mode-xref-finds-the-references-of-one-of-two-namesakes ()
   "M-? on a model lists the calls that resolve to it, not those of a namesake."

@@ -392,8 +392,7 @@ A file rewritten with its size, time and mode kept still gives what it held."
                      "models/marts/dim_customers_v1.sql"))
       (should (equal (funcall file '(:kind ref :name "dim_customers" :version "3"))
                      "models/marts/dim_customers_current.sql"))
-      (should (equal (funcall file '(:kind ref :name "fct")) "models/marts/fct_v10.sql"))
-      (should (equal (funcall file '(:kind ref :name "orders" :version "1")) "models/marts/orders.sql")))
+      (should (equal (funcall file '(:kind ref :name "fct")) "models/marts/fct_v10.sql")))
     (should-not (dbt-project-entities root '(model) "dim_customers_v1"))
     (should (equal (plist-get (seq-find (lambda (node) (equal (plist-get node :id) "model.shop.uses_dim"))
                                         (dbt-project-graph root))
@@ -401,6 +400,46 @@ A file rewritten with its size, time and mode kept still gives what it held."
                    '("model.shop.dim_customers.v2" "model.shop.dim_customers.v1" "model.shop.fct.v10")))
     (let ((entity (dbt-project-file-entity root (expand-file-name "models/marts/dim_customers_v1.sql" root))))
       (should (equal (list (plist-get entity :name) (plist-get entity :version)) '("dim_customers" "1"))))))
+
+(ert-deftest dbt-project-resolve-ref-takes-the-latest-version-of-each-package ()
+  "A ref without a version means the latest version of each package's model: its latest_version, else its highest."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (dolist (file '("models/marts/v_v1" "models/marts/w_v1" "models/marts/w_v2" "models/marts/w_v3"
+                    "models/marts/y_v1" "models/marts/y_v2"
+                    "dbt_packages/shop_utils/models/v_v1" "dbt_packages/shop_utils/models/v_v2"
+                    "dbt_packages/shop_utils/models/w_v1" "dbt_packages/shop_utils/models/w_v2"
+                    "dbt_packages/shop_utils/models/y_v1" "dbt_packages/shop_utils/models/y_v2"
+                    "dbt_packages/shop_utils/models/y_v3"))
+      (write-region "select 1" nil (expand-file-name (concat file ".sql") root)))
+    (write-region (concat "models:\n  - name: v\n    latest_version: 1\n    versions:\n      - v: 1\n"
+                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n      - v: 3\n"
+                          "  - name: y\n    versions:\n      - v: 1\n      - v: 2\n")
+                  nil (expand-file-name "models/marts/_v.yml" root))
+    (write-region (concat "models:\n  - name: v\n    latest_version: 2\n    versions:\n      - v: 1\n      - v: 2\n"
+                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n"
+                          "  - name: y\n    latest_version: 1\n    versions:\n      - v: 1\n      - v: 2\n"
+                          "      - v: 3\n")
+                  nil (expand-file-name "dbt_packages/shop_utils/models/_v.yml" root))
+    (let ((ids (lambda (name caller)
+                 (mapcar #'dbt-project-node-id (dbt-project-resolve root (list :kind 'ref :name name) caller)))))
+      (should (equal (funcall ids "v" "shop") '("model.shop.v.v1" "model.shop_utils.v.v2")))
+      (should (equal (funcall ids "v" "shop_utils") '("model.shop_utils.v.v2" "model.shop.v.v1")))
+      (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2" "model.shop.w.v3")))
+      ;; The latest_version of one package is not that of the other.
+      (should (equal (funcall ids "y" "shop") '("model.shop.y.v2" "model.shop_utils.y.v1"))))))
+
+(ert-deftest dbt-project-resolve-ref-takes-only-the-version-it-names ()
+  "A ref with a version means that version of a model alone, never a model without versions."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1" nil (expand-file-name "dbt_packages/shop_utils/models/orders_v1.sql" root))
+    (write-region "models:\n  - name: orders\n    versions:\n      - v: 1\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_orders.yml" root))
+    (let ((ids (lambda (target) (mapcar #'dbt-project-node-id (dbt-project-resolve root target "shop")))))
+      (should (equal (funcall ids '(:kind ref :name "orders" :version "1")) '("model.shop_utils.orders.v1")))
+      (should (equal (funcall ids '(:kind ref :name "orders")) '("model.shop.orders" "model.shop_utils.orders.v1")))
+      (should-not (funcall ids '(:kind ref :name "stg_orders" :version "1"))))))
 
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
@@ -411,6 +450,25 @@ A file rewritten with its size, time and mode kept still gives what it held."
                               :name)
                    "orders_snapshot"))
     (should-not (dbt-project-file-entity root (expand-file-name "macros/cents_to_dollars.sql" root)))))
+
+(ert-deftest dbt-project-resolve-takes-a-doc-of-the-packages-by-name ()
+  "A doc resolves in the project first, then in the packages by the order of their names, not of packages.yml."
+  (dbt-test-with-project root
+    (dolist (package '("zzz" "aaa"))
+      (make-directory (expand-file-name (format "local_packages/%s/models" package) root) t)
+      (write-region (format "name: '%s'\n" package) nil
+                    (expand-file-name (format "local_packages/%s/dbt_project.yml" package) root))
+      (write-region "{% docs shared %}\nIn a package.\n{% enddocs %}\n" nil
+                    (expand-file-name (format "local_packages/%s/models/docs.md" package) root)))
+    (write-region "packages:\n  - local: local_packages/zzz\n  - local: local_packages/aaa\n" nil
+                  (expand-file-name "packages.yml" root))
+    (let ((packages (lambda ()
+                      (mapcar (lambda (entity) (plist-get entity :package))
+                              (dbt-project-resolve root '(:kind doc :name "shared") "zzz")))))
+      (should (equal (funcall packages) '("aaa" "zzz")))
+      (write-region "{% docs shared %}\nIn the project.\n{% enddocs %}\n" nil (expand-file-name "models/shared.md" root))
+      (dbt-project-forget root)
+      (should (equal (funcall packages) '("shop" "aaa" "zzz"))))))
 
 (ert-deftest dbt-project-resolve-prefers-the-caller-then-the-project ()
   "A ref resolves in the given package; else the caller's, then the project's."

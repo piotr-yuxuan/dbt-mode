@@ -406,26 +406,30 @@ KIND:NAME."
     (user-error "Not a dbt identifier: %s; complete one, such as ref:NAME" identifier)))
 
 (defun dbt-mode-entity-target (entity project)
-  "Return the target that names ENTITY, an entity of the PROJECT's index.
+  "Return the target that names ENTITY, an entity of the PROJECT's index, or nil.
 An entry of the properties of a resource names what its section holds,
 as `dbt-project-section-kinds' tells, of its own package: dbt 2.0.9
-calls a root entry that names a package's model unused (dbt1089).
-Another resource of a package other than PROJECT is qualified by its
-package, and a version of a model by its version."
+calls a root entry that names a package's model unused (dbt1089).  An
+item of a model's versions names that version of the model; an entry of
+another section, such as semantic_models, names nothing.  Another
+resource of a package other than PROJECT is qualified by its package,
+and a version of a model by its version."
   (let* ((entry (eq (plist-get entity :kind) 'properties))
          (kind (if entry
-                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
+                   (alist-get (plist-get entity :section) (cons '("versions" . model) dbt-project-section-kinds)
+                              nil nil #'equal)
                  (plist-get entity :kind)))
          (package (and (or entry (not (equal (plist-get entity :package) project))) (plist-get entity :package))))
-    (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
-                                  (doc . doc) (analysis . analysis))
-                           'ref)
-          :qualifier (pcase kind
-                       ('table (plist-get entity :source))
-                       ('source nil)
-                       (_ package))
-          :name (plist-get entity :name)
-          :version (plist-get entity :version))))
+    (when kind
+      (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
+                                    (doc . doc) (analysis . analysis))
+                             'ref)
+            :qualifier (pcase kind
+                         ('table (plist-get entity :source))
+                         ('source nil)
+                         (_ package))
+            :name (plist-get entity :name)
+            :version (plist-get entity :version)))))
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.
@@ -499,8 +503,27 @@ a model, YAML properties, a singular test."
              (xref-make-file-location (plist-get entity :file) (plist-get entity :line) 0)))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
-  "Return the definitions of IDENTIFIER."
-  (mapcar #'dbt-mode--xref (dbt-mode-definitions (dbt-mode-parse-identifier identifier))))
+  "Return the definitions of IDENTIFIER.
+When IDENTIFIER names a package of the project that lacks the name, and
+other packages define it, signal an error that names them, as for a root
+YAML entry of a package's model, which dbt reads as unused.  xref's
+contract asks for nil, but the command that finds definitions is xref's
+own: the backend is the one place that can say it.  The qualifier of a
+source is a source, and that of a macro may be dbt's own package or a
+name of its context such as `builtins', which the index lacks: neither
+is an error.  Where dbt lsp serves the buffer, the error never shows, as
+`dbt-mode-xref-backend' leaves to the server what dbt-mode does not
+resolve."
+  (let* ((target (dbt-mode-parse-identifier identifier))
+         (definitions (dbt-mode-definitions target)))
+    (when-let* (((null definitions))
+                (package (plist-get target :qualifier))
+                ((not (eq (plist-get target :kind) 'source)))
+                ((assoc package (dbt-project-packages (dbt-project-root))))
+                (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
+      (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
+                  (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
+    (mapcar #'dbt-mode--xref definitions)))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
@@ -530,15 +553,18 @@ it.  The YAML entries of what IDENTIFIER resolves to count as uses."
           (when (search-forward (plist-get target :name) nil t)
             (goto-char (point-min))
             (while (re-search-forward regexp nil t)
+              ;; Resolving the call may read the index anew, which
+              ;; changes the match data: the call's place is taken first.
               (let ((call (if source
                               (list :kind kind :name (match-string 2))
                             (list :kind kind :qualifier (match-string 2) :name (match-string 1)
-                                  :version (match-string 3)))))
+                                  :version (match-string 3))))
+                    (start (match-beginning 0)))
                 (when (and (equal (plist-get call :name) (plist-get target :name))
                            (equal (car (dbt-project-resolve root call package)) definition))
                   (push (xref-make (buffer-substring (line-beginning-position) (line-end-position))
-                                   (xref-make-file-location file (line-number-at-pos (match-beginning 0))
-                                                            (- (match-beginning 0) (line-beginning-position))))
+                                   (xref-make-file-location file (line-number-at-pos start)
+                                                            (- start (line-beginning-position))))
                         uses))))))))
     (append (nreverse uses)
             (and definition
@@ -620,7 +646,8 @@ In a YAML file, it is the resource whose entry holds point."
           (car (dbt-mode-definitions target))))))
 
 (defun dbt-mode-resource-selector (resource)
-  "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version."
+  "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version.
+RESOURCE is a resource or a target: only its :name and :version count."
   (concat (plist-get resource :name)
           (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
 

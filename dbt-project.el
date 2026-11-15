@@ -674,20 +674,29 @@ CALLER, though dbt 2.0.9 takes that of the node calling the macro."
 PACKAGE is nil for a call with one argument.  The candidates are models,
 seeds and snapshots named NAME: those of PACKAGE when it is given;
 otherwise all, in the order of `dbt-project-lookup-rank' for CALLER, the
-package of the calling file.  Of a model with versions, the candidate is
-that of VERSION, or else its latest_version, or else its highest
-version."
+package of the calling file.  As in dbt 2.0.11, with VERSION only the
+models that have that version are candidates, none without versions;
+without VERSION, a model with versions is a candidate through one
+version, the latest_version of the model's package or else the highest
+version in that package, as a package's model and the project's
+namesake have versions of their own."
   (let* ((candidates (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
                                  (dbt-project-entities root '(model seed snapshot) name)))
-         (wanted (or version
-                     (seq-some (lambda (entry) (plist-get entry :latest-version))
-                               (dbt-project-entities root '(properties) name package))
-                     (car (sort (delq nil (mapcar (lambda (entity) (plist-get entity :version)) candidates))
-                                (lambda (one other) (string-version-lessp other one)))))))
+         (latest-version (lambda (owner)
+                           (or (seq-some (lambda (entry) (plist-get entry :latest-version))
+                                         (dbt-project-entities root '(properties) name owner))
+                               (car (sort (delq nil (mapcar (lambda (entity)
+                                                              (and (equal owner (plist-get entity :package))
+                                                                   (plist-get entity :version)))
+                                                            candidates))
+                                          (lambda (one other) (string-version-lessp other one))))))))
     (seq-sort-by (dbt-project-lookup-rank root caller)
                  #'<
                  (seq-filter (lambda (entity)
-                               (or (null (plist-get entity :version)) (equal wanted (plist-get entity :version))))
+                               (let ((own (plist-get entity :version)))
+                                 (if version
+                                     (equal version own)
+                                   (or (null own) (equal (funcall latest-version (plist-get entity :package)) own)))))
                              candidates))))
 
 (defun dbt-project-resolve (root target &optional caller)
@@ -699,7 +708,8 @@ or an analysis, or the source of a table, and nil for a source itself.
 VERSION is that of a `ref', nil for the latest.  CALLER is the package
 of the calling file, which a `ref' or a `source' looks in as
 `dbt-project-lookup-rank' says; a `doc' looks in the project first,
-whatever the flag that it reads."
+whatever the flag that it reads, then in the packages by the order of
+their names, as dbt 2.0.11 does whatever packages.yml lists first."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
@@ -710,7 +720,12 @@ whatever the flag that it reads."
                                 (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
                                             (dbt-project-entities root '(table) name))
                               (dbt-project-entities root '(source) name))))
-      ('doc (dbt-project-entities root '(doc) name qualifier))
+      ('doc (let ((project (dbt-project-name root)))
+              (seq-sort-by (lambda (doc)
+                             (let ((package (plist-get doc :package)))
+                               (if (equal package project) "" package)))
+                           #'string<
+                           (dbt-project-entities root '(doc) name qualifier))))
       ('analysis (dbt-project-entities root '(analysis) name qualifier))
       ('macro (dbt-project-entities root '(macro test) name qualifier)))))
 
