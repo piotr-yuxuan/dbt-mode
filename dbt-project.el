@@ -245,7 +245,8 @@ which dbt 2.0.9 ignores for its default.")
 The plist has a property for each key of `dbt-project-config-keys', with
 dbt's default when dbt_project.yml does not set it, or cannot be read.
 A list of paths is either [a, b] on the line of its key, or the items
-below it."
+below it.  A key under a path is read in block style only: under
+`flags: {...}' it keeps its default."
   (let ((lines (dbt-project-yaml-scan (with-temp-buffer
                                         (ignore-error file-error
                                           (insert-file-contents (expand-file-name dbt-project-file root)))
