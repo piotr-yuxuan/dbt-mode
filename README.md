@@ -22,7 +22,8 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
   `dbt_utils.star(…)` included, goes to its definition, and on
   `ref('m', v=2)` to that version; a `ref` or a `source` resolves as dbt
-  2.0.9 resolves it, in the calling file's package first, or in the
+  2.0.9 resolves it, in the calling file's package first (in a macro, the
+  macro's, as dbt-mode cannot know the node that calls it), or in the
   project first when its `dbt_project.yml` sets the flag
   `require_ref_searches_node_package_before_root: false`, and a YAML entry
   in its own package; `M-?` lists the calls that resolve to the same

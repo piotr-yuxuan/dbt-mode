@@ -348,6 +348,8 @@ The project's namesakes and their uses come after, or not at all."
     (write-region (concat "models:\n  - name: pkg_src\n    data_tests:\n      - relationships:\n"
                           "          arguments:\n            to: ref('stg_orders')\n            field: id\n")
                   nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
+    ;; dbt 2.0.9 takes the package of the node that calls the macro,
+    ;; which dbt-mode cannot know, as `dbt-project-lookup-rank' says.
     (write-region "{% macro pkg_orders() %}\n  select * from {{ ref('stg_orders') }}\n{% endmacro %}\n" nil
                   (expand-file-name "dbt_packages/shop_utils/macros/pkg_orders.sql" root))
     (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"
