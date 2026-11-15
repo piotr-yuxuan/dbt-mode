@@ -1,19 +1,32 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
 #
-# Usage: scripts/with-scratch-home COMMAND [ARGUMENT...]
+# Usage: scripts/with-scratch-home [--dbt-cache DIRECTORY] COMMAND [ARGUMENT...]
 #
 # Run COMMAND with a fresh HOME, XDG directories and TMPDIR, so that no
 # test reads or writes the user's own: no git configuration but the test
 # identity, no Emacs load path from the session, no display, no dbt
 # profile.  The marker file .dbt-mode-scratch in HOME tells
-# tests/run-ert.el that it runs here.  The scratch directory is deleted
+# tests/run-ert.el that it runs here.  DIRECTORY, a cache of dbt's
+# database drivers such as ~/.cache/com.getdbt, is copied as the scratch
+# cache's com.getdbt, where dbt looks for its driver before it downloads
+# one; the original stays as it is.  The scratch directory is deleted
 # when COMMAND succeeds, and kept and printed when it fails.
 
 set -uo pipefail
 
+usage="usage: scripts/with-scratch-home [--dbt-cache DIRECTORY] COMMAND [ARGUMENT...]"
+cache=
+if [[ "${1:-}" == --dbt-cache ]]; then
+  cache=${2:-}
+  shift 2 || { echo "$usage" >&2; exit 2; }
+  if [[ ! -d "$cache" ]]; then
+    echo "with-scratch-home: no directory for --dbt-cache: $cache" >&2
+    exit 2
+  fi
+fi
 if (( $# == 0 )); then
-  echo "usage: scripts/with-scratch-home COMMAND [ARGUMENT...]" >&2
+  echo "$usage" >&2
   exit 2
 fi
 
@@ -25,6 +38,10 @@ trap '' PIPE
 scratch=$(TMPDIR=/tmp mktemp -d -t dbt-mode-scratch.XXXXXX) || exit 2
 mkdir -p "$scratch"/{home,config,cache,data,state,tmp}
 touch "$scratch/home/.dbt-mode-scratch"
+if [[ -n "$cache" ]] && ! cp -R -- "$cache/." "$scratch/cache/com.getdbt/"; then
+  echo "with-scratch-home: kept $scratch" >&2
+  exit 2
+fi
 
 env -u EMACSLOADPATH -u DISPLAY -u WAYLAND_DISPLAY \
   HOME="$scratch/home" \

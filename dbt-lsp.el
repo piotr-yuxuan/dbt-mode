@@ -7,13 +7,14 @@
 
 ;;; Commentary:
 
-;; dbt 2.0 and later run a language server, `dbt lsp', on the standard
-;; input and output.  This client registers it with lsp-mode for
-;; `dbt-mode' buffers, which then get from it what lsp-mode offers:
-;; definitions and references of models and macros, hover with a model's
-;; parents, children and columns, completion, diagnostics, semantic
-;; tokens, and code lenses that preview a CTE.  Column-level features
-;; need a dbt account; the server says nothing about them otherwise.
+;; dbt 2's proprietary build runs a language server, `dbt lsp', on the
+;; standard input and output; dbt-oss has none.  This client registers
+;; it with lsp-mode for `dbt-mode' buffers, which then get from it what
+;; lsp-mode offers: definitions and references of models and macros,
+;; hover with a model's parents, children and columns, completion,
+;; diagnostics, semantic tokens, and code lenses that preview a CTE.
+;; Column-level features need a dbt account; the server says nothing
+;; about them otherwise.
 ;;
 ;; What lsp-mode does not do by itself, this client does with the
 ;; server's own requests and commands:
@@ -65,31 +66,10 @@ over the project; dbt-mode steps aside where it says that it answers."
   :type 'boolean
   :group 'dbt)
 
-(defvar dbt-lsp--servers (make-hash-table :test #'equal)
-  "From the file name of a dbt executable to whether it runs `dbt lsp'.
-The value is `yes' or `no'.")
-
-(defvar dbt-lsp--probe-seconds 10
-  "The seconds that dbt has to say whether it runs `dbt lsp'.")
-
 (defun dbt-lsp-server-p ()
-  "Return non-nil when `dbt-executable' runs a language server.
-Only dbt 2.0 or later does; dbt Core 1.x has no `dbt lsp'.  The answer
-is kept for each executable, whichever it is.  A dbt that does not
-answer within `dbt-lsp--probe-seconds' runs none."
-  (when-let* ((executable (executable-find dbt-executable)))
-    (eq 'yes
-        (with-memoization (gethash executable dbt-lsp--servers)
-          (let ((process (ignore-errors
-                           (make-process :name "dbt lsp --help" :command (list executable "lsp" "--help")
-                                         :connection-type 'pipe :noquery t)))
-                (deadline (+ (float-time) dbt-lsp--probe-seconds)))
-            (while (and (process-live-p process) (< (float-time) deadline))
-              (accept-process-output process 0.1))
-            (prog1 (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
-                       'yes
-                     'no)
-              (when process (delete-process process))))))))
+  "Return non-nil when `dbt-executable' runs a language server, `dbt lsp'.
+Only dbt 2.0's proprietary build does, as `dbt-project-command-p' asks."
+  (dbt-project-command-p "lsp"))
 
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.
@@ -153,17 +133,23 @@ the buffer, as lsp-mode would guess before it looks at the folders."
 
 ;;;###autoload
 (defun dbt-lsp ()
-  "Start dbt lsp for the current buffer, on the root of its dbt project."
+  "Start dbt lsp for the current buffer, on the root of its dbt project.
+A dbt that runs no server, such as dbt-oss, is an error."
   (interactive)
+  (unless (dbt-lsp-server-p)
+    (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
   (dbt-lsp-add-project-folder)
   (lsp))
 
 ;;;###autoload
 (defun dbt-lsp-deferred ()
   "Start dbt lsp for the current buffer once it is shown.
-On the root of its dbt project; for `dbt-mode-hook'."
-  (dbt-lsp-add-project-folder)
-  (lsp-deferred))
+On the root of its dbt project; for `dbt-mode-hook'.  Nothing starts
+when dbt runs no server, such as dbt-oss, which lsp-mode would take for
+a server to install."
+  (when (dbt-lsp-server-p)
+    (dbt-lsp-add-project-folder)
+    (lsp-deferred)))
 
 ;;;; Commands of the server
 

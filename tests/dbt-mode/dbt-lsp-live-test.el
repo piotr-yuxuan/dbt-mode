@@ -31,6 +31,9 @@ and the buffers of rows and lineage are killed."
   (declare (indent 1) (debug (symbolp body)))
   `(progn
      (unless dbt-test-live-dbt (ert-skip "no dbt 2 executable"))
+     ;; dbt-oss runs no server: only dbt 2's proprietary build does.
+     (unless (let ((dbt-executable dbt-test-live-dbt)) (dbt-lsp-server-p))
+       (ert-skip "no dbt lsp in this dbt"))
      (dbt-test-with-project ,root
        (let ((dbt-executable dbt-test-live-dbt)
              (dbt-lsp-arguments (list "--profiles-dir" ,root "--no-manage-state"))

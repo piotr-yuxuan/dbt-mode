@@ -2,7 +2,7 @@
 
 Edit [dbt](https://www.getdbt.com/) projects in Emacs: SQL with Jinja,
 navigation across models, sources, macros and docs, previews of rows,
-lineage, and the full language server of dbt 2 through
+lineage, and, with dbt 2's proprietary build, its language server through
 [lsp-mode](https://emacs-lsp.github.io/lsp-mode/).
 
 `dbt-mode` is `sql-mode` that also reads Jinja. A `.sql` file below a
@@ -22,7 +22,7 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
   `dbt_utils.star(…)` included, goes to its definition, and on
   `ref('m', v=2)` to that version; a `ref` or a `source` resolves as dbt
-  2.0.9 resolves it, in the calling file's package first (in a macro, the
+  2.0.11 resolves it, in the calling file's package first (in a macro, the
   macro's, as dbt-mode cannot know the node that calls it), or in the
   project first when its `dbt_project.yml` sets the flag
   `require_ref_searches_node_package_before_root: false`, and a YAML entry
@@ -123,8 +123,9 @@ YAML, packages under `packages-install-path` and local packages, and leaves
 or declares belongs to that project. Saving re-reads only the files that
 changed.
 
-With dbt 2 (`dbt lsp`), `dbt-lsp-deferred` starts the server through
-lsp-mode, which then gives:
+With dbt 2's proprietary build (`dbt lsp`), `dbt-lsp-deferred` starts the
+server through lsp-mode, which then gives the following; with `dbt-oss`
+it starts nothing, and `M-x dbt-lsp` says why:
 
 - definitions of what dbt-mode does not resolve, such as dbt's own macros:
   on a `ref`, a source, a doc or a macro of the project or its packages,
@@ -205,9 +206,13 @@ JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
 ## Installation
 
-dbt-mode needs Emacs 31.1 or later and lsp-mode 9. The language server
-needs dbt 2.0 or later, the `dbt` distribution (dbt Core 1.x and `dbt-oss`
-have no `dbt lsp`); it was tested with dbt 2.0.9.
+dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one
+dbt you have. `dbt-oss`, the open-source build of dbt 2, runs all but the
+language server, the formatter and the linter: `dbt lsp` and `dbt format`
+come with dbt 2's proprietary build only, and `dbt lint` runs only there;
+dbt Core 1.x has none of them. dbt-mode asks dbt once whether it has the
+server and the formatter, asks again once dbt is replaced, and does
+without. It was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:
@@ -235,8 +240,9 @@ session before it starts the server, so that the server runs on the
 project, not on an enclosing repository, and each dbt project of a
 repository gets its own server, whatever `lsp-auto-guess-root` says. It
 adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
-it asks once per executable, within ten seconds. `dbt-properties-mode-maybe` turns
-on `M-.`, `M-?` and completion in the YAML files of a dbt project.
+it asks once, within ten seconds, and again once dbt is replaced.
+`dbt-properties-mode-maybe` turns on `M-.`, `M-?` and completion in the
+YAML files of a dbt project.
 
 ## Options
 
@@ -277,7 +283,9 @@ and still fail on another file of the project: the buffer shows the
 file, and dbt's error, which names the file it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
 `dbt-mode-hook`, formats after each save, and with dbt lsp saves again
 when that changed the buffer; a failure to format is a message, and the
-save stands.
+save stands. A dbt with neither a server nor `dbt format`, such as
+`dbt-oss`, cannot format: `C-c C-q` saves, then says so, and
+`dbt-format-on-save-mode` leaves saves as they are.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.
@@ -304,7 +312,10 @@ of the package already has.
 `make check` in `nix develop` runs the lints and the tests; the lsp client
 is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
 `DBT_MODE_TEST_DBT` naming a dbt 2 executable, the tests also run the real
-`dbt lsp` on the fixture project, `tests/fixtures/shop`, through lsp-mode.
+dbt on the fixture project, `tests/fixtures/shop`, and, when it is the
+proprietary build, its `dbt lsp` through lsp-mode. `DBT_MODE_TEST_DBT_CACHE`,
+naming a cache of dbt's database drivers such as `~/.cache/com.getdbt`, is
+copied into the scratch home, so that dbt downloads no driver.
 
 ## Licence
 

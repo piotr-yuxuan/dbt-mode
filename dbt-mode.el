@@ -43,12 +43,12 @@
 ;; - `dbt-lineage', the upstream and downstream of a model;
 ;; - `dbt-find-resource', `dbt-visit-properties' and `dbt-insert-ref'.
 ;;
-;; With dbt 2.0 or later, `dbt-lsp-deferred' starts `dbt lsp' through
-;; lsp-mode, which then takes over definitions, references, hover,
-;; completion and diagnostics, and the commands above use the server
-;; where it knows better: compiled SQL, previews of results and lineage.
-;; dbt-lsp.el is that client.  `dbt-dispatch' runs dbt's commands on the
-;; current model.
+;; With dbt 2's proprietary build, `dbt-lsp-deferred' starts `dbt lsp'
+;; through lsp-mode, which then takes over definitions, references,
+;; hover, completion and diagnostics, and the commands above use the
+;; server where it knows better: compiled SQL, previews of results and
+;; lineage.  dbt-lsp.el is that client.  `dbt-dispatch' runs dbt's
+;; commands on the current model.
 
 ;;; Code:
 
@@ -967,7 +967,8 @@ A buffer saved meanwhile, as by a timer, is formatted as usual.")
 With dbt lsp, the server formats it as it answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
-dbt ends, unless it was modified meanwhile."
+dbt ends, unless it was modified meanwhile.  A dbt with neither, such
+as dbt-oss, cannot format: that is an error, once the buffer is saved."
   (interactive)
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
@@ -975,23 +976,30 @@ dbt ends, unless it was modified meanwhile."
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
       (save-buffer)
+      (unless (dbt-project-command-p "format")
+        ;; Without any dbt, that is what it says.
+        (dbt-project-executable)
+        (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs"))
       (dbt-cli-format (current-buffer)))))
 
 (defun dbt-mode--format-after-save ()
   "Format the buffer just saved, and save it again when that changed it.
 For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
-message: the save stands."
+message: the save stands, as without any dbt.  A dbt that cannot
+format leaves it alone."
   (unless (eq dbt-mode--formatting (current-buffer))
     (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
-          (if (not (dbt-mode-server-p))
-              (dbt-cli-format (current-buffer))
-            ;; The server answers later: the save that follows its edits
-            ;; formats nothing again.
-            (dbt-lsp-format-buffer (lambda ()
-                                     (when (buffer-modified-p)
-                                       (let ((dbt-mode--formatting (current-buffer)))
-                                         (save-buffer))))))
+          (cond ((dbt-mode-server-p)
+                 ;; The server answers later: the save that follows its
+                 ;; edits formats nothing again.
+                 (dbt-lsp-format-buffer (lambda ()
+                                          (when (buffer-modified-p)
+                                            (let ((dbt-mode--formatting (current-buffer)))
+                                              (save-buffer))))))
+                ((dbt-project-command-p "format") (dbt-cli-format (current-buffer)))
+                ;; Without any dbt, that is the message.
+                (t (dbt-project-executable)))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 
 (define-minor-mode dbt-format-on-save-mode
@@ -999,7 +1007,9 @@ message: the save stands."
 With dbt lsp, the formatted buffer is saved again when formatting
 changed it.  Without a server, `dbt format' formats the saved file
 while you go on, and the buffer shows the result unless you modified it
-meanwhile.  A failure to format is a message, and the save stands."
+meanwhile.  A failure to format is a message, and the save stands.  A
+dbt with neither a server nor `dbt format', such as dbt-oss, leaves
+saves as they are."
   :lighter " Fmt"
   (if dbt-format-on-save-mode
       (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)

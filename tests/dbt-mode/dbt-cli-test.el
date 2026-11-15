@@ -636,7 +636,8 @@ C-c C-q with the mode on formats once."
       (should (equal (buffer-string) "select 1")))))
 
 (ert-deftest dbt-cli-format-leaves-nothing-behind-without-dbt ()
-  "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind."
+  "Without dbt, C-c C-q saves, says there is no dbt, and leaves no buffer or process behind.
+A save in `dbt-format-on-save-mode' says so too, and stands."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
@@ -645,10 +646,17 @@ C-c C-q with the mode on formats once."
             (processes (process-list)))
         (goto-char (point-min))
         (insert "-- edited\n")
-        (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+        (should (string-prefix-p "No dbt to run: no executable"
+                                 (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
         (should-not (buffer-modified-p))
         (should (equal (process-list) processes))
-        (should-not (seq-difference (buffer-list) buffers))))))
+        (should-not (seq-difference (buffer-list) buffers))
+        (dbt-format-on-save-mode 1)
+        (insert "-- edited again\n")
+        (let ((start (with-current-buffer (messages-buffer) (point-max))))
+          (execute-kbd-macro (kbd "C-x C-s"))
+          (dbt-test-message-since start "dbt could not format orders\\.sql: No dbt to run: no executable"))
+        (should-not (buffer-modified-p))))))
 
 (ert-deftest dbt-cli-formats-after-each-save ()
   "In `dbt-format-on-save-mode', without a server, each save has dbt format the file."

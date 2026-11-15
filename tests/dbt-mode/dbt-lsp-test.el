@@ -173,14 +173,105 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
       (should-not (dbt-lsp-server-p)))
     (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
 
+(ert-deftest dbt-lsp-asks-dbt-about-each-command ()
+  "dbt is asked about each command apart: it may run dbt lsp and not dbt format, whichever is asked first."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; [ \"$1 $2\" = \"lsp --help\" ]"
+    (let ((dbt-executable dbt))
+      (should-not (dbt-project-command-p "format"))
+      (should (dbt-project-command-p "lsp"))
+      (should-not (dbt-project-command-p "format")))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\nlsp --help\n")))
+  (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"
+    (let ((dbt-executable dbt))
+      (should (dbt-project-command-p "lsp"))
+      (should-not (dbt-project-command-p "format")))))
+
+(ert-deftest dbt-lsp-asks-a-replaced-dbt-again ()
+  "A dbt replaced in place, as an upgrade from dbt-oss is, or a link pointed at another dbt, as a new profile does, is asked again.
+The two dbts that the link names have one modification time, as the
+files of the Nix store do: only their true names tell them apart."
+  (dbt-lsp-test-with-dbt dbt "exit 2"
+    (let ((dbt-executable dbt))
+      (should-not (dbt-project-command-p "format"))
+      (with-temp-file dbt (insert "#!/bin/sh\nexit 0\n"))
+      (set-file-modes dbt #o755)
+      (set-file-times dbt (time-add (current-time) 10))
+      (should (dbt-project-command-p "format")))
+    (let* ((directory (file-name-directory dbt))
+           (profile (expand-file-name "profile" directory))
+           (dbt-executable (expand-file-name "bin/dbt" profile)))
+      (dolist (build '(("proprietary" . 0) ("oss" . 2)))
+        (let ((file (expand-file-name (format "%s/bin/dbt" (car build)) directory)))
+          (make-directory (file-name-directory file) t)
+          (with-temp-file file (insert (format "#!/bin/sh\nexit %d\n" (cdr build))))
+          (set-file-modes file #o755)
+          (set-file-times file 1)))
+      (make-symbolic-link (expand-file-name "proprietary" directory) profile)
+      (should (dbt-project-command-p "format"))
+      (delete-file profile)
+      (make-symbolic-link (expand-file-name "oss" directory) profile)
+      (should-not (dbt-project-command-p "format")))))
+
+(ert-deftest dbt-lsp-starts-nothing-with-a-dbt-without-a-server ()
+  "With a dbt that runs no dbt lsp, such as dbt-oss, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why."
+  (dbt-lsp-test-with-dbt dbt "exit 2"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt))
+          (dbt-lsp-deferred)
+          (should-not (bound-and-true-p lsp--buffer-deferred))
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
+                         "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
+          (should-not (dbt-lsp-workspace)))))))
+
+(ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
+  "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
+  (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"
+    (dbt-test-with-project root
+      (let* ((dbt-executable dbt)
+             (lsp--session nil)
+             (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
+             (buffer (dbt-test-visit root "models/marts/orders.sql")))
+        (unwind-protect
+            (with-current-buffer buffer
+              (dbt-lsp-deferred)
+              (should lsp--buffer-deferred))
+          ;; Its start, once Emacs is idle, finds the buffer gone.
+          (kill-buffer buffer))))))
+
 (ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
   (dbt-lsp-test-with-dbt dbt "exec sleep 20"
     (let ((dbt-executable dbt)
-          (dbt-lsp--probe-seconds 1)
+          (dbt-project--probe-seconds 1)
           (start (float-time)))
       (should-not (dbt-lsp-server-p))
       (should (< (- (float-time) start) 5)))))
+
+(ert-deftest dbt-lsp-formats-nothing-with-a-dbt-that-cannot ()
+  "With a dbt that runs neither dbt lsp nor dbt format, such as dbt-oss, C-c C-q saves, then says it cannot format.
+A save in `dbt-format-on-save-mode' stays as it is, with no message.
+dbt is only asked whether it runs dbt format, once."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exit 2"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt))
+          (goto-char (point-min))
+          (insert "-- edited\n")
+          (should (string-match-p "\\`This dbt cannot format: it has no dbt format"
+                                  (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
+          (should-not (buffer-modified-p))
+          (goto-char (point-min))
+          (insert "-- edited again\n")
+          (dbt-format-on-save-mode 1)
+          (let ((start (with-current-buffer (messages-buffer) (point-max))))
+            (execute-kbd-macro (kbd "C-x C-s"))
+            (should-not (string-search "format" (with-current-buffer (messages-buffer)
+                                                  (buffer-substring start (point-max))))))
+          (should (equal (dbt-test-file-text root "models/marts/orders.sql") (buffer-string))))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
 
 (ert-deftest dbt-lsp-adds-a-folder-only-for-a-server ()
   "The root of the project becomes a folder of the lsp session only if dbt runs a server.

@@ -4,7 +4,11 @@
 # `nix develop', which provides every tool, or with DEPS naming the
 # directories of lsp-mode and its dependencies.  Every test and lint run
 # happens in a scratch home.  DBT_MODE_TEST_DBT, when it names a dbt 2
-# executable, runs the tests against the real dbt lsp too.
+# executable, runs the tests against the real dbt too, and against its
+# dbt lsp when it is dbt 2's proprietary build, which dbt-oss is not.
+# DBT_MODE_TEST_DBT_CACHE, a cache of dbt's database drivers such as
+# ~/.cache/com.getdbt, is copied into the scratch home of the tests, so
+# that dbt downloads none.
 
 EMACS ?= emacs
 DEPS ?=
@@ -12,8 +16,12 @@ SCRATCH := scripts/with-scratch-home
 PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-babel.el dbt-dashboard.el dbt-lsp.el
 TOOL_EL := $(wildcard scripts/*.el tests/helpers/*.el) tests/run-ert.el
 LOAD := -L . $(addprefix -L ,$(DEPS))
-# Without a dbt 2, the live tests skip for this reason only.
-SKIP := $(if $(DBT_MODE_TEST_DBT),,no dbt 2 executable)
+# The value $(1), quoted for the shell.
+quote = '$(subst ','\'',$(1))'
+# Without a dbt 2, the live tests skip for this reason only; with
+# dbt-oss, the tests of its server do, for theirs, which dbt is asked
+# in a scratch home.  Only the tests expand it, as asking takes time.
+SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c '"$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
 .PHONY: check lint compile checkdoc package-lint relint complexity test
 
@@ -46,5 +54,6 @@ complexity:
 	  $(wildcard tests/*/*-test.el)
 
 test:
-	@DBT_MODE_TEST_ALLOW_SKIP="$(SKIP)" $(SCRATCH) $(EMACS) -Q --batch $(LOAD) -L tests/helpers \
-	  -l tests/run-ert.el tests
+	@DBT_MODE_TEST_ALLOW_SKIP="$(SKIP)" \
+	  $(SCRATCH) $(if $(DBT_MODE_TEST_DBT_CACHE),--dbt-cache $(call quote,$(DBT_MODE_TEST_DBT_CACHE))) \
+	  $(EMACS) -Q --batch $(LOAD) -L tests/helpers -l tests/run-ert.el tests
