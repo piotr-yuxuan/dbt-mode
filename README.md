@@ -306,7 +306,10 @@ of the package already has.
 `make check` in `nix develop` runs the lints and the tests; the lsp client
 is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
 `DBT_MODE_TEST_DBT` naming a dbt 2 executable, the tests also run the real
-`dbt lsp` on the fixture project, `tests/fixtures/shop`, through lsp-mode.
+dbt on the fixture project, `tests/fixtures/shop`, and, when it is the
+proprietary build, its `dbt lsp` through lsp-mode. `DBT_MODE_TEST_DBT_CACHE`,
+naming a cache of dbt's database drivers such as `~/.cache/com.getdbt`, is
+copied into the scratch home, so that dbt downloads no driver.
 
 ## Licence
 

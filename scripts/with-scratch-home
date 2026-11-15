@@ -7,8 +7,12 @@
 # test reads or writes the user's own: no git configuration but the test
 # identity, no Emacs load path from the session, no display, no dbt
 # profile.  The marker file .dbt-mode-scratch in HOME tells
-# tests/run-ert.el that it runs here.  The scratch directory is deleted
-# when COMMAND succeeds, and kept and printed when it fails.
+# tests/run-ert.el that it runs here.  DBT_MODE_TEST_DBT_CACHE, a cache
+# of dbt's database drivers such as ~/.cache/com.getdbt, is copied into
+# the scratch cache, so that dbt finds its driver there rather than
+# downloading it; the copy leaves the original as it is.  The scratch
+# directory is deleted when COMMAND succeeds, and kept and printed when
+# it fails.
 
 set -uo pipefail
 
@@ -25,6 +29,9 @@ trap '' PIPE
 scratch=$(TMPDIR=/tmp mktemp -d -t dbt-mode-scratch.XXXXXX) || exit 2
 mkdir -p "$scratch"/{home,config,cache,data,state,tmp}
 touch "$scratch/home/.dbt-mode-scratch"
+if [[ -n "${DBT_MODE_TEST_DBT_CACHE:-}" ]]; then
+  cp -R -- "$DBT_MODE_TEST_DBT_CACHE" "$scratch/cache/" || exit 2
+fi
 
 env -u EMACSLOADPATH -u DISPLAY -u WAYLAND_DISPLAY \
   HOME="$scratch/home" \
