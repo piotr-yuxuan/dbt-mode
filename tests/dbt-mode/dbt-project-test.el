@@ -392,8 +392,7 @@ A file rewritten with its size, time and mode kept still gives what it held."
                      "models/marts/dim_customers_v1.sql"))
       (should (equal (funcall file '(:kind ref :name "dim_customers" :version "3"))
                      "models/marts/dim_customers_current.sql"))
-      (should (equal (funcall file '(:kind ref :name "fct")) "models/marts/fct_v10.sql"))
-      (should (equal (funcall file '(:kind ref :name "orders" :version "1")) "models/marts/orders.sql")))
+      (should (equal (funcall file '(:kind ref :name "fct")) "models/marts/fct_v10.sql")))
     (should-not (dbt-project-entities root '(model) "dim_customers_v1"))
     (should (equal (plist-get (seq-find (lambda (node) (equal (plist-get node :id) "model.shop.uses_dim"))
                                         (dbt-project-graph root))
@@ -421,6 +420,18 @@ A file rewritten with its size, time and mode kept still gives what it held."
       (should (equal (funcall ids "v" "shop") '("model.shop.v.v1" "model.shop_utils.v.v2")))
       (should (equal (funcall ids "v" "shop_utils") '("model.shop_utils.v.v2" "model.shop.v.v1")))
       (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2" "model.shop.w.v3"))))))
+
+(ert-deftest dbt-project-resolve-ref-takes-only-the-version-it-names ()
+  "A ref with a version means that version of a model alone, never a model without versions."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1" nil (expand-file-name "dbt_packages/shop_utils/models/orders_v1.sql" root))
+    (write-region "models:\n  - name: orders\n    versions:\n      - v: 1\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_orders.yml" root))
+    (let ((ids (lambda (target) (mapcar #'dbt-project-node-id (dbt-project-resolve root target "shop")))))
+      (should (equal (funcall ids '(:kind ref :name "orders" :version "1")) '("model.shop_utils.orders.v1")))
+      (should (equal (funcall ids '(:kind ref :name "orders")) '("model.shop.orders" "model.shop_utils.orders.v1")))
+      (should-not (funcall ids '(:kind ref :name "stg_orders" :version "1"))))))
 
 (ert-deftest dbt-project-file-entity-needs-no-index ()
   "A file under the model paths is a model even before it exists."
