@@ -123,8 +123,9 @@ YAML, packages under `packages-install-path` and local packages, and leaves
 or declares belongs to that project. Saving re-reads only the files that
 changed.
 
-With dbt 2 (`dbt lsp`), `dbt-lsp-deferred` starts the server through
-lsp-mode, which then gives:
+With dbt 2's proprietary build (`dbt lsp`), `dbt-lsp-deferred` starts the
+server through lsp-mode, which then gives the following; with `dbt-oss`
+it starts nothing, and `M-x dbt-lsp` says why:
 
 - definitions of what dbt-mode does not resolve, such as dbt's own macros:
   on a `ref`, a source, a doc or a macro of the project or its packages,

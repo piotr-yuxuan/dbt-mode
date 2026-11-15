@@ -205,6 +205,19 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
       (make-symbolic-link other dbt-executable)
       (should-not (dbt-project-command-p "format")))))
 
+(ert-deftest dbt-lsp-starts-nothing-with-a-dbt-without-a-server ()
+  "With a dbt that runs no dbt lsp, such as dbt-oss, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why."
+  (dbt-lsp-test-with-dbt dbt "exit 2"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt))
+          (dbt-lsp-deferred)
+          (should-not (bound-and-true-p lsp--buffer-deferred))
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
+                         "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
+          (should-not (dbt-lsp-workspace)))))))
+
 (ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
   (dbt-lsp-test-with-dbt dbt "exec sleep 20"

@@ -132,17 +132,23 @@ the buffer, as lsp-mode would guess before it looks at the folders."
 
 ;;;###autoload
 (defun dbt-lsp ()
-  "Start dbt lsp for the current buffer, on the root of its dbt project."
+  "Start dbt lsp for the current buffer, on the root of its dbt project.
+A dbt that runs no server, such as dbt-oss, is an error."
   (interactive)
+  (unless (dbt-lsp-server-p)
+    (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
   (dbt-lsp-add-project-folder)
   (lsp))
 
 ;;;###autoload
 (defun dbt-lsp-deferred ()
   "Start dbt lsp for the current buffer once it is shown.
-On the root of its dbt project; for `dbt-mode-hook'."
-  (dbt-lsp-add-project-folder)
-  (lsp-deferred))
+On the root of its dbt project; for `dbt-mode-hook'.  Nothing starts
+when dbt runs no server, such as dbt-oss, which lsp-mode would take for
+a server to install."
+  (when (dbt-lsp-server-p)
+    (dbt-lsp-add-project-folder)
+    (lsp-deferred)))
 
 ;;;; Commands of the server
 
