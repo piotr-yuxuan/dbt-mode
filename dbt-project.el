@@ -720,7 +720,7 @@ their names, as dbt 2.0.11 does whatever packages.yml lists first."
                                 (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
                                             (dbt-project-entities root '(table) name))
                               (dbt-project-entities root '(source) name))))
-      ('doc (let ((project (car (car (dbt-project-packages root)))))
+      ('doc (let ((project (dbt-project-name root)))
               (seq-sort-by (lambda (doc)
                              (let ((package (plist-get doc :package)))
                                (if (equal package project) "" package)))
