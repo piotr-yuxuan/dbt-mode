@@ -21,7 +21,11 @@ quote = '$(subst ','\'',$(1))'
 # Without a dbt 2, the live tests skip for this reason only; with
 # dbt-oss, the tests of its server do, for theirs, which dbt is asked
 # in a scratch home.  Only the tests expand it, as asking takes time.
-SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c '"$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
+# The question gives up after 10 seconds, as dbt-project--probe-seconds
+# does in Emacs, where timeout exists; without it, as on macOS outside
+# nix, it has no deadline, rather than let a missing timeout skip the
+# server's tests.
+SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c 't=; command -v timeout >/dev/null 2>&1 && t="timeout -k 1 10"; $$t "$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
 .PHONY: check lint compile checkdoc package-lint relint complexity test
 
