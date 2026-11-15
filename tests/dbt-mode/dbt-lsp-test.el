@@ -260,8 +260,9 @@ dbt is only asked whether it runs dbt format, once."
         (let ((dbt-executable dbt))
           (goto-char (point-min))
           (insert "-- edited\n")
-          (should (string-match-p "\\`This dbt cannot format: it has no dbt format"
-                                  (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
+                         (concat "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs"
+                                 " (on dbt-oss, dbt system upgrade-distribution installs it)")))
           (should-not (buffer-modified-p))
           (goto-char (point-min))
           (insert "-- edited again\n")
@@ -293,7 +294,9 @@ lack of any dbt, which each save then says."
                                          (insert "--\n"))
                                        (point-max))))
                           (if keys (execute-kbd-macro (kbd keys)) (dbt-format-on-save-mode 1))
-                          (string-search "This dbt cannot format, so saves stay as they are"
+                          (string-search (concat "This dbt cannot format, so saves stay as they are: dbt format comes"
+                                                 " with the proprietary build of dbt 2 (on dbt-oss, dbt system"
+                                                 " upgrade-distribution installs it)")
                                          (with-current-buffer (messages-buffer)
                                            (buffer-substring start (point-max))))))))
             (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))

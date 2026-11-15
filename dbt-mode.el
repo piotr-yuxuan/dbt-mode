@@ -1006,7 +1006,7 @@ as dbt-oss, cannot format: that is an error, once the buffer is saved."
       (unless (dbt-project-command-p "format")
         ;; Without any dbt, that is what it says.
         (dbt-project-executable)
-        (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs"))
+        (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs (on dbt-oss, dbt system upgrade-distribution installs it)"))
       (dbt-cli-format (current-buffer)))))
 
 (defun dbt-mode--format-after-save ()
@@ -1051,7 +1051,7 @@ buffer that turns it on."
                     ((not (member executable dbt-mode--told-cannot-format)))
                     ((not (dbt-project-command-p "format"))))
           (push executable dbt-mode--told-cannot-format)
-          (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2")))
+          (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2 (on dbt-oss, dbt system upgrade-distribution installs it)")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
 
 (defun dbt-mode--forget-project ()
