@@ -500,15 +500,22 @@ a model, YAML properties, a singular test."
 
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
   "Return the definitions of IDENTIFIER.
-A name of a package that the package does not define, but another
-does, is an error that names the others: as a root YAML entry of a
-package's model, which dbt reads as unused.  The qualifier of a source
-is a source, not a package."
+When IDENTIFIER names a package of the project that lacks the name, and
+other packages define it, signal an error that names them, as for a root
+YAML entry of a package's model, which dbt reads as unused.  xref's
+contract asks for nil, but the command that finds definitions is xref's
+own: the backend is the one place that can say it.  The qualifier of a
+source is a source, and that of a macro may be dbt's own package or a
+name of its context such as `builtins', which the index lacks: neither
+is an error.  Where dbt lsp serves the buffer, the error never shows, as
+`dbt-mode-xref-backend' leaves to the server what dbt-mode does not
+resolve."
   (let* ((target (dbt-mode-parse-identifier identifier))
          (definitions (dbt-mode-definitions target)))
     (when-let* (((null definitions))
                 (package (plist-get target :qualifier))
                 ((not (eq (plist-get target :kind) 'source)))
+                ((assoc package (dbt-project-packages (dbt-project-root))))
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (plist-get target :name) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))

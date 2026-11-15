@@ -337,6 +337,23 @@ root model finds that model."
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_orders.sql" . 1))))))
 
+(ert-deftest dbt-mode-finds-no-macro-of-a-package-the-index-lacks ()
+  "M-. on a macro of dbt's own package finds nothing, though a package defines a namesake.
+So does a macro of a package that is not installed, while the project,
+whose package lacks the macro, says where it is."
+  (dbt-test-with-project root
+    (write-region "{% macro date_spine() %}select 1{% endmacro %}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/macros/date_spine.sql" root))
+    (write-region "{{ dbt.date_spine() }} {{ codegen.date_spine() }} {{ shop.date_spine() }}\n" nil
+                  (expand-file-name "models/spine.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/spine.sql"))
+      (dolist (case '(("dbt.date_spine" . "No definitions found for: macro:dbt/date_spine")
+                      ("codegen.date_spine" . "No definitions found for: macro:codegen/date_spine")
+                      ("shop.date_spine" . "No date_spine in package shop, only in shop_utils")))
+        (dbt-test-goto (car case) (1+ (string-search "." (car case))))
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)) (cdr case)))))))
+
 (ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
   "A call in a package's YAML properties, singular test or macro resolves in that package first; M-? on its source entry lists its uses.
 The project's namesakes and their uses come after, or not at all."
