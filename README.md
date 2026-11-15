@@ -240,8 +240,9 @@ session before it starts the server, so that the server runs on the
 project, not on an enclosing repository, and each dbt project of a
 repository gets its own server, whatever `lsp-auto-guess-root` says. It
 adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
-it asks once per executable, within ten seconds. `dbt-properties-mode-maybe` turns
-on `M-.`, `M-?` and completion in the YAML files of a dbt project.
+it asks once, within ten seconds, and again once dbt is replaced.
+`dbt-properties-mode-maybe` turns on `M-.`, `M-?` and completion in the
+YAML files of a dbt project.
 
 ## Options
 
