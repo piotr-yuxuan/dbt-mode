@@ -16,10 +16,12 @@ SCRATCH := scripts/with-scratch-home
 PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-babel.el dbt-dashboard.el dbt-lsp.el
 TOOL_EL := $(wildcard scripts/*.el tests/helpers/*.el) tests/run-ert.el
 LOAD := -L . $(addprefix -L ,$(DEPS))
+# The value $(1), quoted for the shell.
+quote = '$(subst ','\'',$(1))'
 # Without a dbt 2, the live tests skip for this reason only; with
-# dbt-oss, the tests of its server do, for theirs.  Read by the tests
-# alone, as asking dbt takes time.
-SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(DBT_MODE_TEST_DBT) lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"),no dbt 2 executable)
+# dbt-oss, the tests of its server do, for theirs, which dbt is asked
+# in a scratch home.  Only the tests expand it, as asking takes time.
+SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c '"$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
 .PHONY: check lint compile checkdoc package-lint relint complexity test
 
