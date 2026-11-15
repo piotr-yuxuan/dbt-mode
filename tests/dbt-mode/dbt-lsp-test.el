@@ -249,6 +249,20 @@ files of the Nix store do: only their true names tell them apart."
       (should-not (dbt-lsp-server-p))
       (should (< (- (float-time) start) 5)))))
 
+(ert-deftest dbt-lsp-stops-asking-a-dbt-on-a-quit ()
+  "A quit while dbt is asked whether it runs a command, as C-g in the first dispatch menu, stops the dbt it started."
+  (dbt-lsp-test-with-dbt dbt "exec sleep 20"
+    (let ((dbt-executable dbt)
+          (timer (run-at-time 0.5 nil (lambda () (setq quit-flag t)))))
+      (unwind-protect
+          (should (eq (condition-case nil
+                          (progn (dbt-project-command-p "lint") 'answered)
+                        (quit 'quit))
+                      'quit))
+        (cancel-timer timer))
+      (should-not (seq-find (lambda (process) (string-prefix-p "dbt lint --help" (process-name process)))
+                            (process-list))))))
+
 (ert-deftest dbt-lsp-formats-nothing-with-a-dbt-that-cannot ()
   "With a dbt that runs neither dbt lsp nor dbt format, such as dbt-oss, C-c C-q saves, then says it cannot format.
 A save in `dbt-format-on-save-mode' stays as it is, with no message.

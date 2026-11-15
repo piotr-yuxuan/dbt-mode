@@ -98,11 +98,14 @@ within `dbt-project--probe-seconds' runs none; nil without dbt."
                                          :command (list executable command "--help")
                                          :connection-type 'pipe :noquery t)))
                 (deadline (+ (float-time) dbt-project--probe-seconds)))
-            (while (and (process-live-p process) (< (float-time) deadline))
-              (accept-process-output process 0.1))
-            (prog1 (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
-                       'yes
-                     'no)
+            (unwind-protect
+                (progn
+                  (while (and (process-live-p process) (< (float-time) deadline))
+                    (accept-process-output process 0.1))
+                  (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                      'yes
+                    'no))
+              ;; Also on a quit, as C-g in the first dispatch menu.
               (when process (delete-process process))))))))
 
 (defcustom dbt-project-index-lifetime 30
