@@ -293,7 +293,8 @@ file, and dbt's error, which names the file it is about, is the message. `dbt-fo
 when that changed the buffer; a failure to format is a message, and the
 save stands. A dbt with neither a server nor `dbt format`, such as
 `dbt-oss`, cannot format: `C-c C-q` saves, then says so, and
-`dbt-format-on-save-mode` leaves saves as they are.
+`dbt-format-on-save-mode` leaves saves as they are, which it says once
+for each dbt.
 
 `dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
 of the package already has.

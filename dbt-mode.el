@@ -1029,6 +1029,9 @@ format leaves it alone."
                 (t (dbt-project-executable)))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 
+(defvar dbt-mode--told-cannot-format nil
+  "The dbt executables that `dbt-format-on-save-mode' said cannot format.")
+
 (define-minor-mode dbt-format-on-save-mode
   "Format the buffer after each save, as `dbt-format-buffer' does.
 With dbt lsp, the formatted buffer is saved again when formatting
@@ -1036,10 +1039,19 @@ changed it.  Without a server, `dbt format' formats the saved file
 while you go on, and the buffer shows the result unless you modified it
 meanwhile.  A failure to format is a message, and the save stands.  A
 dbt with neither a server nor `dbt format', such as dbt-oss, leaves
-saves as they are."
+saves as they are, which the mode says once for each dbt, in the first
+buffer that turns it on."
   :lighter " Fmt"
   (if dbt-format-on-save-mode
-      (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)
+      (progn
+        (add-hook 'after-save-hook #'dbt-mode--format-after-save nil 'local)
+        ;; dbt lsp, which formats too, comes with dbt format, in the
+        ;; proprietary build; dbt-oss has neither.
+        (when-let* ((executable (executable-find dbt-executable))
+                    ((not (member executable dbt-mode--told-cannot-format)))
+                    ((not (dbt-project-command-p "format"))))
+          (push executable dbt-mode--told-cannot-format)
+          (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
 
 (defun dbt-mode--forget-project ()

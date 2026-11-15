@@ -273,6 +273,51 @@ dbt is only asked whether it runs dbt format, once."
           (should (equal (dbt-test-file-text root "models/marts/orders.sql") (buffer-string))))))
     (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
 
+(ert-deftest dbt-lsp-says-once-that-format-on-save-cannot-format ()
+  "With a dbt that cannot format, turning dbt-format-on-save-mode on says that saves stay as they are, once for that dbt.
+From Lisp, as from `dbt-mode-hook', as by M-x.  Turning it off, on
+again or on in another buffer says nothing; another dbt that cannot
+format is told again; dbt 2's proprietary build is not, nor is the
+lack of any dbt, which each save then says."
+  (dbt-lsp-test-with-dbt dbt "exit 2"
+    (dbt-lsp-test-with-dbt other "exit 2"
+      (dbt-test-with-project root
+        (save-window-excursion
+          (let ((dbt-mode--told-cannot-format nil)
+                (said (lambda (keys)
+                        (let ((start (with-current-buffer (messages-buffer)
+                                       ;; A mark, as *Messages* folds a message that
+                                       ;; repeats the last one into "[2 times]".
+                                       (let ((inhibit-read-only t))
+                                         (goto-char (point-max))
+                                         (insert "--\n"))
+                                       (point-max))))
+                          (if keys (execute-kbd-macro (kbd keys)) (dbt-format-on-save-mode 1))
+                          (string-search "This dbt cannot format, so saves stay as they are"
+                                         (with-current-buffer (messages-buffer)
+                                           (buffer-substring start (point-max))))))))
+            (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+            (let ((dbt-executable dbt))
+              (should (funcall said nil))
+              (should dbt-format-on-save-mode)
+              (should-not (funcall said "M-x dbt-format-on-save-mode RET"))
+              (should-not dbt-format-on-save-mode)
+              (should-not (funcall said "M-x dbt-format-on-save-mode RET"))
+              (should dbt-format-on-save-mode)
+              (switch-to-buffer (dbt-test-visit root "models/marts/customers.sql"))
+              (should-not (funcall said nil)))
+            (dolist (case `((,other . t) (,dbt-lsp-test-dbt) (,(expand-file-name "no-dbt" root))))
+              (let ((dbt-executable (car case)))
+                (dbt-format-on-save-mode -1)
+                (should (eq (and (funcall said "M-x dbt-format-on-save-mode RET") t) (cdr case)))))
+            ;; One name, two executables, as per-project paths give them.
+            (let ((dbt-mode--told-cannot-format nil)
+                  (dbt-executable "dbt"))
+              (dolist (directory (list (file-name-directory dbt) (file-name-directory other)))
+                (let ((exec-path (list directory)))
+                  (dbt-format-on-save-mode -1)
+                  (should (funcall said nil)))))))))))
+
 (ert-deftest dbt-lsp-dispatch-runs-only-what-this-dbt-has ()
   "With a dbt that cannot format, such as dbt-oss, dispatch shows lint and format inapt, says why, and runs neither.
 dbt-oss answers `dbt lint --help', as this stand-in does, though its
