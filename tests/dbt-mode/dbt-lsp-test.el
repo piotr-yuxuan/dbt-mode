@@ -173,6 +173,38 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
       (should-not (dbt-lsp-server-p)))
     (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "lsp --help\n"))))
 
+(ert-deftest dbt-lsp-asks-dbt-about-each-command ()
+  "dbt is asked about each command apart: it may run dbt lsp and not dbt format, whichever is asked first."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; [ \"$1 $2\" = \"lsp --help\" ]"
+    (let ((dbt-executable dbt))
+      (should-not (dbt-project-command-p "format"))
+      (should (dbt-project-command-p "lsp"))
+      (should-not (dbt-project-command-p "format")))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\nlsp --help\n")))
+  (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"
+    (let ((dbt-executable dbt))
+      (should (dbt-project-command-p "lsp"))
+      (should-not (dbt-project-command-p "format")))))
+
+(ert-deftest dbt-lsp-asks-a-replaced-dbt-again ()
+  "A dbt replaced in place, as an upgrade from dbt-oss is, or a link pointed at another dbt, as a new profile does, is asked again."
+  (dbt-lsp-test-with-dbt dbt "exit 2"
+    (let ((dbt-executable dbt))
+      (should-not (dbt-project-command-p "format"))
+      (with-temp-file dbt (insert "#!/bin/sh\nexit 0\n"))
+      (set-file-modes dbt #o755)
+      (set-file-times dbt (time-add (current-time) 10))
+      (should (dbt-project-command-p "format")))
+    (let ((other (expand-file-name "other-dbt" (file-name-directory dbt)))
+          (dbt-executable (expand-file-name "linked-dbt" (file-name-directory dbt))))
+      (with-temp-file other (insert "#!/bin/sh\nexit 2\n"))
+      (set-file-modes other #o755)
+      (make-symbolic-link dbt dbt-executable)
+      (should (dbt-project-command-p "format"))
+      (delete-file dbt-executable)
+      (make-symbolic-link other dbt-executable)
+      (should-not (dbt-project-command-p "format")))))
+
 (ert-deftest dbt-lsp-gives-up-on-a-dbt-that-does-not-answer ()
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
   (dbt-lsp-test-with-dbt dbt "exec sleep 20"
