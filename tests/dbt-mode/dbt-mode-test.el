@@ -318,15 +318,20 @@ tags are code, in SQL strings or in comments."
 
 (ert-deftest dbt-mode-finds-no-package-model-from-a-root-entry ()
   "M-. on a root YAML entry that names only a package's model finds nothing, as dbt 2.0.9 calls the entry unused.
-A root entry of a root model finds that model."
+It says which package defines the model instead.  A root entry of a
+root model finds that model."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/util_orders.sql" root))
     (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
     (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
-    (dbt-test-visit root "models/_utils.yml")
-    (dbt-test-goto "util_orders")
-    (should-not (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/_utils.yml"))
+      ;; As the hook of YAML files does.
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "util_orders")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No util_orders in package shop, only in shop_utils")))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)

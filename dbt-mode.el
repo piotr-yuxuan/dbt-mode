@@ -499,8 +499,20 @@ a model, YAML properties, a singular test."
              (xref-make-file-location (plist-get entity :file) (plist-get entity :line) 0)))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
-  "Return the definitions of IDENTIFIER."
-  (mapcar #'dbt-mode--xref (dbt-mode-definitions (dbt-mode-parse-identifier identifier))))
+  "Return the definitions of IDENTIFIER.
+A name of a package that the package does not define, but another
+does, is an error that names the others: as a root YAML entry of a
+package's model, which dbt reads as unused.  The qualifier of a source
+is a source, not a package."
+  (let* ((target (dbt-mode-parse-identifier identifier))
+         (definitions (dbt-mode-definitions target)))
+    (when-let* (((null definitions))
+                (package (plist-get target :qualifier))
+                ((not (eq (plist-get target :kind) 'source)))
+                (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
+      (user-error "No %s in package %s, only in %s" (plist-get target :name) package
+                  (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
+    (mapcar #'dbt-mode--xref definitions)))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
