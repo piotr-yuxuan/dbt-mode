@@ -517,7 +517,7 @@ resolve."
                 ((not (eq (plist-get target :kind) 'source)))
                 ((assoc package (dbt-project-packages (dbt-project-root))))
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
-      (user-error "No %s in package %s, only in %s" (plist-get target :name) package
+      (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
     (mapcar #'dbt-mode--xref definitions)))
 
@@ -642,7 +642,8 @@ In a YAML file, it is the resource whose entry holds point."
           (car (dbt-mode-definitions target))))))
 
 (defun dbt-mode-resource-selector (resource)
-  "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version."
+  "Return dbt's selector of RESOURCE alone: NAME, or NAME.vVERSION of a version.
+RESOURCE is a resource or a target: only its :name and :version count."
   (concat (plist-get resource :name)
           (and (plist-get resource :version) (format ".v%s" (plist-get resource :version)))))
 

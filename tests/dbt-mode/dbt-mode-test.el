@@ -354,6 +354,24 @@ whose package lacks the macro, says where it is."
         (dbt-test-goto (car case) (1+ (string-search "." (car case))))
         (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)) (cdr case)))))))
 
+(ert-deftest dbt-mode-names-the-version-a-package-lacks ()
+  "M-. on a version of a package's model that only the project has says that the package lacks that version."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (dolist (file '("dbt_packages/shop_utils/models/v_v1" "dbt_packages/shop_utils/models/v_v2" "models/marts/v_v3"))
+      (write-region "select 1" nil (expand-file-name (concat file ".sql") root)))
+    (write-region "models:\n  - name: v\n    versions:\n      - v: 1\n      - v: 2\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_v.yml" root))
+    (write-region "models:\n  - name: v\n    versions:\n      - v: 3\n" nil
+                  (expand-file-name "models/marts/_v.yml" root))
+    (write-region "select * from {{ ref('shop_utils', 'v', v=3) }}\n" nil
+                  (expand-file-name "models/marts/uses_v.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/uses_v.sql"))
+      (dbt-test-goto "'v'" 1)
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No v.v3 in package shop_utils, only in shop")))))
+
 (ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
   "A call in a package's YAML properties, singular test or macro resolves in that package first; M-? on its source entry lists its uses.
 The project's namesakes and their uses come after, or not at all."
