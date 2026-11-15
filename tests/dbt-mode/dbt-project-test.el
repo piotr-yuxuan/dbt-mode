@@ -412,6 +412,25 @@ A file rewritten with its size, time and mode kept still gives what it held."
                    "orders_snapshot"))
     (should-not (dbt-project-file-entity root (expand-file-name "macros/cents_to_dollars.sql" root)))))
 
+(ert-deftest dbt-project-resolve-takes-a-doc-of-the-packages-by-name ()
+  "A doc resolves in the project first, then in the packages by the order of their names, not of packages.yml."
+  (dbt-test-with-project root
+    (dolist (package '("zzz" "aaa"))
+      (make-directory (expand-file-name (format "local_packages/%s/models" package) root) t)
+      (write-region (format "name: '%s'\n" package) nil
+                    (expand-file-name (format "local_packages/%s/dbt_project.yml" package) root))
+      (write-region "{% docs shared %}\nIn a package.\n{% enddocs %}\n" nil
+                    (expand-file-name (format "local_packages/%s/models/docs.md" package) root)))
+    (write-region "packages:\n  - local: local_packages/zzz\n  - local: local_packages/aaa\n" nil
+                  (expand-file-name "packages.yml" root))
+    (let ((packages (lambda ()
+                      (mapcar (lambda (entity) (plist-get entity :package))
+                              (dbt-project-resolve root '(:kind doc :name "shared") "zzz")))))
+      (should (equal (funcall packages) '("aaa" "zzz")))
+      (write-region "{% docs shared %}\nIn the project.\n{% enddocs %}\n" nil (expand-file-name "models/shared.md" root))
+      (dbt-project-forget root)
+      (should (equal (funcall packages) '("shop" "aaa" "zzz"))))))
+
 (ert-deftest dbt-project-resolve-prefers-the-caller-then-the-project ()
   "A ref resolves in the given package; else the caller's, then the project's."
   (dbt-test-with-project root

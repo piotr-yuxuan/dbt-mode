@@ -699,7 +699,8 @@ or an analysis, or the source of a table, and nil for a source itself.
 VERSION is that of a `ref', nil for the latest.  CALLER is the package
 of the calling file, which a `ref' or a `source' looks in as
 `dbt-project-lookup-rank' says; a `doc' looks in the project first,
-whatever the flag that it reads."
+whatever the flag that it reads, then in the packages by the order of
+their names, as dbt 2.0.11 does whatever packages.yml lists first."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
@@ -710,7 +711,12 @@ whatever the flag that it reads."
                                 (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
                                             (dbt-project-entities root '(table) name))
                               (dbt-project-entities root '(source) name))))
-      ('doc (dbt-project-entities root '(doc) name qualifier))
+      ('doc (let ((project (car (car (dbt-project-packages root)))))
+              (seq-sort-by (lambda (doc)
+                             (let ((package (plist-get doc :package)))
+                               (if (equal package project) "" package)))
+                           #'string<
+                           (dbt-project-entities root '(doc) name qualifier))))
       ('analysis (dbt-project-entities root '(analysis) name qualifier))
       ('macro (dbt-project-entities root '(macro test) name qualifier)))))
 
