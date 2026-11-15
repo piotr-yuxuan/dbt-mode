@@ -406,20 +406,28 @@ A file rewritten with its size, time and mode kept still gives what it held."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (dolist (file '("models/marts/v_v1" "models/marts/w_v1" "models/marts/w_v2" "models/marts/w_v3"
+                    "models/marts/y_v1" "models/marts/y_v2"
                     "dbt_packages/shop_utils/models/v_v1" "dbt_packages/shop_utils/models/v_v2"
-                    "dbt_packages/shop_utils/models/w_v1" "dbt_packages/shop_utils/models/w_v2"))
+                    "dbt_packages/shop_utils/models/w_v1" "dbt_packages/shop_utils/models/w_v2"
+                    "dbt_packages/shop_utils/models/y_v1" "dbt_packages/shop_utils/models/y_v2"
+                    "dbt_packages/shop_utils/models/y_v3"))
       (write-region "select 1" nil (expand-file-name (concat file ".sql") root)))
     (write-region (concat "models:\n  - name: v\n    latest_version: 1\n    versions:\n      - v: 1\n"
-                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n      - v: 3\n")
+                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n      - v: 3\n"
+                          "  - name: y\n    versions:\n      - v: 1\n      - v: 2\n")
                   nil (expand-file-name "models/marts/_v.yml" root))
     (write-region (concat "models:\n  - name: v\n    latest_version: 2\n    versions:\n      - v: 1\n      - v: 2\n"
-                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n")
+                          "  - name: w\n    versions:\n      - v: 1\n      - v: 2\n"
+                          "  - name: y\n    latest_version: 1\n    versions:\n      - v: 1\n      - v: 2\n"
+                          "      - v: 3\n")
                   nil (expand-file-name "dbt_packages/shop_utils/models/_v.yml" root))
     (let ((ids (lambda (name caller)
                  (mapcar #'dbt-project-node-id (dbt-project-resolve root (list :kind 'ref :name name) caller)))))
       (should (equal (funcall ids "v" "shop") '("model.shop.v.v1" "model.shop_utils.v.v2")))
       (should (equal (funcall ids "v" "shop_utils") '("model.shop_utils.v.v2" "model.shop.v.v1")))
-      (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2" "model.shop.w.v3"))))))
+      (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2" "model.shop.w.v3")))
+      ;; The latest_version of one package is not that of the other.
+      (should (equal (funcall ids "y" "shop") '("model.shop.y.v2" "model.shop_utils.y.v1"))))))
 
 (ert-deftest dbt-project-resolve-ref-takes-only-the-version-it-names ()
   "A ref with a version means that version of a model alone, never a model without versions."
