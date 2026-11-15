@@ -337,6 +337,38 @@ root model finds that model."
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("models/staging/stg_orders.sql" . 1))))))
 
+(ert-deftest dbt-mode-names-each-package-that-defines-the-name ()
+  "M-. on a root YAML entry of a name that two packages define names both, each once."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (make-directory (expand-file-name "dbt_packages/aaa_utils/models" root) t)
+    (make-directory (expand-file-name "dbt_packages/aaa_utils/seeds" root))
+    (write-region "name: 'aaa_utils'\n" nil (expand-file-name "dbt_packages/aaa_utils/dbt_project.yml" root))
+    (dolist (file '("dbt_packages/shop_utils/models/util_orders.sql" "dbt_packages/aaa_utils/models/util_orders.sql"))
+      (write-region "select 1 as id" nil (expand-file-name file root)))
+    (write-region "id\n1\n" nil (expand-file-name "dbt_packages/aaa_utils/seeds/util_orders.csv" root))
+    (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/_utils.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "util_orders")
+      ;; In either order.
+      (should (string-match-p "\\`No util_orders in package shop, only in \\(aaa_utils, shop_utils\\|shop_utils, aaa_utils\\)\\'"
+                              (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)))))))
+
+(ert-deftest dbt-mode-finds-no-source-named-as-a-package ()
+  "M-. on source('shop_utils', 'events') finds nothing: no source is shop_utils, and a package of that name is no source.
+The project has a source events, which a message taking shop_utils for
+a package would name."
+  (dbt-test-with-project root
+    (write-region "select * from {{ source('shop_utils', 'events') }}\n" nil
+                  (expand-file-name "models/from_utils.sql" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/from_utils.sql"))
+      (dbt-test-goto "events")
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error))
+                     "No definitions found for: source:shop_utils/events")))))
+
 (ert-deftest dbt-mode-finds-no-macro-of-a-package-the-index-lacks ()
   "M-. on a macro of dbt's own package finds nothing, though a package defines a namesake.
 So does a macro of a package that is not installed, while the project,
