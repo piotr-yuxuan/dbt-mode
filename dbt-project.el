@@ -123,18 +123,22 @@ integration_tests of a package, is a project of its own."
   "Return the key or the list item of the YAML LINE as a plist, or nil.
 The plist has :column, the column of the key or the value, which follows
 the \"- \" of a list item, :key, nil for an item that is a scalar,
-:item, non-nil when the line starts a list item, and :value, unquoted
-and nil when empty.  A comment after the value is dropped.  Of an item
+:item, non-nil when the line starts a list item, :value, unquoted and
+nil when empty, and :raw, the value as written, empty when there is
+none.  A comment after the value is dropped.  Of an item
 written as a flow mapping, such as \"- {name: x}\", the key is its `name'.
 A blank line or a comment gives nil."
   (when (seq-find (lambda (regexp) (string-match regexp line))
                   '("\\`\\(?1: *\\(?4:- +\\)\\){\\(?:[^}]*,\\)? *\\(?2:name\\): *\\(?3:[^,}]*?\\) *[,}]"
                     "\\`\\(?1: *\\(?4:- +\\)?\\)\\(?2:[A-Za-z_][A-Za-z0-9_-]*\\): *\\(?3:.*?\\) *\\(?:#.*\\)?\\'"
                     "\\`\\(?1: *\\(?4:- +\\)\\)\\(?3:.*?\\) *\\(?:#.*\\)?\\'"))
-    (list :column (match-end 1)
-          :key (match-string 2 line)
-          :item (and (match-beginning 4) t)
-          :value (dbt-project-yaml-unquote (match-string 3 line)))))
+    (let ((raw (match-string 3 line)))
+      (list :column (match-end 1)
+            :key (match-string 2 line)
+            :item (and (match-beginning 4) t)
+            ;; Unquoting matches again: read the rest first.
+            :value (dbt-project-yaml-unquote raw)
+            :raw raw))))
 
 (defun dbt-project-yaml-scan (text)
   "Return the keys and list items of TEXT, a YAML document, in order.
@@ -217,10 +221,20 @@ in any order, give the other properties."
     ("packages-install-path" :packages-install-path "dbt_packages")
     ("model-paths" :model-paths ("models")) ("seed-paths" :seed-paths ("seeds"))
     ("analysis-paths" :analysis-paths ("analyses")) ("macro-paths" :macro-paths ("macros"))
-    ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests")))
+    ("snapshot-paths" :snapshot-paths ("snapshots")) ("test-paths" :test-paths ("tests"))
+    ("require_ref_searches_node_package_before_root" :package-first "true" "flags"))
   "The keys of dbt_project.yml that the configuration keeps.
-Each is (KEY PROPERTY DEFAULT): DEFAULT is dbt's, and a list for a
-list of paths.")
+Each is (KEY PROPERTY DEFAULT . PATH): DEFAULT is dbt's, a list for a
+list of paths, and \"true\" or \"false\" for a boolean, which reads as
+`dbt-project-yaml-booleans' says; PATH, the keys that hold KEY,
+innermost first, is nil for a key at the top.")
+
+(defconst dbt-project-yaml-booleans
+  '(("true" . "true") ("True" . "true") ("TRUE" . "true")
+    ("false" . "false") ("False" . "false") ("FALSE" . "false"))
+  "The booleans of YAML that dbt reads, written unquoted, to their value.
+Any other value of a boolean, a quoted \"false\" included, is a string,
+which dbt 2.0.9 ignores for its default.")
 
 (defun dbt-project-target (root)
   "Return the directory where dbt writes the artifacts of the project at ROOT."
@@ -231,23 +245,26 @@ list of paths.")
 The plist has a property for each key of `dbt-project-config-keys', with
 dbt's default when dbt_project.yml does not set it, or cannot be read.
 A list of paths is either [a, b] on the line of its key, or the items
-below it."
+below it.  A key under a path is read in block style only: under
+`flags: {...}' it keeps its default."
   (let ((lines (dbt-project-yaml-scan (with-temp-buffer
                                         (ignore-error file-error
                                           (insert-file-contents (expand-file-name dbt-project-file root)))
                                         (buffer-string)))))
     (mapcan
-     (pcase-lambda (`(,key ,property ,default))
-       (let ((value (plist-get (seq-find (lambda (line)
-                                           (and (null (plist-get line :path)) (equal (plist-get line :key) key)))
-                                         lines)
-                               :value))
-             (items (delq nil (mapcar (lambda (line)
-                                        (and (plist-get line :item) (equal (plist-get line :path) (list key))
+     (pcase-lambda (`(,key ,property ,default . ,path))
+       (let* ((line (seq-find (lambda (line)
+                                (and (equal (plist-get line :path) path) (equal (plist-get line :key) key)))
+                              lines))
+              (value (plist-get line :value))
+              (items (delq nil (mapcar (lambda (line)
+                                        (and (plist-get line :item) (equal (plist-get line :path) (cons key path))
                                              (plist-get line :value)))
                                       lines))))
          (list property
-               (cond ((not (consp default)) (or value default))
+               (cond ((member default '("true" "false"))
+                      (alist-get (plist-get line :raw) dbt-project-yaml-booleans default nil #'equal))
+                     ((not (consp default)) (or value default))
                      ((and value (string-match "\\`\\[\\(.*\\)\\]\\'" value))
                       (mapcar #'dbt-project-yaml-unquote (split-string (match-string 1 value) "," t "[ \t]+")))
                      (t (or items default))))))
@@ -575,19 +592,25 @@ is looked up in a table, built once for each index."
                        (or (null package) (equal package (plist-get entity :package)))))
                 (if name (gethash name names) index))))
 
+(defun dbt-project-file-package (root file)
+  "Return the package of ROOT that FILE belongs to, as (NAME DIRECTORY CONFIG).
+It is the package whose directory is the nearest above FILE: an
+installed package rather than the project, the project rather than a
+local package that holds it, such as the `../' of a package's
+integration_tests.  Nil when FILE is in none."
+  (let ((file (expand-file-name file)))
+    (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
+                      (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
+                                  (dbt-project-packages root))))))
+
 (defun dbt-project-file-entity (root file)
   "Return the model, seed, snapshot or analysis that FILE of ROOT defines.
 It is the first that the index has of FILE, a snapshot of a Jinja block
 included: a YAML file defines no resource of its own.  FILE need not
 exist yet, nor the index know it: a model, a seed or an analysis is told
-by its place alone.  FILE belongs to the package whose directory is the
-nearest above it: an installed package rather than the project, the
-project rather than a local package that holds it, such as the `../'
-of a package's integration_tests."
+by its place alone, in the package of `dbt-project-file-package'."
   (let* ((file (expand-file-name file))
-         (package (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
-                                    (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
-                                                (dbt-project-packages root)))))
+         (package (dbt-project-file-package root file))
          (kind (dbt-project-file-kind file (nth 1 package) (nth 2 package))))
     (or (seq-find (lambda (entity)
                     (and (equal (plist-get entity :file) file)
@@ -596,27 +619,37 @@ of a package's integration_tests."
                   (dbt-project-index root))
         (and kind (list :kind kind :name (file-name-base file) :package (car package) :file file :line 1)))))
 
+(defun dbt-project-lookup-rank (root caller)
+  "Return the rank of an entity of ROOT for an unqualified call from CALLER.
+The value is a function of an entity, which gives 0 for the first
+package that a `ref' or a `source' of CALLER, the package of the calling
+file, looks in, 1 for the second, 2 for the others.  dbt 2.0.9 looks in
+CALLER, then in the project, unless the project's dbt_project.yml sets
+the flag require_ref_searches_node_package_before_root to false, which
+puts the project first.  A call in a macro takes the macro's package for
+CALLER, though dbt 2.0.9 takes that of the node calling the macro."
+  (let* ((project (car (dbt-project-packages root)))
+         (order (if (equal (plist-get (nth 2 project) :package-first) "false")
+                    (list (car project) caller)
+                  (list caller (car project)))))
+    (lambda (entity) (or (seq-position order (plist-get entity :package)) 2))))
+
 (defun dbt-project-resolve-ref (root package name &optional caller version)
   "Return what `ref' with PACKAGE, NAME and VERSION means in ROOT, best first.
 PACKAGE is nil for a call with one argument.  The candidates are models,
 seeds and snapshots named NAME: those of PACKAGE when it is given;
-otherwise those of CALLER, the package of the calling file, then those
-of the project, then the others.  Of a model with versions, the
-candidate is that of VERSION, or else its latest_version, or else its
-highest version."
-  (let* ((project (dbt-project-name root))
-         (candidates (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
+otherwise all, in the order of `dbt-project-lookup-rank' for CALLER, the
+package of the calling file.  Of a model with versions, the candidate is
+that of VERSION, or else its latest_version, or else its highest
+version."
+  (let* ((candidates (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
                                  (dbt-project-entities root '(model seed snapshot) name)))
          (wanted (or version
                      (seq-some (lambda (entry) (plist-get entry :latest-version))
                                (dbt-project-entities root '(properties) name package))
                      (car (sort (delq nil (mapcar (lambda (entity) (plist-get entity :version)) candidates))
                                 (lambda (one other) (string-version-lessp other one)))))))
-    (seq-sort-by (lambda (entity)
-                   (let ((owner (plist-get entity :package)))
-                     (cond ((equal owner (or package caller)) 0)
-                           ((equal owner project) 1)
-                           (t 2))))
+    (seq-sort-by (dbt-project-lookup-rank root caller)
                  #'<
                  (seq-filter (lambda (entity)
                                (or (null (plist-get entity :version)) (equal wanted (plist-get entity :version))))
@@ -629,15 +662,19 @@ VERSION).  KIND is `ref', `source', `doc', `macro' or `analysis', which
 no call names.  QUALIFIER is the package of a `ref', a `doc', a macro
 or an analysis, or the source of a table, and nil for a source itself.
 VERSION is that of a `ref', nil for the latest.  CALLER is the package
-of the calling file, for a `ref'."
+of the calling file, which a `ref' or a `source' looks in as
+`dbt-project-lookup-rank' says; a `doc' looks in the project first,
+whatever the flag that it reads."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
       ('ref (dbt-project-resolve-ref root qualifier name caller (plist-get target :version)))
-      ('source (if qualifier
-                   (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
-                               (dbt-project-entities root '(table) name))
-                 (dbt-project-entities root '(source) name)))
+      ('source (seq-sort-by (dbt-project-lookup-rank root caller)
+                            #'<
+                            (if qualifier
+                                (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
+                                            (dbt-project-entities root '(table) name))
+                              (dbt-project-entities root '(source) name))))
       ('doc (dbt-project-entities root '(doc) name qualifier))
       ('analysis (dbt-project-entities root '(analysis) name qualifier))
       ('macro (dbt-project-entities root '(macro test) name qualifier)))))

@@ -408,13 +408,15 @@ KIND:NAME."
 (defun dbt-mode-entity-target (entity project)
   "Return the target that names ENTITY, an entity of the PROJECT's index.
 An entry of the properties of a resource names what its section holds,
-as `dbt-project-section-kinds' tells.  A resource of a package other
-than PROJECT is qualified by its package, and a version of a model by
-its version."
-  (let ((kind (if (eq (plist-get entity :kind) 'properties)
-                  (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
-                (plist-get entity :kind)))
-        (package (and (not (equal (plist-get entity :package) project)) (plist-get entity :package))))
+as `dbt-project-section-kinds' tells, of its own package: dbt 2.0.9
+calls a root entry that names a package's model unused (dbt1089).
+Another resource of a package other than PROJECT is qualified by its
+package, and a version of a model by its version."
+  (let* ((entry (eq (plist-get entity :kind) 'properties))
+         (kind (if entry
+                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
+                 (plist-get entity :kind)))
+         (package (and (or entry (not (equal (plist-get entity :package) project))) (plist-get entity :package))))
     (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
                                   (doc . doc) (analysis . analysis))
                            'ref)
@@ -482,11 +484,12 @@ dbt-mode's."
              (dbt-project-entities root '(model seed snapshot analysis macro test doc source table))))))
 
 (defun dbt-mode-definitions (target)
-  "Return the entities that define TARGET, from the current buffer."
+  "Return the entities that define TARGET, from the current buffer.
+The calls of a file resolve from its package, whatever the file holds:
+a model, YAML properties, a singular test."
   (let ((root (dbt-project-root)))
     (dbt-project-resolve root target
-                         (plist-get (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
-                                    :package))))
+                         (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))))
 
 (defun dbt-mode--xref (entity &optional summary)
   "Return the xref item of ENTITY, whose summary is SUMMARY or its description."
@@ -707,12 +710,14 @@ or not a language server runs."
     (xref-find-definitions identifier)))
 
 (defun dbt-visit-properties ()
-  "Visit the YAML entry of the current model, seed, snapshot or analysis."
+  "Visit the YAML entry of the current model, seed, snapshot or analysis.
+It is an entry of the resource's own package, as dbt 2.0.9 reads one."
   (interactive)
   (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
          (entries (seq-filter (lambda (entity)
                                 (member (plist-get entity :section) dbt-project-resource-sections))
-                              (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)))))
+                              (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)
+                                                    (plist-get resource :package)))))
     (unless entries
       (user-error "No YAML entry names %s" (plist-get resource :name)))
     (xref-show-definitions-completing-read

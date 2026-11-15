@@ -123,6 +123,33 @@ A hyphen, as in google-ads, is part of a name."
     (should (equal (file-relative-name buffer-file-name root) "models/staging/_staging.yml"))
     (should (equal (line-number-at-pos) 4))))
 
+(ert-deftest dbt-new-adds-the-entry-of-a-package-model-in-its-package ()
+  "C-c C-a adds the entry and a unit test of a package's model in its package, though the project's namesake has an entry.
+The entry of a project's model goes to the project, though a namesake in
+a package has one."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models/marts" root) t)
+    (write-region "select 1 as id\n" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "select 1 as id\n" nil (expand-file-name "dbt_packages/shop_utils/models/marts/customers.sql" root))
+    (write-region "models:\n  - name: customers\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/marts/_marts.yml" root))
+    (let ((project-yaml (dbt-test-file-text root "models/staging/_staging.yml")))
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/stg_orders.sql"))
+        (execute-kbd-macro (kbd "C-c C-a YAML RET"))
+        (should (equal (file-relative-name buffer-file-name root) "dbt_packages/shop_utils/models/_models__models.yml"))
+        (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/stg_orders.sql"))
+        ;; RET completes the one choice that starts with Unit.
+        (execute-kbd-macro (kbd "C-c C-a Unit RET RET")))
+      (let ((text (dbt-test-file-text root "dbt_packages/shop_utils/models/_models__models.yml")))
+        (should (string-match-p "^models:\n  - name: stg_orders\n" text))
+        (should (string-match-p "^unit_tests:\n  - name: test_stg_orders\n" text)))
+      (should (equal (dbt-test-file-text root "models/staging/_staging.yml") project-yaml)))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/customers.sql"))
+      (execute-kbd-macro (kbd "C-c C-a YAML RET"))
+      (should (equal (file-relative-name buffer-file-name root) "models/marts/_marts__models.yml")))))
+
 (defun dbt-test-add-entry-to (root yaml)
   "Write YAML as models/staging/_staging.yml of ROOT, then add stg_new's entry.
 Return the YAML file's text afterwards.  The buffers visiting the files

@@ -299,7 +299,7 @@ tags are code, in SQL strings or in comments."
     (should (equal (dbt-mode-target-at-point) '(:kind source :qualifier "raw" :name "raw_orders" :version nil)))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "stg_orders" :version nil)))
+    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop" :name "stg_orders" :version nil)))
     (dbt-test-goto "order_status")
     (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status" :version nil)))))
 
@@ -315,6 +315,73 @@ tags are code, in SQL strings or in comments."
     (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders" :version nil)))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
+
+(ert-deftest dbt-mode-finds-no-package-model-from-a-root-entry ()
+  "M-. on a root YAML entry that names only a package's model finds nothing, as dbt 2.0.9 calls the entry unused.
+A root entry of a root model finds that model."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/util_orders.sql" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "models:\n  - name: util_orders\n" nil (expand-file-name "models/_utils.yml" root))
+    (dbt-test-visit root "models/_utils.yml")
+    (dbt-test-goto "util_orders")
+    (should-not (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+    (dbt-test-visit root "models/staging/_staging.yml")
+    (dbt-test-goto "stg_orders")
+    (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("models/staging/stg_orders.sql" . 1))))))
+
+(ert-deftest dbt-mode-resolves-from-the-package-of-any-file ()
+  "A call in a package's YAML properties, singular test or macro resolves in that package first; M-? on its source entry lists its uses.
+The project's namesakes and their uses come after, or not at all."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (make-directory (expand-file-name "dbt_packages/shop_utils/tests" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/_sources.yml" root))
+    (write-region "select * from {{ source('raw', 'raw_orders') }}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/pkg_src.sql" root))
+    (write-region "select * from {{ ref('stg_orders') }} where id < 0\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/tests/assert_pkg.sql" root))
+    (write-region (concat "models:\n  - name: pkg_src\n    data_tests:\n      - relationships:\n"
+                          "          arguments:\n            to: ref('stg_orders')\n            field: id\n")
+                  nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
+    ;; dbt 2.0.9 takes the package of the node that calls the macro,
+    ;; which dbt-mode cannot know, as `dbt-project-lookup-rank' says.
+    (write-region "{% macro pkg_orders() %}\n  select * from {{ ref('stg_orders') }}\n{% endmacro %}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/macros/pkg_orders.sql" root))
+    (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"
+                    "dbt_packages/shop_utils/macros/pkg_orders.sql"))
+      (dbt-test-visit root file)
+      (dbt-test-goto "stg_orders")
+      (should (equal (car (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt))
+                                               root))
+                     '("dbt_packages/shop_utils/models/stg_orders.sql" . 1))))
+    (dbt-test-visit root "dbt_packages/shop_utils/models/_sources.yml")
+    (dbt-test-goto "raw_orders")
+    (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (xref-backend-identifier-at-point 'dbt)) root)
+                   '(("dbt_packages/shop_utils/models/pkg_src.sql" . 1))))))
+
+(ert-deftest dbt-mode-visits-the-properties-of-its-own-package ()
+  "C-c C-y visits the YAML entry of the model in its own package, never that of a namesake in another.
+A package's model without an entry of its own has none to visit."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
+    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/shop_utils/models/stg_customers.sql" root))
+    (write-region "models:\n  - name: stg_orders\n" nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/staging/stg_orders.sql"))
+      (execute-kbd-macro (kbd "C-c C-y"))
+      (should (equal (file-relative-name buffer-file-name root) "models/staging/_staging.yml"))
+      (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/stg_orders.sql"))
+      (execute-kbd-macro (kbd "C-c C-y"))
+      (should (equal (file-relative-name buffer-file-name root) "dbt_packages/shop_utils/models/_props.yml"))
+      (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/stg_customers.sql"))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-y")) :type 'user-error))
+                     "No YAML entry names stg_customers")))))
 
 (ert-deftest dbt-mode-identifiers-round-trip ()
   "An identifier reads back as the target it was written from."
