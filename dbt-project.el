@@ -675,19 +675,25 @@ PACKAGE is nil for a call with one argument.  The candidates are models,
 seeds and snapshots named NAME: those of PACKAGE when it is given;
 otherwise all, in the order of `dbt-project-lookup-rank' for CALLER, the
 package of the calling file.  Of a model with versions, the candidate is
-that of VERSION, or else its latest_version, or else its highest
-version."
+that of VERSION, or else the latest_version of the model's package, or
+else the highest version in that package, as dbt 2.0.11 takes them: a
+package's model and the project's namesake have versions of their own."
   (let* ((candidates (seq-filter (lambda (entity) (or (null package) (equal package (plist-get entity :package))))
                                  (dbt-project-entities root '(model seed snapshot) name)))
-         (wanted (or version
-                     (seq-some (lambda (entry) (plist-get entry :latest-version))
-                               (dbt-project-entities root '(properties) name package))
-                     (car (sort (delq nil (mapcar (lambda (entity) (plist-get entity :version)) candidates))
-                                (lambda (one other) (string-version-lessp other one)))))))
+         (wanted (lambda (owner)
+                   (or version
+                       (seq-some (lambda (entry) (plist-get entry :latest-version))
+                                 (dbt-project-entities root '(properties) name owner))
+                       (car (sort (delq nil (mapcar (lambda (entity)
+                                                      (and (equal owner (plist-get entity :package))
+                                                           (plist-get entity :version)))
+                                                    candidates))
+                                  (lambda (one other) (string-version-lessp other one))))))))
     (seq-sort-by (dbt-project-lookup-rank root caller)
                  #'<
                  (seq-filter (lambda (entity)
-                               (or (null (plist-get entity :version)) (equal wanted (plist-get entity :version))))
+                               (or (null (plist-get entity :version))
+                                   (equal (funcall wanted (plist-get entity :package)) (plist-get entity :version))))
                              candidates))))
 
 (defun dbt-project-resolve (root target &optional caller)
