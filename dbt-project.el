@@ -70,6 +70,34 @@ Signal a `user-error' when there is none, before anything starts."
   (or (executable-find dbt-executable)
       (user-error "No dbt to run: no executable %s" dbt-executable)))
 
+(defvar dbt-project--commands (make-hash-table :test #'equal)
+  "From a dbt executable's file name and a command to whether it runs it.
+The key is (FILE . COMMAND), the value `yes' or `no'.")
+
+(defvar dbt-project--probe-seconds 10
+  "The seconds that dbt has to say whether it runs a command.")
+
+(defun dbt-project-command-p (command)
+  "Return non-nil when the dbt of `dbt-executable' runs COMMAND.
+It does when `dbt COMMAND --help' succeeds: dbt 2.0's proprietary build
+runs `lsp' and `format', which dbt-oss 2.0 and dbt Core 1.x lack.  The
+answer is kept for each executable and command.  A dbt that does not
+answer within `dbt-project--probe-seconds' runs none; nil without dbt."
+  (when-let* ((executable (executable-find dbt-executable)))
+    (eq 'yes
+        (with-memoization (gethash (cons executable command) dbt-project--commands)
+          (let ((process (ignore-errors
+                           (make-process :name (format "dbt %s --help" command)
+                                         :command (list executable command "--help")
+                                         :connection-type 'pipe :noquery t)))
+                (deadline (+ (float-time) dbt-project--probe-seconds)))
+            (while (and (process-live-p process) (< (float-time) deadline))
+              (accept-process-output process 0.1))
+            (prog1 (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                       'yes
+                     'no)
+              (when process (delete-process process))))))))
+
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
 Saving a buffer of the project forgets the index at once; this bounds how

@@ -177,7 +177,7 @@ SCRIPT runs with the variable LOG naming the file calls in its directory."
   "A dbt that does not say in time whether it has `dbt lsp' runs no server."
   (dbt-lsp-test-with-dbt dbt "exec sleep 20"
     (let ((dbt-executable dbt)
-          (dbt-lsp--probe-seconds 1)
+          (dbt-project--probe-seconds 1)
           (start (float-time)))
       (should-not (dbt-lsp-server-p))
       (should (< (- (float-time) start) 5)))))
