@@ -331,8 +331,15 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ("c" "compile" (lambda () (interactive) (dbt-cli-dispatch "compile")))
     ("s" "show" (lambda () (interactive) (dbt-cli-dispatch "show")))
     ("l" "list" (lambda () (interactive) (dbt-cli-dispatch "list")))
-    ("L" "lint" (lambda () (interactive) (dbt-cli-dispatch "lint")))
-    ("=" "format" (lambda () (interactive) (dbt-cli-dispatch "format")))]
+    ;; dbt-oss runs neither: they show, inapt, and say why.  Its `dbt
+    ;; lint --help' succeeds, though its lint only says that it needs the
+    ;; proprietary build, which brings lint with format.
+    ("L" (lambda () (interactive) (dbt-cli-dispatch "lint"))
+     :description (lambda () (if (dbt-project-command-p "format") "lint" "lint (proprietary dbt 2 only)"))
+     :inapt-if-not (lambda () (dbt-project-command-p "format")))
+    ("=" (lambda () (interactive) (dbt-cli-dispatch "format"))
+     :description (lambda () (if (dbt-project-command-p "format") "format" "format (proprietary dbt 2 only)"))
+     :inapt-if-not (lambda () (dbt-project-command-p "format")))]
    ["Project"
     ("p" "parse" (lambda () (interactive) (dbt-cli-dispatch "parse")))
     ("d" "deps" (lambda () (interactive) (dbt-cli-dispatch "deps")))

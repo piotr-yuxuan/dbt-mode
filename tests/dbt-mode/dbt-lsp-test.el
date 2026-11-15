@@ -273,6 +273,43 @@ dbt is only asked whether it runs dbt format, once."
           (should (equal (dbt-test-file-text root "models/marts/orders.sql") (buffer-string))))))
     (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
 
+(ert-deftest dbt-lsp-dispatch-runs-only-what-this-dbt-has ()
+  "With a dbt that cannot format, such as dbt-oss, dispatch shows lint and format inapt, says why, and runs neither.
+dbt-oss answers `dbt lint --help', as this stand-in does, though its
+lint only says that it needs the proprietary build.  With dbt 2's
+proprietary build, both run, labelled as usual."
+  (dbt-lsp-test-with-dbt dbt (format "case \"$1 $2\" in \"format --help\" | \"lsp --help\") exit 2 ;; esac\nexec %s \"$@\""
+                                     (shell-quote-argument dbt-lsp-test-dbt))
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (pcase-dolist (`(,executable ,runs) `((,dbt nil) (,dbt-lsp-test-dbt t)))
+          (let ((dbt-executable executable))
+            (execute-kbd-macro (kbd "C-c C-d"))
+            (let ((menu (with-current-buffer " *transient*" (buffer-string))))
+              (execute-kbd-macro (kbd "C-g"))
+              (dolist (label '("L lint" "= format"))
+                (should (string-search label menu))
+                (should (eq (and (string-search (concat label " (proprietary dbt 2 only)") menu) t) (not runs)))))
+            (dolist (command '(("L" . "lint") ("=" . "format")))
+              (let ((buffer (format "*dbt shop: %s*" (cdr command))))
+                (when (get-buffer buffer)
+                  (kill-buffer buffer))
+                (let ((start (with-current-buffer (messages-buffer) (point-max))))
+                  (execute-kbd-macro (kbd (concat "C-c C-d " (car command))))
+                  (should (eq (and (get-buffer buffer) t) runs))
+                  (unless runs
+                    ;; An inapt command leaves the menu open.
+                    (should (string-search "Inapt command" (with-current-buffer (messages-buffer)
+                                                             (buffer-substring start (point-max)))))
+                    (execute-kbd-macro (kbd "C-g"))
+                    (should-not (transient-active-prefix))))
+                (when runs
+                  (with-current-buffer buffer
+                    (dbt-test-wait (lambda () (not (get-buffer-process (current-buffer)))))
+                    (should (string-match-p (format "^arguments: %s " (cdr command)) (buffer-string))))
+                  (kill-buffer buffer))))))))))
+
 (ert-deftest dbt-lsp-adds-a-folder-only-for-a-server ()
   "The root of the project becomes a folder of the lsp session only if dbt runs a server.
 The session persists its folders, so it would keep one it cannot use."

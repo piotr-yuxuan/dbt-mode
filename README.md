@@ -174,8 +174,10 @@ need a dbt account: without one, the server says nothing about columns.
 
 `dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
 `show`, `list`, `lint`, `format`, `parse`, `deps`, `debug`, `retry` and
-`docs generate` in a compilation buffer whose errors link to their files.
-Its selection defaults to what point is on, a `ref` or a `source` as dbt
+`docs generate` in a compilation buffer whose errors link to their files;
+with a dbt that cannot format, such as `dbt-oss`, it greys out `lint` and
+`format`, which only dbt 2's proprietary build runs. Its selection
+defaults to what point is on, a `ref` or a `source` as dbt
 selects it (`orders.v2`, `source:raw.orders`), else the current model, else
 the file by path (`path:tests/assert_positive_amount.sql`) for a file that
 holds no model, such as a singular test or a properties file; two switches

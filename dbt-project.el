@@ -48,8 +48,8 @@
 
 (defcustom dbt-executable "dbt"
   "The dbt executable: a name looked up in the variable `exec-path', or a file.
-The language server needs dbt 2's proprietary build, which runs it as
-`dbt lsp'; dbt-oss runs the rest."
+The language server and the formatter need dbt 2's proprietary build,
+which runs them as `dbt lsp' and `dbt format'; dbt-oss runs the rest."
   :type 'string)
 
 (defcustom dbt-preview-limit 50
