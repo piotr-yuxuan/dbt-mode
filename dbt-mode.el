@@ -968,7 +968,7 @@ With dbt lsp, the server formats it as it answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
 dbt ends, unless it was modified meanwhile.  A dbt with neither, such
-as dbt-oss, cannot format, which `dbt-cli-format' says."
+as dbt-oss, cannot format: that is an error, once the buffer is saved."
   (interactive)
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
@@ -976,12 +976,17 @@ as dbt-oss, cannot format, which `dbt-cli-format' says."
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
       (save-buffer)
+      (unless (dbt-project-command-p "format")
+        ;; Without any dbt, that is what it says.
+        (dbt-project-executable)
+        (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs"))
       (dbt-cli-format (current-buffer)))))
 
 (defun dbt-mode--format-after-save ()
   "Format the buffer just saved, and save it again when that changed it.
 For `after-save-hook', in `dbt-format-on-save-mode'.  A failure is a
-message: the save stands.  A dbt that cannot format leaves it alone."
+message: the save stands, as without any dbt.  A dbt that cannot
+format leaves it alone."
   (unless (eq dbt-mode--formatting (current-buffer))
     (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
@@ -992,7 +997,9 @@ message: the save stands.  A dbt that cannot format leaves it alone."
                                           (when (buffer-modified-p)
                                             (let ((dbt-mode--formatting (current-buffer)))
                                               (save-buffer))))))
-                ((dbt-project-command-p "format") (dbt-cli-format (current-buffer))))
+                ((dbt-project-command-p "format") (dbt-cli-format (current-buffer)))
+                ;; Without any dbt, that is the message.
+                (t (dbt-project-executable)))
         (error (message "dbt could not format %s: %s" (buffer-name) (error-message-string err)))))))
 
 (define-minor-mode dbt-format-on-save-mode
