@@ -406,26 +406,30 @@ KIND:NAME."
     (user-error "Not a dbt identifier: %s; complete one, such as ref:NAME" identifier)))
 
 (defun dbt-mode-entity-target (entity project)
-  "Return the target that names ENTITY, an entity of the PROJECT's index.
+  "Return the target that names ENTITY, an entity of the PROJECT's index, or nil.
 An entry of the properties of a resource names what its section holds,
 as `dbt-project-section-kinds' tells, of its own package: dbt 2.0.9
-calls a root entry that names a package's model unused (dbt1089).
-Another resource of a package other than PROJECT is qualified by its
-package, and a version of a model by its version."
+calls a root entry that names a package's model unused (dbt1089).  An
+item of a model's versions names that version of the model; an entry of
+another section, such as semantic_models, names nothing.  Another
+resource of a package other than PROJECT is qualified by its package,
+and a version of a model by its version."
   (let* ((entry (eq (plist-get entity :kind) 'properties))
          (kind (if entry
-                   (alist-get (plist-get entity :section) dbt-project-section-kinds nil nil #'equal)
+                   (alist-get (plist-get entity :section) (cons '("versions" . model) dbt-project-section-kinds)
+                              nil nil #'equal)
                  (plist-get entity :kind)))
          (package (and (or entry (not (equal (plist-get entity :package) project))) (plist-get entity :package))))
-    (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
-                                  (doc . doc) (analysis . analysis))
-                           'ref)
-          :qualifier (pcase kind
-                       ('table (plist-get entity :source))
-                       ('source nil)
-                       (_ package))
-          :name (plist-get entity :name)
-          :version (plist-get entity :version))))
+    (when kind
+      (list :kind (alist-get kind '((table . source) (source . source) (macro . macro) (test . macro)
+                                    (doc . doc) (analysis . analysis))
+                             'ref)
+            :qualifier (pcase kind
+                         ('table (plist-get entity :source))
+                         ('source nil)
+                         (_ package))
+            :name (plist-get entity :name)
+            :version (plist-get entity :version)))))
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.
