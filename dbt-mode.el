@@ -494,13 +494,18 @@ dbt-mode's."
      (mapcar (lambda (entity) (dbt-mode-identifier (dbt-mode-entity-target entity (dbt-project-name root))))
              (dbt-project-entities root '(model seed snapshot analysis macro test doc source table))))))
 
+(defun dbt-mode-caller (root)
+  "Return the name of the package of ROOT whose calls the current file makes.
+dbt resolves the calls of a file from its package, whatever the file
+holds: a model, YAML properties, a singular test.  Nil for a buffer
+that visits no file."
+  (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))
+
 (defun dbt-mode-definitions (target)
   "Return the entities that define TARGET, from the current buffer.
-The calls of a file resolve from its package, whatever the file holds:
-a model, YAML properties, a singular test."
+They are best first, as dbt resolves TARGET from `dbt-mode-caller'."
   (let ((root (dbt-project-root)))
-    (dbt-project-resolve root target
-                         (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))))
+    (dbt-project-resolve root target (dbt-mode-caller root))))
 
 (defun dbt-mode--xref (entity &optional summary)
   "Return the xref item of ENTITY, whose summary is SUMMARY or its description."
