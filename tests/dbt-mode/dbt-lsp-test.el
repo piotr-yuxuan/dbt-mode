@@ -359,6 +359,22 @@ says it answers it."
     (dbt-test-goto "raw_orders')")
     (should (dbt-mode--proxy-answers-p :references (xref-backend-identifier-at-point 'dbt)))))
 
+(ert-deftest dbt-lsp-alone-refuses-what-only-dbt-lsp-does ()
+  "With dbt-lsp-plus alone, C-c C-q asks dbt format, which dbt-oss lacks; renaming a model and fixing lint issues say that the server does neither.
+dbt-lsp-plus alone announces no formatting, no code action and no
+rename of files, which dbt lsp does."
+  (dbt-lsp-test-alone root nil
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (should (string-prefix-p "This dbt cannot format"
+                               (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-rename-model RET RET")) :type 'user-error))
+                     "The server renames no model: dbt lsp does"))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-fix-all RET")) :type 'user-error))
+                     "The server fixes no lint issue: dbt lsp does")))
+    (should-not (seq-intersection '("textDocument/formatting" "textDocument/codeAction" "workspace/willRenameFiles")
+                                  (dbt-lsp-test-methods)))))
+
 (ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
   "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
   (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"

@@ -101,6 +101,10 @@ it, as `dbt-lsp-plus -- COMMAND'."
                    (eq (lsp--client-server-id (lsp--workspace-client workspace)) 'dbt-lsp))
                  (lsp-workspaces))))
 
+(defvar dbt-lsp--hidden (make-hash-table :test #'eq :weakness 'key)
+  "From a workspace to the capabilities that `dbt-lsp--hide-formatting' hid.
+Each is a keyword of those it hides, which the server announced.")
+
 (defun dbt-lsp--hide-formatting (workspace)
   "Hide the formatting of the server of WORKSPACE from lsp-mode.
 The server formats the file on disk rather than the buffer, so lsp-mode
@@ -109,8 +113,10 @@ first.  Its code actions go too: it has one, which fixes lint issues
 and formats, also from the file on disk; `dbt-lsp-fix-all' saves first."
   ;; A key with a nil value would still mean support to lsp-mode: the keys
   ;; go.  They are strings in a hash table, keywords in a plist.
-  (let ((capabilities (lsp--workspace-server-capabilities workspace)))
-    (dolist (key '(:documentFormattingProvider :documentRangeFormattingProvider :codeActionProvider))
+  (let ((capabilities (lsp--workspace-server-capabilities workspace))
+        (keys '(:documentFormattingProvider :documentRangeFormattingProvider :codeActionProvider)))
+    (puthash workspace (seq-filter (lambda (key) (lsp-get capabilities key)) keys) dbt-lsp--hidden)
+    (dolist (key keys)
       (setq capabilities (map-delete capabilities (if (hash-table-p capabilities) (lsp-keyword->string key) key))))
     (setf (lsp--workspace-server-capabilities workspace) capabilities)))
 
@@ -240,6 +246,16 @@ that lacks dbt lsp, it lists only its own, and fails the others."
     (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities workspace) :executeCommandProvider)
                              :commands)
                     command)))
+
+(defun dbt-lsp-announced-p (&rest path)
+  "Return non-nil when the server of the project announced the capability at PATH.
+PATH is keywords, as :documentFormattingProvider, or :workspace
+:fileOperations :willRename; those that `dbt-lsp--hide-formatting' hid
+from lsp-mode count.  dbt lsp announces formatting, code actions and
+the rename of files; dbt-lsp-plus alone, none of them."
+  (when-let* ((workspace (dbt-lsp--project-workspace)))
+    (or (memq (car path) (gethash workspace dbt-lsp--hidden))
+        (seq-reduce #'lsp-get path (lsp--workspace-server-capabilities workspace)))))
 
 (defun dbt-lsp--request (method params schema callback &optional failed)
   "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
@@ -498,8 +514,10 @@ of a model is not renamed, as the server would edit nothing."
   (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
-  (unless (dbt-lsp-workspace)
-    (user-error "No dbt lsp runs in this buffer"))
+  ;; lsp-mode asks the server about the rename only when it says it
+  ;; answers, which dbt-lsp-plus alone does not.
+  (unless (dbt-lsp-announced-p :workspace :fileOperations :willRename)
+    (user-error "The server renames no model: dbt lsp does"))
   (let* ((root (dbt-project-root))
          (entity (dbt-project-file-entity root buffer-file-name))
          (file buffer-file-name)
@@ -591,8 +609,10 @@ message."
   "Save the buffer, then fix its lint issues and format it with the server.
 dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   (interactive)
+  (unless (dbt-lsp-announced-p :codeActionProvider)
+    (user-error "The server fixes no lint issue: dbt lsp does"))
   (save-buffer)
-  (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
+  (with-lsp-workspace (dbt-lsp--project-workspace)
     ;; Without its requirement, lsp-mode sends the method that
     ;; `dbt-lsp--hide-formatting' hid, here only.
     (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"

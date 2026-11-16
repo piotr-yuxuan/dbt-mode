@@ -100,6 +100,7 @@
 (declare-function dbt-lsp-lineage "dbt-lsp")
 (declare-function dbt-lsp-hierarchy-p "dbt-lsp")
 (declare-function dbt-lsp-command-p "dbt-lsp")
+(declare-function dbt-lsp-announced-p "dbt-lsp")
 (declare-function dbt-lsp-hierarchy-lineage "dbt-lsp")
 
 ;;;; Faces
@@ -688,6 +689,11 @@ a dbt that lacks dbt lsp: what it answers, each feature asks, as
 As `dbt-lsp-command-p' says; nil while dbt-lsp.el is not loaded."
   (and (featurep 'dbt-lsp) (dbt-lsp-command-p command)))
 
+(defun dbt-mode-server-announced-p (&rest path)
+  "Return non-nil when the server of the project announced the capability at PATH.
+As `dbt-lsp-announced-p' says; nil while dbt-lsp.el is not loaded."
+  (and (featurep 'dbt-lsp) (apply #'dbt-lsp-announced-p path)))
+
 (defun dbt-mode-dbt-lsp-p ()
   "Return non-nil when dbt lsp answers for the project, behind the proxy or not.
 Its server lists dbt.listNodes, which dbt lsp lists and dbt-lsp-plus
@@ -1120,7 +1126,8 @@ A buffer saved meanwhile, as by a timer, is formatted as usual.")
 
 (defun dbt-format-buffer ()
   "Save the buffer, then format it.
-With dbt lsp, the server formats it as it answers, as
+With dbt lsp, which announces formatting, the server formats it as it
+answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
 dbt ends, unless it was modified meanwhile.  A dbt with neither, such
@@ -1130,7 +1137,7 @@ A dbt that did not answer in time whether it formats is asked again."
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
   (let ((dbt-mode--formatting (current-buffer)))
-    (if (dbt-mode-server-p)
+    (if (dbt-mode-server-announced-p :documentFormattingProvider)
         (dbt-lsp-format-buffer)
       (save-buffer)
       (dbt-project-ask-again "format")
@@ -1150,7 +1157,7 @@ format leaves it alone."
   (unless (eq dbt-mode--formatting (current-buffer))
     (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
-          (cond ((dbt-mode-server-p)
+          (cond ((dbt-mode-server-announced-p :documentFormattingProvider)
                  ;; The server answers later: the save that follows its
                  ;; edits formats nothing again.
                  (dbt-lsp-format-buffer (lambda ()
@@ -1244,10 +1251,11 @@ CTE rather than by statement."
     ["Close the Jinja block" dbt-close-block]
     ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
-    ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
+    ["Rename model..." dbt-lsp-rename-model
+     :active (dbt-mode-server-announced-p :workspace :fileOperations :willRename)]
     ["Format buffer" dbt-format-buffer]
     ["Format on save" dbt-format-on-save-mode :style toggle :selected dbt-format-on-save-mode]
-    ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
+    ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-announced-p :codeActionProvider)]
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression
