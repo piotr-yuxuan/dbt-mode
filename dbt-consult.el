@@ -34,9 +34,10 @@
 ;;;###autoload
 (defun dbt-consult-resource ()
   "Visit a resource of the project or of its packages, read with consult.
-They are the resources that `dbt-find-resource' names, each under its
-identifier, grouped by kind, with its package and file; consult
-previews the definition of the current candidate."
+They are the resources that `dbt-find-resource' names, each
+identifier once, grouped by kind, with its package and file; consult
+previews the definition of the current candidate, the first of an
+identifier that two packages share, as a source's tables can."
   (interactive)
   (unless (require 'consult nil t)
     (user-error "This command needs consult"))
@@ -47,12 +48,15 @@ previews the definition of the current candidate."
          (open (consult--temporary-files))
          (jump (consult--jump-state)))
     (consult--read
-     (mapcan (pcase-lambda (`(,kind . ,_))
-               (mapcar (lambda (entity)
-                         (propertize (dbt-mode-identifier (dbt-mode-entity-target entity project))
-                                     'dbt-consult-entity entity))
-                       (dbt-project-entities root (list kind))))
-             dbt-consult-groups)
+     ;; One candidate an identifier, as C-c C-f offers them: a source's
+     ;; tables in two packages share theirs, the first previewed.
+     (delete-dups
+      (mapcan (pcase-lambda (`(,kind . ,_))
+                (mapcar (lambda (entity)
+                          (propertize (dbt-mode-identifier (dbt-mode-entity-target entity project))
+                                      'dbt-consult-entity entity))
+                        (dbt-project-entities root (list kind))))
+              dbt-consult-groups))
      :prompt "dbt resource: "
      :category 'dbt-identifier
      :require-match t
