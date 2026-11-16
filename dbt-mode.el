@@ -933,16 +933,19 @@ again."
 (defun dbt-insert-ref (selector)
   "Insert a call of `ref' to SELECTOR, read with completion.
 SELECTOR is a name, or NAME.vVERSION, which calls that version.  Outside
-a Jinja tag, the call comes within `{{ }}'.  A resource of an installed
-package is called with its package.  The current resource is not the
-default: a model that refers to itself is a cycle."
+a Jinja tag, the call comes within `{{ }}'.  The call is to what dbt
+takes for SELECTOR from the current file, as `xref-find-definitions'
+finds it: in a package's model, the package's own resource first.  A resource of
+another installed package is called with its package.  The current
+resource is not the default: a model that refers to itself is a cycle."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
+         (caller (dbt-mode-caller root))
          (wanted (dbt-mode-parse-selector selector))
-         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
+         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted)))
                      (user-error "No model, seed or snapshot `%s'" selector)))
          (call (format "ref(%s'%s'%s)"
-                       (if (equal (plist-get entity :package) (dbt-project-name root))
+                       (if (member (plist-get entity :package) (list caller (dbt-project-name root)))
                            ""
                          (format "'%s', " (plist-get entity :package)))
                        (car wanted)
