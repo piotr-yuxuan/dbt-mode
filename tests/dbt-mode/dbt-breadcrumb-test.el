@@ -118,10 +118,23 @@ comment are none."
                      (concat " macros > helper.sql > helper > rows > outer_cte > inner_cte"
                              " > for column in columns > if loop.index % 2 == 0")))
       (should (equal (dbt-test-breadcrumbs-at "AT_ONE") " macros > helper.sql > helper > rows > outer_cte > one"))
+      ;; A line that closes a CTE and opens the next is the next one's.
+      (dbt-test-goto "    ), one as")
+      (execute-kbd-macro (kbd "C-a"))
+      (ert-run-idle-timers)
+      (should (equal (dbt-test-mode-line header-line-format) " macros > helper.sql > helper > rows > outer_cte > one"))
       (should (equal (dbt-test-breadcrumbs-at "AT_CALL")
                      " macros > helper.sql > helper > rows > outer_cte > call(user) dbt_utils.my_macro()"))
       (should (equal (dbt-test-breadcrumbs-at "AT_COMMENT") " macros > helper.sql > helper > rows"))
-      (should (equal (dbt-test-breadcrumbs-at "AT_END") " macros > helper.sql > helper > rows")))))
+      (should (equal (dbt-test-breadcrumbs-at "AT_END") " macros > helper.sql > helper > rows"))
+      ;; Narrowed to the CTE inner_cte, the header line names what holds it.
+      (dbt-test-goto "AT_IF")
+      (execute-kbd-macro (kbd "C-x n d"))
+      (should (buffer-narrowed-p))
+      (ert-run-idle-timers)
+      (should (equal (dbt-test-mode-line header-line-format)
+                     (concat " macros > helper.sql > helper > rows > outer_cte > inner_cte"
+                             " > for column in columns > if loop.index % 2 == 0"))))))
 
 (ert-deftest dbt-breadcrumb-leaves-a-killed-buffer-alone ()
   "A buffer killed before Emacs is idle leaves its update nothing to do, and no error.

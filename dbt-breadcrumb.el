@@ -53,46 +53,54 @@ nothing compiles."
 
 (defun dbt-breadcrumb--update (buffer)
   "Compute `dbt-breadcrumb--line' of BUFFER at its point, unless it was killed.
-For the idle timer of `dbt-breadcrumb--schedule'.  The symbols are the
-Jinja blocks open at point, a definition block named by the first
-identifier after its keyword and an `if', `for' or `call' block by its
-statement, and the CTEs whose parenthesis holds point or is opened on
-its line, outermost first."
+For the idle timer of `dbt-breadcrumb--schedule'.  The symbols are the Jinja blocks open at point, a definition
+block named by the first identifier after its keyword and an `if',
+`for' or `call' block by its statement, and the CTEs whose parenthesis
+holds point, outermost first, in the whole buffer, narrowed or not.
+On the first line of a CTE, point is in it: before its parenthesis, as
+where `C-M-a' leaves it, and in a line that closes a CTE and opens the
+next, `), final as (', which is the next one's."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq dbt-breadcrumb--timer nil
             dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick)))
-      (let* ((case-fold-search t)
-             (position (point))
-             (root (dbt-project-root))
-             (symbols nil))
-        (save-excursion
-          (dolist (block (cdr (dbt-edit-blocks position)))
-            (let ((statement (replace-regexp-in-string
-                              "[ \t\n\r]+" " "
-                              (string-trim (buffer-substring-no-properties (+ (nth 1 block) 2) (- (nth 2 block) 2))
-                                           "[-+]?[ \t\n\r]*" "[ \t\n\r]*[-+]?"))))
-              ;; dbt-lsp-plus's outline leaves out raw, filter, block and with.
-              (when (string-match (concat "\\`\\(?:\\(?:if\\|for\\|call\\)\\_>"
-                                          "\\|\\(?:macro\\|test\\|snapshot\\|materialization\\|docs\\|set\\)"
-                                          " \\([[:alpha:]_][[:alnum:]_]*\\)\\)")
-                                  statement)
-                (push (cons (nth 1 block) (or (match-string 1 statement) statement)) symbols))))
-          ;; A parenthesis in a comment or a string opens nothing for `syntax-ppss'.
-          (dolist (paren (seq-uniq (append (nth 9 (syntax-ppss position)) (nth 9 (syntax-ppss (line-end-position))))))
-            (goto-char (1+ paren))
-            (when (looking-back (dbt-mode-cte-regexp) (line-beginning-position))
-              (push (cons (match-beginning 1) (match-string-no-properties 1)) symbols))))
-        (setq dbt-breadcrumb--line
-              (cons (string-replace
-                     "%" "%%"
-                     (concat " " (string-join
-                                  (append (and root (delete "." (split-string (file-relative-name default-directory root) "/" t)))
-                                          (list (file-name-nondirectory (or buffer-file-name (buffer-name)))))
-                                  " > ")))
-                    (string-replace "%" "%%" (mapconcat (lambda (symbol) (concat " > " (cdr symbol)))
-                                                        (sort symbols #'car-less-than-car)))))
-        (force-mode-line-update)))))
+      (save-excursion
+        (save-restriction
+          (widen)
+          (let* ((case-fold-search t)
+                 (position (point))
+                 (root (dbt-project-root))
+                 (symbols nil))
+            (dolist (block (cdr (dbt-edit-blocks position)))
+              (let ((statement (replace-regexp-in-string
+                                "[ \t\n\r]+" " "
+                                (string-trim (buffer-substring-no-properties (+ (nth 1 block) 2) (- (nth 2 block) 2))
+                                             "[-+]?[ \t\n\r]*" "[ \t\n\r]*[-+]?"))))
+                ;; dbt-lsp-plus's outline leaves out raw, filter, block and with.
+                (when (string-match (concat "\\`\\(?:\\(?:macro\\|test\\|snapshot\\|materialization\\|docs\\|set\\)"
+                                            " \\(?1:[[:alpha:]_][[:alnum:]_]*\\)"
+                                            "\\|\\(?1:\\(?:if\\|for\\|call\\)\\_>.*\\)\\)")
+                                    statement)
+                  (push (cons (nth 1 block) (match-string 1 statement)) symbols))))
+            ;; A parenthesis in a comment or a string opens nothing for
+            ;; `syntax-ppss'; the CTE's regexp matches at a line's start.
+            (beginning-of-line)
+            (dolist (paren (nth 9 (syntax-ppss (max position (or (re-search-forward (dbt-mode-cte-regexp) (line-end-position) t)
+                                                                 position)))))
+              (goto-char (1+ paren))
+              (when (looking-back (dbt-mode-cte-regexp) (line-beginning-position))
+                (push (cons (match-beginning 1) (match-string-no-properties 1)) symbols)))
+            (setq dbt-breadcrumb--line
+                  (cons (string-replace
+                         "%" "%%"
+                         (concat " " (string-join
+                                      (append (and root (delete "." (split-string (file-relative-name default-directory root)
+                                                                                  "/" t)))
+                                              (list (file-name-nondirectory (or buffer-file-name (buffer-name)))))
+                                      " > ")))
+                        (string-replace "%" "%%" (mapconcat (lambda (symbol) (concat " > " (cdr symbol)))
+                                                            (sort symbols #'car-less-than-car))))))))
+      (force-mode-line-update))))
 
 (defun dbt-breadcrumb--schedule ()
   "Have the header line computed once Emacs is idle, if point or the text moved.
