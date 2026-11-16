@@ -58,9 +58,11 @@ of no argument, shows the node again, on \\[revert-buffer]."
                 (propertize (format "%-9s %s" (car (split-string node-id "\\.")) (dbt-lineage-label node-id))
                             'dbt-node-id node-id)))
         (empty (lambda (value) (member value '(nil :false "" []))))
-        (directory (nth 1 (assoc (map-elt node "package_name") (dbt-project-packages root)))))
+        (directory (nth 1 (assoc (map-elt node "package_name") (dbt-project-packages root))))
+        (columns (map-values (map-elt node "columns"))))
     (with-current-buffer (get-buffer-create (format "*dbt node: %s*" id))
-      (let ((inhibit-read-only t))
+      (let ((inhibit-read-only t)
+            (width (apply #'max 0 (mapcar (lambda (column) (length (map-elt column "name"))) columns))))
         (dbt-node-mode)
         (setq dbt-node--root root
               default-directory root)
@@ -104,12 +106,14 @@ of no argument, shows the node again, on \\[revert-buffer]."
                                ("disabled" . ,(or (map-elt node "disabled")
                                                   (eq (map-nested-elt node '("config" "enabled")) :false)))))))
         (dbt-node--section "Columns"
-                           (map-apply (lambda (_name column)
-                                        (mapconcat #'identity
-                                                   (seq-remove empty (mapcar (lambda (key) (map-elt column key))
-                                                                             '("name" "data_type" "description")))
-                                                   "  "))
-                                      (map-elt node "columns")))
+                           (mapcar (lambda (column)
+                                     (string-trim-right
+                                      (format (format "%%-%ds  %%s" width) (map-elt column "name")
+                                              (mapconcat #'identity
+                                                         (seq-remove empty (list (map-elt column "data_type")
+                                                                                 (map-elt column "description")))
+                                                         "  "))))
+                                   columns))
         (dbt-node--section "Tests"
                            (if (map-contains-key node "tests")
                                (mapcar (lambda (test)

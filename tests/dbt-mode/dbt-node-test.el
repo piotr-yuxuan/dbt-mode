@@ -30,7 +30,7 @@ lines; off under \"disabled\", the first of an array."
                                (access . "protected") (contract . ((enforced . :json-false)))))
                     (columns . ((order_id . ((name . "order_id") (data_type . "integer")
                                              (description . "One per order.")))
-                                (amount . ((name . "amount") (data_type) (description . "")))))
+                                (amount . ((name . "amount") (data_type . "numeric") (description . "")))))
                     (depends_on . ((nodes . ["seed.shop.raw_orders"]) (macros . ["macro.shop.cents_to_dollars"])))
                     (description . "The orders, cleaned.\nOne row per order.")))
                 (seed.shop.raw_orders
@@ -52,11 +52,12 @@ lines; off under \"disabled\", the first of an array."
   "C-c C-o on a ref shows its node from the manifest, its description first, then its files, configuration, columns, tests, what it depends on and what uses it.
 The heading names the node, its kind and package, and the manifest it
 comes from, with when dbt wrote it.  A value that dbt leaves empty, null
-or false shows nothing; a description of two lines is one value, which
-TAB folds with its section.  The tests are left to dbt-lsp-plus.  What uses
-it is what dbt's child_map names, but for tests: an analysis, a model, a
-snapshot.  C-c C-o again, and g, show the node once.  RET visits its
-file, its YAML entry, what it depends on and what uses it."
+or false shows nothing; columns align by name; a description of two
+lines is one value, which TAB folds with its section.  The tests are
+left to dbt-lsp-plus.  What uses it is what dbt's child_map names, but
+for tests: an analysis, a model, a snapshot.  C-c C-o again, and g, show
+the node once.  RET visits its file, its YAML entry, what it depends on
+and what uses it."
   (dbt-test-with-project root
     (dbt-test-write-manifest root)
     (save-window-excursion
@@ -84,7 +85,7 @@ file, its YAML entry, what it depends on and what uses it."
                            "  access        protected"
                            "Columns"
                            "  order_id  integer  One per order."
-                           "  amount"
+                           "  amount    numeric"
                            "Tests"
                            "  known to dbt-lsp-plus only: C-c C-t visits the YAML that holds them"
                            "Depends on"
