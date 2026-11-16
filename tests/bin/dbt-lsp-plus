@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: EUPL-1.2 OR GPL-3.0-or-later
+#
+# A stand-in for dbt-lsp-plus, run as `dbt-lsp-plus -- DBT lsp ...'.  As
+# the proxy does, it asks `DBT lsp --help': when DBT runs dbt lsp, it runs
+# `DBT lsp ...', the scripted dbt lsp of the fake dbt; when DBT refuses
+# it as dbt 2 refuses a command it lacks, exit 2 and "unrecognized
+# subcommand 'lsp'", it runs the scripted server alone, as the proxy runs
+# alone; otherwise it runs `DBT lsp ...' all the same, as the proxy does.
+[ "$1" = "--" ] && shift
+help=$("$1" lsp --help 2>&1)
+if [ $? -eq 2 ] && printf '%s' "$help" | grep -q "unrecognized subcommand 'lsp'"; then
+  FAKE_ALONE=1 exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@"
+fi
+exec "$@"
