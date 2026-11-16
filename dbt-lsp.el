@@ -265,32 +265,37 @@ argument, is then called."
                                           (message "dbt lsp: %s failed: %s" name (lsp-get error :message))
                                           (when failed (funcall failed)))))))
 
-(defun dbt-lsp--execute (command arguments schema callback)
+(defun dbt-lsp--execute (command arguments schema callback &optional failed)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
-or holds an error, a message says so."
+or holds an error, a message says so, and FAILED, a function of no
+argument, is then called, when given."
   (dbt-lsp--request "workspace/executeCommand" (list :command command :arguments (vconcat arguments))
                     `(or null (object (:error stringp)) ,schema)
                     (lambda (answer)
-                      (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
-                            ((dbt-lsp--conforms-p answer '(object (:error stringp)))
-                             (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
-                            (t (funcall callback answer))))))
+                      (if (and answer (not (dbt-lsp--conforms-p answer '(object (:error stringp)))))
+                          (funcall callback answer)
+                        (message "dbt lsp: %s %s" command
+                                 (if answer (format "failed: %s" (lsp-get answer :error)) "answered nothing"))
+                        (when failed
+                          (funcall failed))))
+                    failed))
 
 (defun dbt-lsp-node-info (id callback otherwise)
   "Give CALLBACK the node ID as dbt-lsp-plus knows it, else call OTHERWISE.
 When the server lists the command dbt-lsp-plus.nodeInfo, CALLBACK
 receives the node, a hash table, once the proxy answers; a null answer,
 no such node, and an error, such as -32803 until the proxy's first
-parse, are said as `dbt-lsp--execute' says them.  OTHERWISE, a function
-of no argument, is called when the server does not list the command, as
-dbt lsp alone."
+parse or while its parse is refused, are said as `dbt-lsp--execute'
+says them.  OTHERWISE, a function of no argument, is called then, and
+when the server does not list the command, as dbt lsp alone."
   (if (dbt-lsp-command-p "dbt-lsp-plus.nodeInfo")
       (dbt-lsp--execute "dbt-lsp-plus.nodeInfo" (list id) '(object)
                         ;; One shape whatever `lsp-use-plists' says, false
                         ;; read as nil, as lsp-mode reads it.
-                        (lambda (node) (funcall callback (json-parse-string (json-encode node) :null-object nil))))
+                        (lambda (node) (funcall callback (json-parse-string (json-encode node) :null-object nil)))
+                        otherwise)
     (funcall otherwise)))
 
 (defun dbt-lsp-compiled (callback)

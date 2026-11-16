@@ -1318,9 +1318,10 @@ stands."
 A test, no node of the index, is no link; g asks the proxy again; a
 null relation, as the proxy gives a disabled node, shows none.  Its
 error, -32803 until the proxy's first parse, shows its reason; its null
-answer, no such node, says so.  A server that does not list the
-command, as dbt lsp alone, leaves the node to the manifest; eldoc of
-dbt-mode's own steps aside for the server's hover."
+answer, no such node, says so; then the manifest serves, as without the
+proxy.  A server that does not list the command, as dbt lsp alone,
+leaves the node to the manifest; eldoc of dbt-mode's own steps aside
+for dbt lsp's hover."
   (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
                 (package_name . "shop") (summary . "view \"shop\".\"main\".\"stg_orders\"\ntags daily")
                 (relation . "\"shop\".\"main\".\"stg_orders\"") (relation_name . "elsewhere")
@@ -1373,19 +1374,23 @@ dbt-mode's own steps aside for the server's hover."
         (should-not (string-search "relation" (buffer-string)))
         (should (string-search "  disabled      yes" (buffer-string)))
         (kill-buffer)))
-    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
-                                     ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
-                                                    . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
-      (switch-to-buffer (current-buffer))
-      (dbt-test-goto "stg_orders')")
-      (execute-kbd-macro (kbd "C-c C-o"))
-      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
-      (should-not (get-buffer "*dbt node: model.shop.stg_orders*")))
-    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"]))
-      (switch-to-buffer (current-buffer))
-      (dbt-test-goto "stg_orders')")
-      (execute-kbd-macro (kbd "C-c C-o"))
-      (should (dbt-lsp-test-message "nodeInfo answered nothing")))
+    (dolist (case '(((("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                      ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                     . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+                     . "nodeInfo failed: No index yet: dbt parse runs")
+                    ((("$commands" . ["dbt-lsp-plus.nodeInfo"])) . "nodeInfo answered nothing")))
+      (dbt-lsp-test-with-server root (car case)
+        (make-directory (expand-file-name "target" root))
+        (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                              " \"resource_type\": \"model\", \"package_name\": \"shop\"}}}")
+                      nil (expand-file-name "target/manifest.json" root))
+        (switch-to-buffer (current-buffer))
+        (dbt-test-goto "stg_orders')")
+        (execute-kbd-macro (kbd "C-c C-o"))
+        (should (dbt-lsp-test-message (cdr case)))
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
+          (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
+          (kill-buffer))))
     (dbt-lsp-test-with-server root nil
       (make-directory (expand-file-name "target" root))
       (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
