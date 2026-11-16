@@ -1360,7 +1360,12 @@ target elsewhere are watched as before."
         ;; The events of logs and target come first, if any come.
         (dotimes (_ 10)
           (read-event nil nil 0.1))
-        (should-not (seq-find (lambda (uri) (string-match-p "/\\(?:logs\\|target\\)/" uri)) (funcall changed))))
+        (should-not (seq-find (lambda (uri)
+                                (seq-some (lambda (directory)
+                                            (string-prefix-p (expand-file-name directory (file-truename root))
+                                                             (lsp--uri-to-path uri)))
+                                          '("logs/" "target/")))
+                              (funcall changed))))
       (should (member "[/\\\\]\\.git\\'" lsp-file-watch-ignored-directories))
       ;; Another project's logs, or a directory logs of this one's models,
       ;; are watched as before.
@@ -1370,23 +1375,24 @@ target elsewhere are watched as before."
 (ert-deftest dbt-lsp-keeps-the-watchers-out-by-true-names ()
   "A project opened through a symbolic link has its logs and target kept out by their true names.
 lsp-mode watches, and matches, the true names of directories, as on
-macOS, where /var is /private/var."
-  (dbt-test-with-project root
-    (let* ((link (make-temp-name (expand-file-name "dbt-link" temporary-file-directory)))
-           (dbt-executable dbt-lsp-test-dbt)
-           (lsp--session nil)
-           (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
+macOS, where /var is /private/var; the name of a root may hold
+characters special to regexps."
+  (dbt-lsp-test-with-server root nil
+    (let* ((project (expand-file-name "a+b[c]/" root))
+           (link (make-temp-name (expand-file-name "dbt-link" temporary-file-directory)))
            (lsp-file-watch-ignored-directories nil)
            (buffer nil))
-      (make-symbolic-link (directory-file-name root) link)
+      (make-directory (expand-file-name "models" project) t)
+      (write-region "name: 'linked'\nprofile: 'shop'\n" nil (expand-file-name "dbt_project.yml" project))
+      (write-region "select 1 as id\n" nil (expand-file-name "models/one.sql" project))
+      (make-symbolic-link (directory-file-name project) link)
       (unwind-protect
-          (progn
-            (setq buffer (find-file-noselect (expand-file-name "models/marts/orders.sql" link)))
-            (with-current-buffer buffer
-              (should (string-prefix-p link buffer-file-name))
-              (dbt-lsp-deferred))
+          (with-current-buffer (setq buffer (find-file-noselect (expand-file-name "models/one.sql" link)))
+            (should (string-prefix-p link buffer-file-name))
+            (dbt-lsp)
+            (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
             (dolist (directory '("logs" "target"))
-              (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename root))))
+              (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename project))))
                                 lsp-file-watch-ignored-directories))))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))

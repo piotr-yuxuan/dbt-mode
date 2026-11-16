@@ -38,7 +38,9 @@
 ;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
 ;; project a folder of the lsp session before lsp-mode starts, so that
 ;; the server runs on the project, not on an enclosing repository; `dbt-lsp'
-;; does the same at once.
+;; does the same at once.  Loading this file keeps lsp-mode's file watchers
+;; out of the outputs of a dbt project, for every server that it starts
+;; on one: see `dbt-lsp--ignore-outputs'.
 
 ;;; Code:
 
@@ -132,19 +134,30 @@ the buffer, as lsp-mode would guess before it looks at the folders."
       (setq-local lsp-auto-guess-root nil))))
 
 (defun dbt-lsp--ignore-outputs ()
-  "Keep lsp-mode's file watchers out of the current project's logs and target.
-dbt writes there at each run and dbt lsp at each compilation, while dbt
-lsp asks to watch every file: at each event, dbt-lsp-plus would list
-the graph again, and dbt lsp compile.  lsp-mode reads
-`lsp-file-watch-ignored-directories' under the workspace's root when
-the server asks, and matches true names: one regexp per project, at the
-true name of its root, joins the option's value in this session, and
-the user's own entries stay.  A value that the project's .dir-locals.el
-gives the option takes precedence."
-  (when-let* ((root (dbt-project-root)))
-    (add-to-list 'lsp-file-watch-ignored-directories
-                 (format "\\`%s[/\\\\]\\(?:logs\\|target\\)\\'"
-                         (regexp-quote (directory-file-name (file-truename root)))))))
+  "Keep lsp-mode's file watchers out of dbt's outputs in the starting workspace.
+For `lsp-before-initialize-hook', so for every server that lsp-mode
+starts, dbt lsp or another one on the same folder, before it asks for a
+watcher: lsp-mode makes one watch per folder of its session, with the
+option's value of that moment.  The outputs are the logs and the target
+of the dbt project at the workspace's root, where dbt lsp writes
+whatever it is told.  dbt
+writes there at each run and dbt lsp at each compilation, while dbt lsp
+asks to watch every file: a dbt-lsp-plus older than its plan 025 would
+list the graph again at each event, and dbt lsp compile.  lsp-mode reads
+`lsp-file-watch-ignored-directories' in a buffer at the workspace's
+root, and matches true names: one regexp per project, of true names,
+joins the option's global value for this Emacs session, and the user's
+own entries stay.  A .dir-locals.el at the workspace's root that sets
+the option for every mode replaces the whole list, this regexp
+included."
+  (when-let* ((root (dbt-project-root (lsp--workspace-root lsp--cur-workspace)))
+              (regexp (format "\\`%s[/\\\\]\\(?:logs\\|target\\)\\'"
+                              (regexp-quote (directory-file-name (file-truename root)))))
+              ((not (member regexp (default-value 'lsp-file-watch-ignored-directories)))))
+    (set-default 'lsp-file-watch-ignored-directories
+                 (cons regexp (default-value 'lsp-file-watch-ignored-directories)))))
+
+(add-hook 'lsp-before-initialize-hook #'dbt-lsp--ignore-outputs)
 
 ;;;###autoload
 (defun dbt-lsp ()
@@ -158,7 +171,6 @@ did not answer in time whether it runs one is asked again."
     ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
     (_ (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does")))
   (dbt-lsp-add-project-folder)
-  (dbt-lsp--ignore-outputs)
   (lsp))
 
 ;;;###autoload
@@ -169,7 +181,6 @@ when dbt runs no server, such as dbt-oss, which lsp-mode would take for
 a server to install."
   (when (dbt-lsp-server-p)
     (dbt-lsp-add-project-folder)
-    (dbt-lsp--ignore-outputs)
     (lsp-deferred)))
 
 ;;;; Commands of the server
