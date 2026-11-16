@@ -113,7 +113,7 @@ otherwise, or with an active region, this is `delete-backward-char'."
 
 (defconst dbt-edit--lexeme-regexp
   "{\\(?:\\(?1:#\\)\\|{\\|%[-+]?[ \t\n]*\\(?2:end\\)?\\(?3:[a-z_]+\\)\\_>\\)"
-  "What starts a Jinja comment, group 1, an expression or a statement.
+  "What starts a Jinja comment (group 1), an expression or a statement.
 Group 3 is a statement's keyword, group 2 the `end' before it in a
 closing tag.  `-' or `+', Jinja's whitespace control, may follow `{%'.")
 
