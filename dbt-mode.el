@@ -953,8 +953,8 @@ That is the model, seed or snapshot of the `ref' at point, the source
 of the `source' at point, or else the current resource, as
 `dbt-mode-selection-at-point' selects it.  With FAMILY, interactively a
 prefix argument, the selection takes in its upstream and downstream:
-+SELECTOR+.  An exposure, which dbt has nothing to build for, needs it
-to build what the exposure reads."
++SELECTOR+.  An exposure, which dbt has nothing to build for, needs
+FAMILY to build what the exposure reads."
   (interactive "P")
   (let* ((selector (or (dbt-mode-selection-at-point) (user-error "No model here")))
          (command (format "dbt build -s %s" (if family (format "+%s+" selector) selector))))
