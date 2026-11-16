@@ -67,6 +67,25 @@ Fail the test after SECONDS, 30 by default, while processes run."
       (accept-process-output nil 0.1))
     (or value (ert-fail (list "Timed out waiting for" predicate)))))
 
+(defun dbt-test-mode-line (construct)
+  "Return the text of the mode line CONSTRUCT, as redisplay draws it.
+It is read in the current buffer, since `format-mode-line' gives an
+empty string in batch.  This reads what the
+header lines of the tests hold: a string, whose `%%' is `%', a list of
+constructs, (:eval FORM), and (SYMBOL THEN ELSE) for a SYMBOL that is
+no keyword; anything else, nil included, is empty.  Any other
+%-construct is an error, as redisplay would not show it as written."
+  (pcase construct
+    ((pred stringp)
+     (when (string-search "%" (string-replace "%%" "" construct))
+       (error "No %%-construct but %%%% is read here: %S" construct))
+     (string-replace "%%" "%" construct))
+    (`(:eval ,form) (dbt-test-mode-line (eval form t)))
+    (`(,(and (pred symbolp) (pred (not keywordp)) symbol) ,then . ,else)
+     (dbt-test-mode-line (if (symbol-value symbol) then (car else))))
+    ((pred consp) (mapconcat #'dbt-test-mode-line construct))
+    (_ "")))
+
 (defun dbt-test-lineage-rows ()
   "Return the rows of the lineage tree of the current buffer, in its order.
 Each is (DIRECTION DEPTH TYPE NAME FILE), strings, DEPTH that of its

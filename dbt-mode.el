@@ -60,6 +60,7 @@
 (defvar font-lock-end)
 
 (autoload 'dbt-dispatch "dbt-cli" nil t)
+(autoload 'dbt-breadcrumb-mode "dbt-breadcrumb" nil t)
 (autoload 'dbt-describe "dbt-node" nil t)
 (autoload 'dbt-node-eldoc "dbt-node")
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
