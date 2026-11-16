@@ -818,6 +818,134 @@ A node of a package that dbt-mode does not know has no file."
     (should (equal (aref (plist-get (plist-get (car (last (dbt-lsp-test-received))) :params) :arguments) 0)
                    "+stg_orders+"))))
 
+(defun dbt-lsp-test-item (root id file &optional line)
+  "Return the call hierarchy item of the node ID, in FILE of ROOT, at LINE.
+LINE is 0 by default; the shape is dbt-lsp-plus's."
+  (let ((range `(:start (:line ,(or line 0) :character 0) :end (:line ,(or line 0) :character 0))))
+    `(:name ,(car (last (split-string id "\\."))) :kind 5 :detail ,id
+            :uri ,(concat "file://" (expand-file-name file root)) :range ,range :selectionRange ,range
+            :data (:uniqueId ,id :resourceType ,(car (split-string id "\\."))))))
+
+(defun dbt-lsp-test-hierarchy (root)
+  "Return the answers of a server that gives a call hierarchy of ROOT.
+It is the lineage of stg_orders: stg_orders calls the seed raw_orders
+and the macro cents_to_dollars, at its third line; orders,
+orders_snapshot and order_counts call it, then customers calls orders,
+and customer_ltv, which has no file, customers."
+  (let ((item (lambda (id file &optional line) (dbt-lsp-test-item root id file line))))
+    `(("$capabilities" (callHierarchyProvider . t))
+      ("textDocument/prepareCallHierarchy"
+       . [,(funcall item "model.shop.stg_orders" "models/staging/stg_orders.sql")])
+      ("callHierarchy/outgoingCalls model.shop.stg_orders"
+       . [(:to ,(funcall item "seed.shop.raw_orders" "seeds/raw_orders.csv") :fromRanges [])
+          (:to ,(funcall item "macro.shop.cents_to_dollars" "macros/cents_to_dollars.sql" 2) :fromRanges [])])
+      ("callHierarchy/incomingCalls model.shop.stg_orders"
+       . [(:from ,(funcall item "model.shop.orders" "models/marts/orders.sql") :fromRanges [])
+          (:from ,(funcall item "snapshot.shop.orders_snapshot" "snapshots/orders_snapshot.sql") :fromRanges [])
+          (:from ,(funcall item "analysis.shop.order_counts" "analyses/order_counts.sql") :fromRanges [])])
+      ("callHierarchy/incomingCalls model.shop.orders"
+       . [(:from ,(funcall item "model.shop.customers" "models/marts/customers.sql") :fromRanges [])])
+      ("callHierarchy/incomingCalls model.shop.customers"
+       . [(:from ,(funcall item "model.shop.customer_ltv" "models/marts/customer_ltv.sql") :fromRanges [])]))))
+
+(defun dbt-lsp-test-calls ()
+  "Return the calls that the scripted server was asked, as (METHOD ID), in order."
+  (delq nil (mapcar (lambda (message)
+                      (when (string-prefix-p "callHierarchy/" (or (plist-get message :method) ""))
+                        (list (plist-get message :method)
+                              (plist-get (plist-get (plist-get (plist-get message :params) :item) :data) :uniqueId))))
+                    (dbt-lsp-test-received))))
+
+(ert-deftest dbt-lsp-lineage-asks-the-call-hierarchy ()
+  "With a server that announces a call hierarchy, as dbt-lsp-plus, C-c C-g asks it, two levels deep.
+The node's item comes from the start of its line in its file; outgoing
+calls give its upstream, incoming calls its downstream.  A macro shows
+with m, and RET visits it at its line; + asks one level more."
+  (dbt-lsp-test-with-server root (dbt-lsp-test-hierarchy root)
+    (dbt-lineage "stg_orders")
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*"))))
+      (dbt-test-wait (lambda () (dbt-test-lineage-rows)))
+      (should (equal (dbt-test-lineage-rows)
+                     '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv")
+                       ("downstream" "1" "model" "orders" "models/marts/orders.sql")
+                       ("downstream" "2" "model" "customers" "models/marts/customers.sql")
+                       ("downstream" "1" "snapshot" "orders_snapshot" "snapshots/orders_snapshot.sql")
+                       ("downstream" "1" "analysis" "order_counts" "analyses/order_counts.sql"))))
+      (should (equal header-line-format " Lineage of stg_orders, to depth 2"))
+      (let ((prepare (seq-find (lambda (message)
+                                 (equal (plist-get message :method) "textDocument/prepareCallHierarchy"))
+                               (dbt-lsp-test-received))))
+        (should (equal (plist-get (plist-get prepare :params) :position) '(:line 0 :character 0)))
+        (should (string-suffix-p "models/staging/stg_orders.sql"
+                                 (plist-get (plist-get (plist-get prepare :params) :textDocument) :uri))))
+      (should (equal (dbt-lsp-test-calls)
+                     '(("callHierarchy/outgoingCalls" "model.shop.stg_orders")
+                       ("callHierarchy/incomingCalls" "model.shop.stg_orders")
+                       ("callHierarchy/outgoingCalls" "seed.shop.raw_orders")
+                       ("callHierarchy/outgoingCalls" "macro.shop.cents_to_dollars")
+                       ("callHierarchy/incomingCalls" "model.shop.orders")
+                       ("callHierarchy/incomingCalls" "snapshot.shop.orders_snapshot")
+                       ("callHierarchy/incomingCalls" "analysis.shop.order_counts"))))
+      (execute-kbd-macro (kbd "m"))
+      (should (member '("upstream" "1" "macro" "cents_to_dollars" "macros/cents_to_dollars.sql")
+                      (dbt-test-lineage-rows)))
+      (goto-char (point-min))
+      (search-forward "cents_to_dollars")
+      (execute-kbd-macro (kbd "RET"))
+      (should (equal (file-relative-name buffer-file-name root) "macros/cents_to_dollars.sql"))
+      (should (= (line-number-at-pos) 3))
+      (switch-to-buffer "*dbt lineage: stg_orders*")
+      (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format " Lineage of stg_orders, to depth 3"))
+      (dbt-test-wait (lambda () (member '("downstream" "3" "model" "customer_ltv" "") (dbt-test-lineage-rows))))
+      (should (equal (car (last (dbt-lsp-test-calls))) '("callHierarchy/incomingCalls" "model.shop.customers"))))))
+
+(ert-deftest dbt-lsp-lineage-goes-on-past-a-call-that-fails ()
+  "A call of a level that fails is said, and the other calls of the level go on.
+The calls of orders fail, so customers is missing; those of
+orders_snapshot give snapshot_report, at the second level."
+  (dbt-lsp-test-with-server root
+      (append `(("$errors" . (("callHierarchy/incomingCalls model.shop.orders"
+                               . ((code . -32603) (message . "No graph yet")))))
+                ("callHierarchy/incomingCalls snapshot.shop.orders_snapshot"
+                 . [(:from ,(dbt-lsp-test-item root "model.shop.snapshot_report" "models/marts/snapshot_report.sql")
+                           :fromRanges [])]))
+              (dbt-lsp-test-hierarchy root))
+    (dbt-lineage "stg_orders")
+    (dbt-lsp-test-message "dbt lsp: callHierarchy/incomingCalls failed: No graph yet")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (dbt-test-wait (lambda () (member '("downstream" "2" "model" "snapshot_report" "") (dbt-test-lineage-rows))))
+      (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)))))))
+
+(ert-deftest dbt-lsp-lineage-says-what-it-cannot-read ()
+  "An answer of the call hierarchy that dbt-mode cannot read is said."
+  (dbt-lsp-test-with-server root
+      (cons '("callHierarchy/outgoingCalls model.shop.stg_orders" . [((to . 3))])
+            (assoc-delete-all "callHierarchy/outgoingCalls model.shop.stg_orders" (dbt-lsp-test-hierarchy root)))
+    (dbt-lineage "stg_orders")
+    (dbt-lsp-test-message "dbt lsp: callHierarchy/outgoingCalls answered what dbt-mode cannot read")))
+
+(ert-deftest dbt-lsp-lineage-lists-the-nodes-without-an-item ()
+  "Without an item of the node, as for a snapshot whose block does not start its line, dbt lsp lists the nodes."
+  (dbt-lsp-test-with-server root
+      (append '(("textDocument/prepareCallHierarchy" . [])
+                ("workspace/executeCommand dbt.listNodes"
+                 :nodes [(:unique_id "seed.shop.raw_orders" :name "raw_orders" :resource_type "seed"
+                                     :package_name "shop" :original_file_path "seeds/raw_orders.csv"
+                                     :depends_on (:nodes []))
+                         (:unique_id "model.shop.stg_orders" :name "stg_orders" :resource_type "model"
+                                     :package_name "shop" :original_file_path "models/staging/stg_orders.sql"
+                                     :depends_on (:nodes ["seed.shop.raw_orders"]))]
+                 :error nil))
+              (assoc-delete-all "textDocument/prepareCallHierarchy" (dbt-lsp-test-hierarchy root)))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (should (equal (dbt-test-lineage-rows) '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv"))))
+      (should (equal header-line-format " Lineage of stg_orders, at every depth")))
+    (should (member "workspace/executeCommand dbt.listNodes" (dbt-lsp-test-methods)))
+    (should-not (dbt-lsp-test-calls))))
+
 (ert-deftest dbt-lsp-rename-model-refuses-what-dbt-would-not-take ()
   "Renaming a model refuses a name that is not one, or that another resource has.
 dbt names the models, seeds and snapshots of a package apart, wherever

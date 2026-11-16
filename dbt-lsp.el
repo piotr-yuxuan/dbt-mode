@@ -187,28 +187,46 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
           method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
 
+(defun dbt-lsp--request (method params schema callback &optional failed)
+  "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
+SCHEMA is as `dbt-lsp--conforms-p' takes it.  An answer that it does not
+fit, and an error, are said in a message instead, naming METHOD, or the
+command of a workspace/executeCommand; FAILED, a function of no
+argument, is then called."
+  ;; From a buffer the server does not serve, such as that of the
+  ;; lineage, the server of the project.
+  (let ((name (if (equal method "workspace/executeCommand") (plist-get params :command) method))
+        (workspace (or (dbt-lsp-workspace)
+                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
+                       (user-error "No dbt lsp runs on this project"))))
+    (with-lsp-workspace workspace
+      ;; Unmerged, the answer of the one workspace asked: lsp-mode's
+      ;; merging of answers would turn an array into a list.
+      (lsp-request-async method params
+                         (lambda (answers)
+                           (let ((answer (cdar answers)))
+                             (if (dbt-lsp--conforms-p answer schema)
+                                 (funcall callback answer)
+                               (message "%s" (dbt-lsp--unreadable name answer))
+                               (when failed (funcall failed)))))
+                         :mode 'detached
+                         :no-merge t
+                         :error-handler (lambda (error)
+                                          (message "dbt lsp: %s failed: %s" name (lsp-get error :message))
+                                          (when failed (funcall failed)))))))
+
 (defun dbt-lsp--execute (command arguments schema callback)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
 or holds an error, a message says so."
-  ;; From a buffer the server does not serve, such as that of the
-  ;; lineage, the server of the project.
-  (let ((workspace (or (dbt-lsp-workspace)
-                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
-                       (user-error "No dbt lsp runs on this project"))))
-    (with-lsp-workspace workspace
-      (lsp-request-async "workspace/executeCommand"
-                         (list :command command :arguments (vconcat arguments))
-                         (lambda (answer)
-                           (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
-                                 ((dbt-lsp--conforms-p answer '(object (:error stringp)))
-                                  (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
-                                 ((dbt-lsp--conforms-p answer schema) (funcall callback answer))
-                                 (t (message "%s" (dbt-lsp--unreadable command answer)))))
-                         :mode 'detached
-                         :error-handler (lambda (error)
-                                          (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
+  (dbt-lsp--request "workspace/executeCommand" (list :command command :arguments (vconcat arguments))
+                    `(or null (object (:error stringp)) ,schema)
+                    (lambda (answer)
+                      (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
+                            ((dbt-lsp--conforms-p answer '(object (:error stringp)))
+                             (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
+                            (t (funcall callback answer))))))
 
 (defun dbt-lsp-node-info (id callback otherwise)
   "Give CALLBACK the node ID as dbt-lsp-plus knows it, else call OTHERWISE.
@@ -335,6 +353,77 @@ orders or orders.v2."
                 (append (lsp-get result :nodes) nil))
         "dbt lsp"
         (lambda () (let ((default-directory root)) (dbt-lsp-lineage selector id))))))))
+
+(defun dbt-lsp-hierarchy-p ()
+  "Return non-nil when the server of the buffer announces a call hierarchy.
+dbt-lsp-plus does; dbt lsp alone does not."
+  (let ((workspace (dbt-lsp-workspace)))
+    (and workspace (lsp-get (lsp--workspace-server-capabilities workspace) :callHierarchyProvider))))
+
+(defconst dbt-lsp--item
+  '(object (:name stringp) (:uri stringp) (:range (object (:start (object (:line natnump)))))
+           (:data (object (:uniqueId stringp) (:resourceType stringp))))
+  "The schema of an item of dbt-lsp-plus's call hierarchy, as dbt-mode reads it.
+`data.uniqueId' is dbt's unique id of the node.")
+
+(defun dbt-lsp-hierarchy-lineage (file line id otherwise)
+  "Show the lineage of the node ID, at LINE of FILE, from the call hierarchy.
+dbt-lsp-plus answers it from the project's files, and dbt lsp's nodes
+once listed, macros included.  The item of the node comes from the start
+of LINE, which must be that of ID; then outgoing calls give what each
+node depends on, upstream, and incoming calls what depends on it,
+downstream, one level at a time, as `dbt-lineage-show' asks them.
+OTHERWISE, a function of no argument, is called when the server has no
+item of ID there: a snapshot whose block does not start its line, one
+defined in YAML, a version of a model before the proxy listed dbt lsp's
+nodes."
+  (let* ((root (dbt-project-root))
+         (items (make-hash-table :test #'equal))
+         (node (lambda (item)
+                 (let ((node-id (lsp-get (lsp-get item :data) :uniqueId))
+                       (path (lsp--uri-to-path (lsp-get item :uri))))
+                   (puthash node-id item items)
+                   (list :id node-id :name (lsp-get item :name)
+                         :type (intern (lsp-get (lsp-get item :data) :resourceType))
+                         :package (nth 1 (split-string node-id "\\.")) :file (and (file-regular-p path) path)
+                         :line (1+ (lsp-get (lsp-get (lsp-get item :range) :start) :line))))))
+         (calls (lambda (ids direction callback)
+                  (pcase-let* ((`(,method ,key) (if (eq direction 'upstream)
+                                                    '("callHierarchy/outgoingCalls" :to)
+                                                  '("callHierarchy/incomingCalls" :from)))
+                               (left (length ids))
+                               (found nil)
+                               ;; Once each node of the level answered, or
+                               ;; failed, as said: the others go on.
+                               (done (lambda ()
+                                       (when (zerop (setq left (1- left)))
+                                         (funcall callback (nreverse found))))))
+                    (dolist (asked ids)
+                      (let ((default-directory root))
+                        (dbt-lsp--request
+                         method (list :item (gethash asked items)) `(or null (array (object (,key ,dbt-lsp--item))))
+                         (lambda (answer)
+                           (seq-doseq (call answer)
+                             (let ((other (funcall node (lsp-get call key))))
+                               ;; What ASKED depends on, upstream; what depends on it, downstream.
+                               (push (if (eq key :to)
+                                         (list other asked (plist-get other :id))
+                                       (list other (plist-get other :id) asked))
+                                     found)))
+                           (funcall done))
+                         done)))))))
+    (dbt-lsp--request
+     "textDocument/prepareCallHierarchy"
+     (list :textDocument (list :uri (lsp--path-to-uri file)) :position (list :line (1- line) :character 0))
+     `(or null (array ,dbt-lsp--item))
+     (lambda (answer)
+       (if-let* ((item (seq-find (lambda (item) (equal (lsp-get (lsp-get item :data) :uniqueId) id)) answer)))
+           (dbt-lineage-show root id (list (funcall node item)) "dbt-lsp-plus"
+                             (lambda ()
+                               (let ((default-directory root))
+                                 (dbt-lsp-hierarchy-lineage file line id otherwise)))
+                             calls)
+         (funcall otherwise))))))
 
 (defun dbt-lsp-rename-model (name)
   "Rename the model of the current buffer to NAME, and the uses of it.

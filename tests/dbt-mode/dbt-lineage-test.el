@@ -144,5 +144,206 @@ name, so two nodes of one name stay apart."
               (kill-buffer)))
         (delete-directory bin t)))))
 
+;; A graph that a server gives level by level: the focus f depends on a
+;; seed s and a macro m, which calls the macro n; a, b and c depend on f,
+;; and d on a.
+(defconst dbt-test-levels
+  '((upstream ("model.p.f" "seed.p.s" "macro.p.m") ("macro.p.m" "macro.p.n"))
+    (downstream ("model.p.f" "model.p.a" "model.p.b" "model.p.c") ("model.p.a" "model.p.d")))
+  "What each node calls, upstream, and what calls it, downstream.")
+
+(defun dbt-test-level-calls (levels asked &optional pending)
+  "Return a function that answers the calls of a level from LEVELS.
+LEVELS is as `dbt-test-levels', the answers as `dbt-lineage--calls'
+says.  It pushes each level asked, (DIRECTION . IDS), on the car of the
+cons ASKED.  It answers at once, or, when PENDING is a cons, pushes on
+its car a function that answers."
+  (lambda (ids direction callback)
+    (push (cons direction ids) (car asked))
+    (let ((answer (lambda ()
+                    (funcall callback
+                             (mapcan (lambda (id)
+                                       (mapcar (lambda (other)
+                                                 (list (list :id other :name (dbt-lineage-label other)
+                                                             :type (intern (car (split-string other "\\."))))
+                                                       (if (eq direction 'upstream) id other)
+                                                       (if (eq direction 'upstream) other id)))
+                                               (cdr (assoc id (alist-get direction levels)))))
+                                     ids)))))
+      (if pending
+          (push answer (car pending))
+        (funcall answer)))))
+
+(ert-deftest dbt-lineage-asks-a-server-level-by-level ()
+  "A lineage that a server gives level by level opens at depth 2; + asks one level more past the last asked.
+- redraws without asking; m shows the macros, hidden at first; past the
+last level, + shows every depth.  g asks again, to the depth shown."
+  (let* ((asked (list nil))
+         (focus (list (list :id "model.p.f" :name "f" :type 'model)))
+         (calls (dbt-test-level-calls dbt-test-levels asked)))
+    (dbt-lineage-show "/" "model.p.f" focus "a test"
+                      (lambda () (dbt-lineage-show "/" "model.p.f" focus "a test" #'ignore calls))
+                      calls)
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (should (equal (dbt-test-lineage-rows)
+                     '(("upstream" "1" "seed" "s" "")
+                       ("downstream" "1" "model" "a" "")
+                       ("downstream" "2" "model" "d" "")
+                       ("downstream" "1" "model" "b" "")
+                       ("downstream" "1" "model" "c" ""))))
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (should (equal (reverse (car asked))
+                     '((upstream "model.p.f") (upstream "seed.p.s" "macro.p.m")
+                       (downstream "model.p.f") (downstream "model.p.a" "model.p.b" "model.p.c"))))
+      (execute-kbd-macro (kbd "m"))
+      (should (equal (seq-filter (lambda (row) (equal (car row) "upstream")) (dbt-test-lineage-rows))
+                     '(("upstream" "1" "seed" "s" "")
+                       ("upstream" "1" "macro" "m" "")
+                       ("upstream" "2" "macro" "n" ""))))
+      (execute-kbd-macro (kbd "m"))
+      (should-not (member "m" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
+      (setcar asked nil)
+      (execute-kbd-macro (kbd "-"))
+      (should (equal header-line-format " Lineage of f, to depth 1"))
+      (should-not (car asked))
+      (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (should-not (car asked))
+      ;; Level 3: n and d call nothing more, so the lineage ends there.
+      (execute-kbd-macro (kbd "+"))
+      (should (equal (reverse (car asked)) '((upstream "macro.p.n") (downstream "model.p.d"))))
+      ;; As deep as the lineage goes, its macros hidden.
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (setcar asked nil)
+      (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format " Lineage of f, at every depth"))
+      (should-not (car asked))
+      (execute-kbd-macro (kbd "-"))
+      (execute-kbd-macro (kbd "g"))
+      (should (equal (length (car asked)) 4))
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-stops-a-level-past-its-limit ()
+  "A level of more nodes than `dbt-lineage-level-limit' is the last asked in its direction, as the header line says."
+  (let ((asked (list nil))
+        (dbt-lineage-level-limit 2))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked))
+    (with-current-buffer "*dbt lineage: f*"
+      (should (equal (dbt-test-lineage-rows)
+                     '(("upstream" "1" "seed" "s" "")
+                       ("downstream" "1" "model" "a" "")
+                       ("downstream" "1" "model" "b" "")
+                       ("downstream" "1" "model" "c" ""))))
+      (should (equal header-line-format
+                     " Lineage of f, to depth 2; downstream stops at depth 1: its 3 nodes are more than dbt-lineage-level-limit, 2"))
+      (should (equal (mapcar #'car (reverse (car asked))) '(upstream upstream downstream)))
+      (kill-buffer))))
+
+(defun dbt-test-answer-pending (pending)
+  "Give the answers on the car of the cons PENDING, oldest first, until none is left.
+The answers that they ask are given in turn."
+  (while (car pending)
+    (let ((answers (reverse (car pending))))
+      (setcar pending nil)
+      (mapc #'funcall answers))))
+
+(ert-deftest dbt-lineage-keeps-the-depth-chosen-while-a-level-is-asked ()
+  "- while a level is asked keeps its depth once the level comes, though it ends the lineage."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    (dbt-test-answer-pending pending)
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (execute-kbd-macro (kbd "+"))
+      (execute-kbd-macro (kbd "-"))
+      (execute-kbd-macro (kbd "-"))
+      (dbt-test-answer-pending pending)
+      (should (equal header-line-format " Lineage of f, to depth 1"))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-goes-no-deeper-than-its-end ()
+  "+ pressed again and again while a level is asked shows no deeper than where the lineage ends.
+It asks nothing more while the level is asked."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (execute-kbd-macro (kbd "+ + + + +"))
+      (should (equal (length (car asked)) 2))
+      (dbt-test-answer-pending pending)
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (execute-kbd-macro (kbd "-"))
+      (should (equal header-line-format " Lineage of f, to depth 1"))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-asks-no-level-again-while-it-is-asked ()
+  "+ while a level is asked asks it no more: its answer asks the next level, as deep as shown."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    ;; The first level only, which asks the second.
+    (let ((first (reverse (car pending))))
+      (setcar pending nil)
+      (mapc #'funcall first))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (should (equal (length (car asked)) 4))
+      (execute-kbd-macro (kbd "+"))
+      (should (equal (length (car asked)) 4))
+      (dbt-test-answer-pending pending)
+      (should (equal (reverse (car asked))
+                     '((upstream "model.p.f") (downstream "model.p.f")
+                       (upstream "seed.p.s" "macro.p.m") (downstream "model.p.a" "model.p.b" "model.p.c")
+                       (upstream "macro.p.n") (downstream "model.p.d"))))
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-says-where-plus-stops ()
+  "+ that comes to a level past `dbt-lineage-level-limit' says so in the header line."
+  (let ((asked (list nil))
+        (dbt-lineage-level-limit 2))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls '((upstream)
+                                              (downstream ("model.p.f" "model.p.a")
+                                                          ("model.p.a" "model.p.b" "model.p.c" "model.p.d")))
+                                            asked))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format
+                     " Lineage of f, to depth 3; downstream stops at depth 2: its 3 nodes are more than dbt-lineage-level-limit, 2"))
+      (kill-buffer))))
+
+(ert-deftest dbt-lineage-drops-the-answers-of-a-level-asked-again ()
+  "Asked again before its answers come, the lineage keeps the answers of the last asking only.
+The first asking would have found a seed old upstream."
+  (let ((asked (list nil))
+        (pending (list nil))
+        (focus (list (list :id "model.p.f" :name "f" :type 'model))))
+    (dbt-lineage-show "/" "model.p.f" focus "a test" #'ignore
+                      (dbt-test-level-calls '((upstream ("model.p.f" "seed.p.old")) (downstream)) asked pending))
+    (let ((stale (car pending)))
+      (setcar pending nil)
+      (dbt-lineage-show "/" "model.p.f" focus "a test" #'ignore (dbt-test-level-calls dbt-test-levels asked pending))
+      ;; The first level of the second asking, which asks the second.
+      (let ((first (car pending)))
+        (setcar pending nil)
+        (mapc #'funcall first))
+      (mapc #'funcall stale)
+      (mapc #'funcall (car pending)))
+    (with-current-buffer "*dbt lineage: f*"
+      (should (equal (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)) '("s" "a" "d" "b" "c")))
+      (should (equal (length (car asked)) 6))
+      (kill-buffer))))
+
 (provide 'dbt-lineage-test)
 ;;; dbt-lineage-test.el ends here

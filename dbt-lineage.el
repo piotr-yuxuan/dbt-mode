@@ -12,14 +12,25 @@
 ;; is a plist with :id, :name, :type, :package, :file, :line and
 ;; :parents, the identifiers of the nodes it depends on.  Each node shows
 ;; once, under the node through which it is nearest.  TAB folds a node,
-;; + and - change the depth shown, e writes the graph within that depth
-;; as Graphviz dot, RET visits the file of the node at point, and g asks
-;; for the lineage again.
+;; + and - change the depth shown, m shows or hides the macros, e writes
+;; the graph within that depth as Graphviz dot, RET visits the file of the
+;; node at point, and g asks for the lineage again.  A server that gives
+;; the lineage one level at a time, as dbt-lsp-plus's call hierarchy, is
+;; asked to the depth shown, two levels at first.
 
 ;;; Code:
 
 (require 'outline)
 (require 'seq)
+
+(defcustom dbt-lineage-level-limit 500
+  "The most nodes of a level of the lineage whose calls a server is asked.
+dbt-lsp-plus gives the lineage through its call hierarchy, one level at
+a time, a request for each node: past this many nodes in one level,
+hidden macros included, the lineage asks no further in that direction,
+and its header line says so."
+  :type 'natnum
+  :group 'dbt)
 
 (defun dbt-lineage-reach (nodes focus direction)
   "Return the nodes of NODES upstream or downstream of FOCUS, as a tree.
@@ -66,15 +77,62 @@ node through which the walk first reached ID, FOCUS at depth 1."
 (defvar-local dbt-lineage--nodes nil
   "The nodes of this buffer's lineage.")
 
+(defvar-local dbt-lineage--by-id nil
+  "The nodes of this buffer's lineage, by identifier, the first of each.")
+
+(defvar-local dbt-lineage--calls nil
+  "The function that asks a server for a level of this buffer's lineage, or nil.
+It takes the identifiers of the nodes of a level, a direction and a
+function, which it calls once with a list of (NODE CHILD PARENT): the
+node NODE, reached in that direction, and the dependency that reached
+it, the node CHILD depending on the node PARENT.")
+
+(defvar-local dbt-lineage--frontier nil
+  "The identifiers of the last level asked of the server, by direction.
+Nil in a direction that has no level left to ask.")
+
+(defvar-local dbt-lineage--asked nil
+  "The number of levels asked of the server, by direction.")
+
+(defvar-local dbt-lineage--walk nil
+  "The token of this buffer's walk: only the answers of its last walk count.")
+
+(defvar-local dbt-lineage--asking nil
+  "The directions whose next level is asked, its answer not come yet.")
+
+(defvar-local dbt-lineage--stops nil
+  "Where and why the lineage asks no further, a list of sentences.")
+
+(defvar-local dbt-lineage--macros nil
+  "Whether this buffer's lineage shows its macros.")
+
 (defvar-local dbt-lineage--focus nil
   "The identifier of the node whose lineage this buffer shows.")
 
 (defvar-local dbt-lineage--depth nil
-  "The deepest level that this buffer shows, or nil for every one.")
+  "The deepest level that this buffer shows, or nil for every one.
+Never nil while the lineage has a level left to ask of its server.")
 
 (defvar-local dbt-lineage--reach nil
   "The reach of this buffer's focus, as an alist from a direction.
 Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
+
+(defun dbt-lineage--compute ()
+  "Compute the reach of this buffer's focus, without its macros unless shown.
+A macro is a node whose identifier starts with macro., as dbt names it."
+  (let ((nodes (if dbt-lineage--macros
+                   dbt-lineage--nodes
+                 (let ((macro-p (lambda (id) (string-prefix-p "macro." id))))
+                   (mapcar (lambda (node)
+                             (plist-put (copy-sequence node) :parents (seq-remove macro-p (plist-get node :parents))))
+                           (seq-remove (lambda (node) (funcall macro-p (plist-get node :id))) dbt-lineage--nodes))))))
+    (setq dbt-lineage--reach (mapcar (lambda (direction)
+                                       (cons direction (dbt-lineage-reach nodes dbt-lineage--focus direction)))
+                                     '(upstream downstream)))))
+
+(defun dbt-lineage--growing-p ()
+  "Return non-nil when this buffer's lineage has a level left to ask."
+  (seq-some #'cdr dbt-lineage--frontier))
 
 (defun dbt-lineage--within (direction)
   "Return the reach of this buffer's focus in DIRECTION, within its depth."
@@ -83,10 +141,7 @@ Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
 
 (defun dbt-lineage--render ()
   "Write the tree of this buffer's lineage, within its depth."
-  (let ((inhibit-read-only t)
-        (by-id (make-hash-table :test #'equal)))
-    (dolist (node (reverse dbt-lineage--nodes))
-      (puthash (plist-get node :id) node by-id))
+  (let ((inhibit-read-only t))
     (erase-buffer)
     (dolist (direction '(upstream downstream))
       (insert (propertize (symbol-name direction) 'face 'bold) "\n")
@@ -99,7 +154,7 @@ Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
         (setq stack (gethash dbt-lineage--focus children))
         (while stack
           (let* ((entry (pop stack))
-                 (node (or (gethash (car entry) by-id) (list :id (car entry)))))
+                 (node (or (gethash (car entry) dbt-lineage--by-id) (list :id (car entry)))))
             (insert (propertize (concat (make-string (* 2 (nth 1 entry)) ?\s)
                                         (dbt-lineage-label (car entry))
                                         (propertize (format "  %s  %s" (or (plist-get node :type) "")
@@ -111,8 +166,9 @@ Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
                                 'dbt-lineage-node node)
                     "\n")
             (setq stack (append (gethash (car entry) children) stack))))))
-    (setq header-line-format (format " Lineage of %s, %s" (dbt-lineage-label dbt-lineage--focus)
-                                     (if dbt-lineage--depth (format "to depth %d" dbt-lineage--depth) "at every depth")))
+    (setq header-line-format (format " Lineage of %s, %s%s" (dbt-lineage-label dbt-lineage--focus)
+                                     (if dbt-lineage--depth (format "to depth %d" dbt-lineage--depth) "at every depth")
+                                     (mapconcat (lambda (stop) (concat "; " stop)) (reverse dbt-lineage--stops) "")))
     (goto-char (point-min))))
 
 (defun dbt-lineage--deepest ()
@@ -128,16 +184,74 @@ Point goes to the first line of that node while the tree shows it."
     (when-let* ((match (and at (text-property-search-forward 'dbt-lineage-node at t))))
       (goto-char (prop-match-beginning match)))))
 
+(defun dbt-lineage--ask (direction)
+  "Ask the server for the next level of this buffer's lineage in DIRECTION.
+Only while the lineage shows deeper than it asked in DIRECTION.  A level
+of more nodes than `dbt-lineage-level-limit' is not asked: the lineage
+stops there in DIRECTION, as its header line says.  A level already
+asked is not asked again: its answer draws the lineage again and asks
+the next level, unless the lineage was shown anew since, which makes it
+count for nothing."
+  (let ((buffer (current-buffer))
+        (ids (alist-get direction dbt-lineage--frontier))
+        (asked (alist-get direction dbt-lineage--asked 0))
+        (walk dbt-lineage--walk))
+    (when (and ids (not (memq direction dbt-lineage--asking)) (< asked dbt-lineage--depth))
+      (if (> (length ids) dbt-lineage-level-limit)
+          (setf (alist-get direction dbt-lineage--frontier) nil
+                dbt-lineage--stops (cons (format "%s stops at depth %d: its %d nodes are more than dbt-lineage-level-limit, %d"
+                                                 direction asked (length ids) dbt-lineage-level-limit)
+                                         dbt-lineage--stops))
+        (push direction dbt-lineage--asking)
+        (funcall dbt-lineage--calls ids direction
+                 (lambda (calls)
+                   (when (and (buffer-live-p buffer) (eq walk (buffer-local-value 'dbt-lineage--walk buffer)))
+                     (with-current-buffer buffer
+                       (setq dbt-lineage--asking (delq direction dbt-lineage--asking))
+                       (let (reached)
+                         (pcase-dolist (`(,node ,child ,parent) calls)
+                           (unless (gethash (plist-get node :id) dbt-lineage--by-id)
+                             (setq node (copy-sequence node))
+                             (puthash (plist-get node :id) node dbt-lineage--by-id)
+                             (push node reached))
+                           ;; In place, as the node is also in `dbt-lineage--nodes'.
+                           (plist-put (gethash child dbt-lineage--by-id) :parents
+                                      (append (plist-get (gethash child dbt-lineage--by-id) :parents) (list parent))))
+                         (setq reached (nreverse reached)
+                               dbt-lineage--nodes (append dbt-lineage--nodes reached))
+                         (setf (alist-get direction dbt-lineage--asked) (1+ asked)
+                               (alist-get direction dbt-lineage--frontier) (mapcar (lambda (node) (plist-get node :id))
+                                                                                   reached)))
+                       (dbt-lineage--ask direction)
+                       (dbt-lineage--compute)
+                       ;; Past its end, no deeper than it goes, whatever +
+                       ;; asked meanwhile; a - meanwhile stays.
+                       (dbt-lineage--show-depth (if (dbt-lineage--growing-p)
+                                                    dbt-lineage--depth
+                                                  (min dbt-lineage--depth (dbt-lineage--deepest))))))))))))
+
 (defun dbt-lineage-deeper ()
-  "Show one level more of the lineage."
+  "Show one level more of the lineage, asked of a server that gives levels."
   (interactive)
-  (dbt-lineage--show-depth (and dbt-lineage--depth (< (1+ dbt-lineage--depth) (dbt-lineage--deepest))
-                                (1+ dbt-lineage--depth))))
+  (let ((next (1+ (or dbt-lineage--depth (dbt-lineage--deepest)))))
+    ;; The depth that the asking reads, then the drawing, which shows
+    ;; where the asking stopped.
+    (setq dbt-lineage--depth (and (or (dbt-lineage--growing-p) (< next (dbt-lineage--deepest))) next))
+    (mapc #'dbt-lineage--ask '(upstream downstream))
+    (dbt-lineage--show-depth dbt-lineage--depth)))
 
 (defun dbt-lineage-shallower ()
   "Show one level less of the lineage, down to the nearest nodes."
   (interactive)
   (dbt-lineage--show-depth (max 1 (1- (or dbt-lineage--depth (dbt-lineage--deepest))))))
+
+(defun dbt-lineage-macros ()
+  "Show or hide the macros of the lineage, which only dbt-lsp-plus gives."
+  (interactive)
+  (setq dbt-lineage--macros (not dbt-lineage--macros))
+  (dbt-lineage--compute)
+  (dbt-lineage--show-depth dbt-lineage--depth)
+  (message "Macros %s" (if dbt-lineage--macros "shown" "hidden")))
 
 (defun dbt-lineage-visit ()
   "Visit the file of the node on point's line."
@@ -191,6 +305,7 @@ the message says when it is there, or why not."
   "o" #'dbt-lineage-visit
   "+" #'dbt-lineage-deeper
   "-" #'dbt-lineage-shallower
+  "m" #'dbt-lineage-macros
   "e" #'dbt-lineage-export
   "n" #'next-line
   "p" #'previous-line)
@@ -204,13 +319,16 @@ the message says when it is there, or why not."
               outline-minor-mode-cycle t)
   (outline-minor-mode 1))
 
-(defun dbt-lineage-show (root id nodes description refresh)
+(defun dbt-lineage-show (root id nodes description refresh &optional calls)
   "Show the lineage of the node ID of ROOT among NODES.
 ID is a unique id, such as model.shop.orders or, for a version,
 model.shop.orders.v2.  DESCRIPTION says where NODES come from, for the
 message.  REFRESH is a function of no argument that asks for the lineage
 again, from where the nodes came.  A buffer that shows the lineage of ID
-already keeps its depth."
+already keeps its depth.  CALLS, for a server that gives the lineage
+one level at a time, is the function that asks it a level, as
+`dbt-lineage--calls' says: NODES is then the node ID alone, and the
+lineage is asked to the depth shown, two levels at least."
   (let ((focus (or (seq-find (lambda (node) (equal (plist-get node :id) id)) nodes)
                    (user-error "No node %s" id))))
     (with-current-buffer (get-buffer-create (format "*dbt lineage: %s*" (dbt-lineage-label id)))
@@ -218,10 +336,20 @@ already keeps its depth."
         (dbt-lineage-mode))
       (setq dbt-lineage--refresh refresh
             dbt-lineage--root root
-            dbt-lineage--nodes nodes
+            dbt-lineage--nodes (mapcar #'copy-sequence nodes)
+            dbt-lineage--by-id (make-hash-table :test #'equal)
             dbt-lineage--focus id
-            dbt-lineage--reach (mapcar (lambda (direction) (cons direction (dbt-lineage-reach nodes id direction)))
-                                       '(upstream downstream)))
+            dbt-lineage--calls calls
+            dbt-lineage--frontier (and calls (list (list 'upstream id) (list 'downstream id)))
+            dbt-lineage--asked nil
+            dbt-lineage--walk (list id)
+            dbt-lineage--asking nil
+            dbt-lineage--stops nil
+            dbt-lineage--depth (if calls (max 2 (or dbt-lineage--depth (dbt-lineage--deepest))) dbt-lineage--depth))
+      (dolist (node (reverse dbt-lineage--nodes))
+        (puthash (plist-get node :id) node dbt-lineage--by-id))
+      (mapc #'dbt-lineage--ask '(upstream downstream))
+      (dbt-lineage--compute)
       (dbt-lineage--render)
       (display-buffer (current-buffer))
       (message "Lineage of %s %s, from %s" (plist-get focus :type) (dbt-lineage-label id) description))))

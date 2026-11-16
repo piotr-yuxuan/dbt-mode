@@ -254,11 +254,23 @@ without `config()`.
 
 The lineage is a tree, upstream above and downstream below: each node shows
 once, under the node through which it is nearest. `TAB` folds a node, `+`
-and `-` show one level more or less, point staying on its node, `e` writes
-the graph within that depth as Graphviz dot, each node named by its unique
-id, and an SVG beside it when `dot` is installed, rendered while you go on,
-and `RET` visits a node's file. In the lineage and the rows, `g` asks again, and
-without a server the lineage reads the project again.
+and `-` show one level more or less, point staying on its node, `m` shows
+or hides the macros, `e` writes the graph within that depth as Graphviz
+dot, each node named by its unique id, and an SVG beside it when `dot` is
+installed, rendered while you go on, and `RET` visits a node's file. With
+dbt-lsp-plus, the lineage comes from its call hierarchy, one level at a
+time: it opens two levels deep, `+` asks the next level, and a level of
+more nodes than `dbt-lineage-level-limit` is the last asked in its
+direction, as the header line says; the macros, which only it gives, are
+hidden at first; a node of which it has no item, such as a snapshot defined
+in YAML, has its lineage from dbt lsp's list of nodes; a call that fails is
+said in a message, the rest of its level shown, and `g` asks again. With
+dbt lsp alone, the lineage comes whole from the server's list of nodes, and
+without a server from the project's files. lsp-mode's own view of the call
+hierarchy, `lsp-treemacs-call-hierarchy` when lsp-treemacs is installed,
+needs nothing of dbt-mode. In the lineage and the rows, `g` asks again:
+with dbt-lsp-plus to the depth shown, two levels at least, and without a
+server the lineage reads the project again.
 The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
 JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
@@ -331,6 +343,7 @@ YAML files of a dbt project.
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
 | `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; a request on a source that it lists goes to it |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
+| `dbt-lineage-level-limit`      | `500`   | The most nodes of a level of the lineage asked of dbt-lsp-plus  |
 | `dbt-indent-offset`            | `4`     | The columns by which a parenthesis or a Jinja block indents     |
 | `dbt-protected-targets`        | `("prod")` | The targets on which an Org block, the data diff and the dashboard's freshness ask first; an unread default asks too |
 | `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
