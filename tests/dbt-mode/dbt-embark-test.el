@@ -27,21 +27,28 @@
 
 (ert-deftest dbt-embark-acts-on-the-call-at-point ()
   "embark's actions on a ref at point visit its definition and its YAML entry, show its lineage, build, run and test it.
-Each acts on what M-. would go to; a macro is not built, and no dbt
-runs for it; outside dbt-mode, or while the region is active, no dbt
-target."
+RET goes where M-. goes, the project's model, though a package defines
+a namesake, which d lists too.  Each other action acts on what M-.
+goes to; a macro is refused by each that does not fit it, and no dbt
+runs; outside dbt-mode, or while the region is active, no dbt target."
   (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (write-region "{{ config(alias='shop_utils_stg_orders') }}\nselect 1 as id\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root))
     (dbt-test-with-embark
       (save-window-excursion
         (pcase-dolist (`(,key ,check)
                        `(("RET" ,(lambda () (equal (file-relative-name buffer-file-name root)
                                                    "models/staging/stg_orders.sql")))
-                         ("d" ,(lambda () (equal (file-relative-name buffer-file-name root)
-                                                 "models/staging/stg_orders.sql")))
+                         ("d" ,(lambda () (and (equal (buffer-name) "*xref*")
+                                               (string-search "shop_utils/models/stg_orders.sql" (buffer-string))
+                                               (string-search "models/staging/stg_orders.sql" (buffer-string)))))
                          ("y" ,(lambda () (and (equal (file-relative-name buffer-file-name root)
                                                       "models/staging/_staging.yml")
                                                (looking-at ".*name: stg_orders"))))
-                         ("l" ,(lambda () (get-buffer "*dbt lineage: stg_orders*")))
+                         ("l" ,(lambda () (equal (buffer-local-value 'dbt-lineage--focus
+                                                                     (get-buffer "*dbt lineage: stg_orders*"))
+                                                 "model.shop.stg_orders")))
                          ("b" ,(lambda () (dbt-test-ran "build" "^arguments: build --select stg_orders$")))
                          ("r" ,(lambda () (dbt-test-ran "run" "^arguments: run --select stg_orders$")))
                          ("t" ,(lambda () (dbt-test-ran "test" "^arguments: test --select stg_orders$")))))
@@ -50,10 +57,15 @@ target."
           (execute-kbd-macro (kbd (concat "M-x embark-act RET " key)))
           (should (funcall check)))
         (switch-to-buffer (dbt-test-visit root "models/staging/stg_orders.sql"))
-        (dbt-test-goto "cents_to_dollars")
-        (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x embark-act RET b")) :type 'user-error))
-                       "Not for a macro, only for a table, model, seed, snapshot"))
-        (should-not (get-buffer "*dbt shop: build*"))
+        (pcase-dolist (`(,key ,kinds) '(("b" "table, model, seed, snapshot") ("r" "model")
+                                        ("t" "table, model, seed, snapshot") ("y" "model, seed, snapshot")
+                                        ("l" "model, seed, snapshot") ("w" "table, model, seed, snapshot")))
+          (dbt-test-goto "cents_to_dollars")
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd (concat "M-x embark-act RET " key)))
+                                             :type 'user-error))
+                         (concat "Not for a macro, only for a " kinds))))
+        (dolist (command '("build" "run" "test"))
+          (should-not (get-buffer (format "*dbt shop: %s*" command))))
         (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
         (dbt-test-goto "stg_orders')")
         (set-mark (line-beginning-position))
