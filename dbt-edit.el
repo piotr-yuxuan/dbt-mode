@@ -111,6 +111,12 @@ otherwise, or with an active region, this is `delete-backward-char'."
     "materialization" "block" "with")
   "The Jinja statements that open a block, which `end' and their name close.")
 
+(defconst dbt-edit--lexeme-regexp
+  "{\\(?:\\(?1:#\\)\\|{\\|%[-+]?[ \t\n]*\\(?2:end\\)?\\(?3:[a-z_]+\\)\\_>\\)"
+  "The start of what Jinja reads: a comment, group 1, an expression, or a statement.
+Group 3 is a statement's keyword, group 2 the `end' before it in a
+closing tag.  `-' or `+', Jinja's whitespace control, may follow `{%'.")
+
 (defvar-local dbt-edit--scans (list (list 0))
   "The states that `dbt-edit-blocks' resumes its scan from, the last first.
 Each is (POSITION CLOSED . OPEN), the blocks of the tags before
@@ -130,13 +136,15 @@ to `dbt-mode-jinja-max-tag-length' further on.  For
   "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
 CLOSED lists the closed blocks, OPEN those still open at LIMIT,
 innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
-CLOSE-END), the last two only when it is closed.  A `set' opens a block
-only without `=', and a tag in a `{# #}' comment or not closed yet
-counts for nothing; a tag that starts before LIMIT counts whole.  The
-scan resumes from the last of `dbt-edit--scans' before LIMIT, unless the
-buffer is narrowed, and keeps the states it reaches when it resumed from
-the last of them.  The lists are those of the states: never modify
-them."
+CLOSE-END), the last two only when it is closed.  The tags are read as
+Jinja reads them, whatever the SQL around them: a tag in a SQL comment
+or string counts, and none in a `{# #}' comment, which ends at its first
+`#}', or the buffer's end, nor in a string of a tag.  A `set' opens a
+block only without `=', and a tag not closed yet counts for nothing; a
+tag that starts before LIMIT counts whole.  The scan resumes from the
+last of `dbt-edit--scans' before LIMIT, unless the buffer is narrowed,
+and keeps the states it reaches when it resumed from the last of them.
+The lists are those of the states: never modify them."
   (add-hook 'before-change-functions #'dbt-edit--forget-scans nil t)
   (save-excursion
     (let* ((scans (if (buffer-narrowed-p) (list (list 0)) dbt-edit--scans))
@@ -148,13 +156,19 @@ them."
            (open (cddar scans)))
       (goto-char (caar scans))
       ;; After a tag that ends past LIMIT, no search may bound behind point.
-      (while (re-search-forward "{%[-+]?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
-        ;; dbt-mode-jinja-bounds searches: read the match before it.
+      (while (re-search-forward dbt-edit--lexeme-regexp (max limit (point)) t)
         (let* ((start (match-beginning 0))
-               (closing (match-beginning 1))
-               (keyword (match-string-no-properties 2))
-               (end (and (not (nth 4 (save-excursion (syntax-ppss start))))
-                         (cdr (dbt-mode-jinja-bounds (match-end 0))))))
+               (comment (match-beginning 1))
+               (closing (match-beginning 2))
+               (keyword (match-string-no-properties 3))
+               ;; A tag not closed is skipped from its opener on: the end
+               ;; of one skips its strings, which may run across lines.
+               (end (save-excursion
+                      (goto-char (+ start 2))
+                      (if comment
+                          ;; Unbounded, so that no state is kept within one.
+                          (progn (search-forward "#}" nil 'move) (point))
+                        (dbt-mode--tag-end (min (point-max) (+ start dbt-mode-jinja-max-tag-length)))))))
           (when end
             (cond (closing
                    (when-let* ((block (assoc keyword open)))

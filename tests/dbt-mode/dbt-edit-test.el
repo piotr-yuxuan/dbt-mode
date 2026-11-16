@@ -533,5 +533,55 @@ C-x h C-M-\\ and typing a closer take its tags as tags."
     (dbt-test-type "{%+ endif")
     (should (equal (dbt-test-around-point) "select\n    id,\n{%+ if x %}\n    name,\n{%+ endif-!- %}"))))
 
+(ert-deftest dbt-edit-reads-tags-in-sql-comments ()
+  "A tag in a SQL comment is a tag, as dbt renders it; only a `{# #}' comment hides one.
+A `{#' opens that comment in a SQL comment or string too, up to its
+first `#}', and a `{%' in the string of a tag is text."
+  (dbt-test-with-window "select 1 as a\n-- {% if a %}\n, 2 as b\n"
+    (dbt-test-keys "C-c /")
+    ;; At the column of its opening tag, as C-c / places it.
+    (should (string-suffix-p ", 2 as b\n   {% endif %}" (buffer-string))))
+  (dbt-test-with-window "select 1 as a\n/* {% for x in y %} */\n, 2 as b\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p ", 2 as b\n   {% endfor %}" (buffer-string))))
+  (dbt-test-with-window "{% if a %}\nselect 1\n-- {% endif %}\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{% endif %}\n\\'")))
+  (dolist (text '("select 1 as a -- {#\n{% if a %}\n#}\n"
+                  "select '{#' as a\n{% if a %}\n#}' as b\n"
+                  "select '{{ \"{% if a %}\" }}' as a\n"
+                  "{% set x = \"{% if a %}{#\" %}\nselect 1\n"))
+    (dbt-test-with-window text
+      (should-error (dbt-test-keys "C-c /") :type 'user-error)))
+  ;; The where that dbt renders only in an incremental run is in the if.
+  (dbt-test-with-window "select *\nfrom t\n-- {% if is_incremental() %}\nwhere a > 1\n-- {% endif %}\norder by 1\n"
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (dbt-test-goto "order")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0)))
+  ;; A comment's end, deleted, hides what follows from the next command.
+  (dbt-test-with-window "{# note #}\n{% if x %}\nselect 1\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "select 1\n{% endif %}" (buffer-string)))
+    (dbt-test-goto "#}")
+    (dbt-test-keys "C-d C-d")
+    (goto-char (point-max))
+    (insert "\n")
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)))
+
+(ert-deftest dbt-edit-keeps-its-states-across-comments-and-raw ()
+  "The blocks read from the states kept after a comment that runs past the limit are those of a scan from the start."
+  (let ((fresh (lambda (limit) (let ((dbt-edit--scans (list (list 0)))) (dbt-edit-blocks limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% if a %}\n{# x\n{% for b in c %}\n#}\n{% for d in e %}\nselect\n")
+      (dbt-edit-blocks (progn (goto-char (point-min)) (search-forward "{# x") (point)))
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))
+      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for" "if"))))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
