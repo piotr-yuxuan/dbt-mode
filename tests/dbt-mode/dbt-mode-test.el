@@ -332,6 +332,39 @@ tags are code, in SQL strings or in comments."
     (dbt-test-goto "util_orders')")
     (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "util_orders" :version nil)))))
 
+(ert-deftest dbt-mode-finds-no-model-from-an-exposure ()
+  "M-. on the name of an exposure asks what to find, though a model has that name; on a seed's or a snapshot's entry it visits that file.
+No `ref' names an exposure.  M-x dbt-copy-build-command there selects
+it as dbt 2.0.11 does, exposure:NAME: a bare NAME would select the model
+too, and path:FILE the other entries of the file.  On a semantic model,
+which names nothing either, it selects the file."
+  (dbt-test-with-project root
+    (write-region (concat "exposures:\n  - name: orders\n    type: dashboard\n"
+                          "    depends_on:\n      - ref('customers')\n"
+                          "seeds:\n  - name: raw_orders\n"
+                          "snapshots:\n  - name: orders_snapshot\n"
+                          "semantic_models:\n  - name: orders_semantic\n    model: ref('orders')\n")
+                  nil (expand-file-name "models/_exposures.yml" root))
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/_exposures.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "orders")
+      (execute-kbd-macro (kbd "M-x dbt-copy-build-command RET"))
+      (should (equal (car kill-ring) "dbt build -s exposure:orders"))
+      (execute-kbd-macro (kbd "C-u M-x dbt-copy-build-command RET"))
+      (should (equal (car kill-ring) "dbt build -s +exposure:orders+"))
+      (dbt-test-goto "orders_semantic")
+      (execute-kbd-macro (kbd "M-x dbt-copy-build-command RET"))
+      (should (equal (car kill-ring) "dbt build -s path:models/_exposures.yml"))
+      (dbt-test-goto "orders")
+      (execute-kbd-macro (kbd "M-. ref:customers RET"))
+      (should (equal (file-relative-name buffer-file-name root) "models/marts/customers.sql"))
+      (dolist (case '(("raw_orders" . "seeds/raw_orders.csv") ("orders_snapshot" . "snapshots/orders_snapshot.sql")))
+        (switch-to-buffer (dbt-test-visit root "models/_exposures.yml"))
+        (dbt-test-goto (car case))
+        (execute-kbd-macro (kbd "M-."))
+        (should (equal (file-relative-name buffer-file-name root) (cdr case)))))))
+
 (ert-deftest dbt-mode-finds-no-package-model-from-a-root-entry ()
   "M-. on a root YAML entry that names only a package's model finds nothing, as dbt 2.0.9 calls the entry unused.
 It says which package defines the model instead.  A root entry of a
@@ -504,6 +537,20 @@ A package's model without an entry of its own has none to visit."
     (should (equal (xref-backend-identifier-at-point 'dbt) "macro:shop_utils/is_positive"))
     (should (member "ref:stg_orders" (xref-backend-identifier-completion-table 'dbt)))
     (should (member "macro:shop_utils/is_positive" (xref-backend-identifier-completion-table 'dbt)))))
+
+(ert-deftest dbt-mode-finds-a-doc-a-source-and-a-generic-test ()
+  "C-c C-f completes a docs block, a source and a generic test by the call that names each, and visits it.
+TAB completes from the identifiers of the project: a keyboard macro
+that ends in the minibuffer returns its text, whatever it matches."
+  (dbt-test-with-project root
+    (write-region "{% test positive(model, column_name) %}\nselect 1\n{% endtest %}\n" nil
+                  (expand-file-name "macros/positive.sql" root))
+    (save-window-excursion
+      (dolist (case '(("doc:order_st" . "models/docs.md") ("source:ra" . "models/staging/_sources.yml")
+                      ("macro:positiv" . "macros/positive.sql")))
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (execute-kbd-macro (kbd (concat "C-c C-f " (car case) " TAB RET")))
+        (should (equal (file-relative-name buffer-file-name root) (cdr case)))))))
 
 (ert-deftest dbt-mode-finds-analyses ()
   "C-c C-f visits an analysis, and so does M-. on its YAML entry."
