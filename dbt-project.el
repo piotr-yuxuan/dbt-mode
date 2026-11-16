@@ -496,9 +496,10 @@ FILE again."
   "Return the node ID of the manifest FILE, as a hash table, or nil.
 Nil when FILE cannot be read or holds no such node.  Only the node is
 parsed, as a manifest grows to tens of MB: its id is the key of an
-object in \"nodes\" or \"sources\", and of an array elsewhere, whose
-first element is the node under \"disabled\", as dbt 2 writes a
-disabled node, and an id in \"child_map\" or \"parent_map\".  The
+object in \"nodes\" or \"sources\", and of an array elsewhere: under
+\"disabled\", as dbt 2 writes a disabled node, the first element is
+the node, whose unique_id is ID; in \"child_map\" or \"parent_map\",
+an id.  The
 text of the last manifest read is kept, in one buffer, and read again
 once the file that FILE names, through its links, changes its
 modification time or its size, as the mode line of each model asks.
@@ -518,7 +519,7 @@ The manifest is dbt's, read as it is."
                     (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*\\[") nil t))
           (backward-char)
           (let ((first (car (append (ignore-errors (json-parse-buffer :null-object nil)) nil))))
-            (setq node (and (hash-table-p first) first))))
+            (setq node (and (hash-table-p first) (equal (gethash "unique_id" first) id) first))))
         node))))
 
 (defun dbt-project-default-target (root)

@@ -622,11 +622,12 @@ as long, not sixty-four."
   "A disabled node, the first of an array under \"disabled\" as dbt 2 writes it, is read.
 The arrays of ids that child_map and parent_map hold under the same id,
 before it or after, are no node (probed on dbt-oss 2.0.11 and the
-proprietary 2.0.9)."
+proprietary 2.0.9), nor an object of another unique_id."
   (dbt-test-with-project root
     (let ((manifest (expand-file-name "target/manifest.json" root)))
       (make-directory (file-name-directory manifest))
       (write-region (concat "{\"nodes\": {}, \"child_map\": {\"model.shop.off\": [\"test.shop.t\"]},"
+                            " \"elsewhere\": {\"model.shop.off\": [{\"unique_id\": \"model.shop.other\"}]},"
                             " \"disabled\": {\"model.shop.off\": [{\"unique_id\": \"model.shop.off\","
                             " \"config\": {\"enabled\": false}}]},"
                             " \"parent_map\": {\"model.shop.off\": []}}")
