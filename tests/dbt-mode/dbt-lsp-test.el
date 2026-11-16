@@ -1053,7 +1053,8 @@ stands."
 
 (ert-deftest dbt-lsp-describes-a-node-from-dbt-lsp-plus ()
   "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
-Its error, -32803 until the proxy's first parse, shows its reason; its
+A null relation, as the proxy gives a disabled node, shows none.  Its
+error, -32803 until the proxy's first parse, shows its reason; its
 null answer, no such node, says so.  A server that does not list the
 command, as dbt lsp alone, leaves the node to the manifest; eldoc of
 dbt-mode's own steps aside for the server's hover."
@@ -1079,6 +1080,18 @@ dbt-mode's own steps aside for the server's hover."
                          "  materialized  view"
                          "Tests")))
         (should (string-search "  test      not_null_stg_orders_order_id.81cfe2fe64" (buffer-string)))
+        (kill-buffer)))
+    ;; The proxy's null relation, as for a disabled node, is no relation.
+    (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                      . ,(append '((relation) (disabled . t))
+                                                 (assq-delete-all 'relation (copy-alist node)))))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
+        (should-not (string-search "relation" (buffer-string)))
+        (should (string-search "  disabled      yes" (buffer-string)))
         (kill-buffer)))
     (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
                                      ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
