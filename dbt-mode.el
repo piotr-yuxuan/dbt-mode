@@ -958,7 +958,8 @@ the lineage is asked for again."
          refresh)
     (cond
      ((and (dbt-mode-server-p) (dbt-lsp-hierarchy-p))
-      (dbt-lsp-hierarchy-lineage (plist-get entity :file) (plist-get entity :line) id))
+      (dbt-lsp-hierarchy-lineage (plist-get entity :file) (plist-get entity :line) id
+                                 (lambda () (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))))
      ((dbt-mode-server-p)
       (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))
      (t

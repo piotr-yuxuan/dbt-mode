@@ -366,13 +366,17 @@ dbt-lsp-plus does; dbt lsp alone does not."
   "The schema of an item of dbt-lsp-plus's call hierarchy, as dbt-mode reads it.
 `data.uniqueId' is dbt's unique id of the node.")
 
-(defun dbt-lsp-hierarchy-lineage (file line id)
+(defun dbt-lsp-hierarchy-lineage (file line id otherwise)
   "Show the lineage of the node ID, at LINE of FILE, from the call hierarchy.
 dbt-lsp-plus answers it from the project's files, and dbt lsp's nodes
 once listed, macros included.  The item of the node comes from the start
 of LINE, which must be that of ID; then outgoing calls give what each
 node depends on, upstream, and incoming calls what depends on it,
-downstream, one level at a time, as `dbt-lineage-show' asks them."
+downstream, one level at a time, as `dbt-lineage-show' asks them.
+OTHERWISE, a function of no argument, is called when the server has no
+item of ID there: a snapshot whose block does not start its line, one
+defined in YAML, a version of a model before the proxy listed dbt lsp's
+nodes."
   (let* ((root (dbt-project-root))
          (items (make-hash-table :test #'equal))
          (node (lambda (item)
@@ -414,10 +418,11 @@ downstream, one level at a time, as `dbt-lineage-show' asks them."
      (lambda (answer)
        (if-let* ((item (seq-find (lambda (item) (equal (lsp-get (lsp-get item :data) :uniqueId) id)) answer)))
            (dbt-lineage-show root id (list (funcall node item)) "dbt-lsp-plus"
-                             (lambda () (let ((default-directory root)) (dbt-lsp-hierarchy-lineage file line id)))
+                             (lambda ()
+                               (let ((default-directory root))
+                                 (dbt-lsp-hierarchy-lineage file line id otherwise)))
                              calls)
-         (message "dbt lsp: textDocument/prepareCallHierarchy gives no item of %s in %s"
-                  id (file-relative-name file root)))))))
+         (funcall otherwise))))))
 
 (defun dbt-lsp-rename-model (name)
   "Rename the model of the current buffer to NAME, and the uses of it.

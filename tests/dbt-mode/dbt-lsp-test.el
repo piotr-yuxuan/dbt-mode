@@ -918,21 +918,32 @@ orders_snapshot give snapshot_report, at the second level."
       (dbt-test-wait (lambda () (member '("downstream" "2" "model" "snapshot_report" "") (dbt-test-lineage-rows))))
       (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)))))))
 
-(ert-deftest dbt-lsp-lineage-says-why-the-call-hierarchy-shows-nothing ()
-  "An answer that dbt-mode cannot read, and no item of the node, say so.
-Without the node's item, no lineage shows."
-  (dolist (case (list (list '(("callHierarchy/outgoingCalls model.shop.stg_orders" . [((to . 3))]))
-                            "dbt lsp: callHierarchy/outgoingCalls answered what dbt-mode cannot read")
-                      (list '(("textDocument/prepareCallHierarchy" . []))
-                            (concat "dbt lsp: textDocument/prepareCallHierarchy gives no item of "
-                                    "model\\.shop\\.stg_orders in models/staging/stg_orders\\.sql"))))
-    ;; The case's answers in place of the hierarchy's of the same key.
-    (dbt-lsp-test-with-server root (append (car case) (seq-remove (lambda (answer) (assoc (car answer) (car case)))
-                                                                  (dbt-lsp-test-hierarchy root)))
-      (dbt-lineage "stg_orders")
-      (dbt-lsp-test-message (cadr case))
-      (when (string-search "prepare" (cadr case))
-        (should-not (get-buffer "*dbt lineage: stg_orders*"))))))
+(ert-deftest dbt-lsp-lineage-says-what-it-cannot-read ()
+  "An answer of the call hierarchy that dbt-mode cannot read is said."
+  (dbt-lsp-test-with-server root
+      (cons '("callHierarchy/outgoingCalls model.shop.stg_orders" . [((to . 3))])
+            (assoc-delete-all "callHierarchy/outgoingCalls model.shop.stg_orders" (dbt-lsp-test-hierarchy root)))
+    (dbt-lineage "stg_orders")
+    (dbt-lsp-test-message "dbt lsp: callHierarchy/outgoingCalls answered what dbt-mode cannot read")))
+
+(ert-deftest dbt-lsp-lineage-lists-the-nodes-without-an-item ()
+  "Without an item of the node, as for a snapshot whose block does not start its line, dbt lsp lists the nodes."
+  (dbt-lsp-test-with-server root
+      (append '(("textDocument/prepareCallHierarchy" . [])
+                ("workspace/executeCommand dbt.listNodes"
+                 :nodes [(:unique_id "seed.shop.raw_orders" :name "raw_orders" :resource_type "seed"
+                                     :package_name "shop" :original_file_path "seeds/raw_orders.csv"
+                                     :depends_on (:nodes []))
+                         (:unique_id "model.shop.stg_orders" :name "stg_orders" :resource_type "model"
+                                     :package_name "shop" :original_file_path "models/staging/stg_orders.sql"
+                                     :depends_on (:nodes ["seed.shop.raw_orders"]))]
+                 :error nil))
+              (assoc-delete-all "textDocument/prepareCallHierarchy" (dbt-lsp-test-hierarchy root)))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (should (equal (dbt-test-lineage-rows) '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv"))))
+      (should (equal header-line-format " Lineage of stg_orders, at every depth")))
+    (should (member "workspace/executeCommand dbt.listNodes" (dbt-lsp-test-methods)))))
 
 (ert-deftest dbt-lsp-rename-model-refuses-what-dbt-would-not-take ()
   "Renaming a model refuses a name that is not one, or that another resource has.
