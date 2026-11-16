@@ -1376,7 +1376,8 @@ target elsewhere are watched as before."
   "A project opened through a symbolic link has its logs, target and target-path kept out by their true names.
 lsp-mode watches, and matches, the true names of directories, as on
 macOS, where /var is /private/var; the name of a root may hold
-characters special to regexps."
+characters special to regexps.  It holds for a server that lsp-mode's
+own command starts, not only `dbt-lsp'."
   (dbt-lsp-test-with-server root nil
     (let* ((project (expand-file-name "a+b[c]/" root))
            (link (make-temp-name (expand-file-name "dbt-link" temporary-file-directory)))
@@ -1389,7 +1390,9 @@ characters special to regexps."
       (unwind-protect
           (with-current-buffer (setq buffer (find-file-noselect (expand-file-name "models/one.sql" link)))
             (should (string-prefix-p link buffer-file-name))
-            (dbt-lsp)
+            ;; lsp-mode's own command, as M-x lsp or a restart starts it.
+            (dbt-lsp-add-project-folder)
+            (lsp)
             (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
             (dolist (directory '("logs" "target" "build"))
               (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename project))))
