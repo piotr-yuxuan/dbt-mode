@@ -267,8 +267,9 @@ in YAML, has its lineage from dbt lsp's list of nodes. With dbt lsp alone,
 the lineage comes whole from the server's list of nodes, and without a
 server from the project's files. lsp-mode's own view of the call hierarchy,
 `lsp-treemacs-call-hierarchy` when lsp-treemacs is installed, needs nothing
-of dbt-mode. In the lineage and the rows, `g` asks again, and without a
-server the lineage reads the project again.
+of dbt-mode. In the lineage and the rows, `g` asks again: with dbt-lsp-plus
+to the depth shown, two levels at least, and without a server the lineage
+reads the project again.
 The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
 JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
