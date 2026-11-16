@@ -136,6 +136,15 @@ Rows and compiled SQL:
   target is protected. The data diff and the dashboard's freshness ask as
   a block does.
 
+`C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
+snapshot or source table that the `ref` or `source` at point names, else
+of the current resource: its relation, materialization, tags, group,
+access, contract, version, whether it is disabled, its columns, what it
+depends on, what uses it and its description, from
+`target/manifest.json`, saying when dbt wrote it. What uses the node
+comes from dbt-mode's index, as for the lineage. `RET` visits a node,
+`TAB` folds a section.
+
 The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
 the project from the artifacts of your own runs, which it never writes, and
 which dbt-mode's previews, diffs and formats leave as they are: the nodes
@@ -196,6 +205,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion, as dbt resolves it here    |
 | `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
 | `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
+| `C-c C-o`     | `dbt-describe`         | What dbt knows of the node at point, a `ref` or a `source`, else of the model |
 | `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s` of what point is on, a `ref` or a `source`, else the model; with `C-u`, `+…+` |
 | `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
 | `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |

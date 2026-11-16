@@ -60,6 +60,7 @@
 (defvar font-lock-end)
 
 (autoload 'dbt-dispatch "dbt-cli" nil t)
+(autoload 'dbt-describe "dbt-node" nil t)
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
@@ -1175,6 +1176,7 @@ CTE rather than by statement."
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
   "C-c C-e" #'dbt-insert-ref
+  "C-c C-o" #'dbt-describe
   "C-c C-t" #'dbt-visit-tests
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
@@ -1197,6 +1199,7 @@ CTE rather than by statement."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    ["Describe node" dbt-describe]
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
     ["Compiled SQL against a state..." dbt-compiled-diff]
