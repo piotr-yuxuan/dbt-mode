@@ -12,9 +12,9 @@
 ;; is a plist with :id, :name, :type, :package, :file, :line and
 ;; :parents, the identifiers of the nodes it depends on.  Each node shows
 ;; once, under the node through which it is nearest.  TAB folds a node,
-;; + and - change the depth shown, e writes the graph within that depth
-;; as Graphviz dot, RET visits the file of the node at point, and g asks
-;; for the lineage again.  A server that gives
+;; + and - change the depth shown, m shows or hides the macros, e writes
+;; the graph within that depth as Graphviz dot, RET visits the file of the
+;; node at point, and g asks for the lineage again.  A server that gives
 ;; the lineage one level at a time, as dbt-lsp-plus's call hierarchy, is
 ;; asked to the depth shown, two levels at first.
 
@@ -99,6 +99,9 @@ Nil in a direction that has no level left to ask.")
 (defvar-local dbt-lineage--stops nil
   "Where and why the lineage asks no further, a list of sentences.")
 
+(defvar-local dbt-lineage--macros nil
+  "Whether this buffer's lineage shows its macros.")
+
 (defvar-local dbt-lineage--focus nil
   "The identifier of the node whose lineage this buffer shows.")
 
@@ -110,10 +113,17 @@ Nil in a direction that has no level left to ask.")
 Each is what `dbt-lineage-reach' returns, computed once for its nodes.")
 
 (defun dbt-lineage--compute ()
-  "Compute the reach of this buffer's focus among its nodes."
-  (setq dbt-lineage--reach (mapcar (lambda (direction)
-                                     (cons direction (dbt-lineage-reach dbt-lineage--nodes dbt-lineage--focus direction)))
-                                   '(upstream downstream))))
+  "Compute the reach of this buffer's focus, without its macros unless shown.
+A macro is a node whose identifier starts with macro., as dbt names it."
+  (let ((nodes (if dbt-lineage--macros
+                   dbt-lineage--nodes
+                 (let ((macro-p (lambda (id) (string-prefix-p "macro." id))))
+                   (mapcar (lambda (node)
+                             (plist-put (copy-sequence node) :parents (seq-remove macro-p (plist-get node :parents))))
+                           (seq-remove (lambda (node) (funcall macro-p (plist-get node :id))) dbt-lineage--nodes))))))
+    (setq dbt-lineage--reach (mapcar (lambda (direction)
+                                       (cons direction (dbt-lineage-reach nodes dbt-lineage--focus direction)))
+                                     '(upstream downstream)))))
 
 (defun dbt-lineage--growing-p ()
   "Return non-nil when this buffer's lineage has a level left to ask."
@@ -222,6 +232,14 @@ again in DIRECTION since: it then counts for nothing."
   (interactive)
   (dbt-lineage--show-depth (max 1 (1- (or dbt-lineage--depth (dbt-lineage--deepest))))))
 
+(defun dbt-lineage-macros ()
+  "Show or hide the macros of the lineage, which only dbt-lsp-plus gives."
+  (interactive)
+  (setq dbt-lineage--macros (not dbt-lineage--macros))
+  (dbt-lineage--compute)
+  (dbt-lineage--show-depth dbt-lineage--depth)
+  (message "Macros %s" (if dbt-lineage--macros "shown" "hidden")))
+
 (defun dbt-lineage-visit ()
   "Visit the file of the node on point's line."
   (interactive)
@@ -274,6 +292,7 @@ the message says when it is there, or why not."
   "o" #'dbt-lineage-visit
   "+" #'dbt-lineage-deeper
   "-" #'dbt-lineage-shallower
+  "m" #'dbt-lineage-macros
   "e" #'dbt-lineage-export
   "n" #'next-line
   "p" #'previous-line)

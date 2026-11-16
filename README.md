@@ -254,11 +254,12 @@ without `config()`.
 
 The lineage is a tree, upstream above and downstream below: each node shows
 once, under the node through which it is nearest. `TAB` folds a node, `+`
-and `-` show one level more or less, point staying on its node, `e` writes
-the graph within that depth as Graphviz dot, each node named by its unique
-id, and an SVG beside it when `dot` is installed, rendered while you go on,
-and `RET` visits a node's file. In the lineage and the rows, `g` asks again, and
-without a server the lineage reads the project again.
+and `-` show one level more or less, point staying on its node, `m` shows
+or hides the macros, `e` writes the graph within that depth as Graphviz
+dot, each node named by its unique id, and an SVG beside it when `dot` is
+installed, rendered while you go on, and `RET` visits a node's file. In
+the lineage and the rows, `g` asks again, and without a server the lineage
+reads the project again.
 The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
 JSON `false` as null, so it shows as `NULL` with dbt lsp.
 

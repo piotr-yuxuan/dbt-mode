@@ -176,8 +176,8 @@ its car a function that answers."
 
 (ert-deftest dbt-lineage-asks-a-server-level-by-level ()
   "A lineage that a server gives level by level opens at depth 2; + asks one level more past the last asked.
-- redraws without asking; past the last level, + shows every depth.  g
-asks again, to the depth shown, two levels at least."
+- redraws without asking; m shows the macros, hidden at first; past the
+last level, + shows every depth.  g asks again, to the depth shown."
   (let* ((asked (list nil))
          (focus (list (list :id "model.p.f" :name "f" :type 'model)))
          (calls (dbt-test-level-calls dbt-test-levels asked)))
@@ -188,8 +188,6 @@ asks again, to the depth shown, two levels at least."
       (switch-to-buffer "*dbt lineage: f*")
       (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "s" "")
-                       ("upstream" "1" "macro" "m" "")
-                       ("upstream" "2" "macro" "n" "")
                        ("downstream" "1" "model" "a" "")
                        ("downstream" "2" "model" "d" "")
                        ("downstream" "1" "model" "b" "")
@@ -198,6 +196,13 @@ asks again, to the depth shown, two levels at least."
       (should (equal (reverse (car asked))
                      '((upstream "model.p.f") (upstream "seed.p.s" "macro.p.m")
                        (downstream "model.p.f") (downstream "model.p.a" "model.p.b" "model.p.c"))))
+      (execute-kbd-macro (kbd "m"))
+      (should (equal (seq-filter (lambda (row) (equal (car row) "upstream")) (dbt-test-lineage-rows))
+                     '(("upstream" "1" "seed" "s" "")
+                       ("upstream" "1" "macro" "m" "")
+                       ("upstream" "2" "macro" "n" ""))))
+      (execute-kbd-macro (kbd "m"))
+      (should-not (member "m" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows))))
       (setcar asked nil)
       (execute-kbd-macro (kbd "-"))
       (should (equal header-line-format " Lineage of f, to depth 1"))
@@ -227,8 +232,6 @@ asks again, to the depth shown, two levels at least."
     (with-current-buffer "*dbt lineage: f*"
       (should (equal (dbt-test-lineage-rows)
                      '(("upstream" "1" "seed" "s" "")
-                       ("upstream" "1" "macro" "m" "")
-                       ("upstream" "2" "macro" "n" "")
                        ("downstream" "1" "model" "a" "")
                        ("downstream" "1" "model" "b" "")
                        ("downstream" "1" "model" "c" ""))))
@@ -255,7 +258,7 @@ The first asking would have found a seed old upstream."
       (mapc #'funcall stale)
       (mapc #'funcall (car pending)))
     (with-current-buffer "*dbt lineage: f*"
-      (should (equal (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)) '("s" "m" "n" "a" "d" "b" "c")))
+      (should (equal (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)) '("s" "a" "d" "b" "c")))
       (should (equal (length (car asked)) 6))
       (kill-buffer))))
 
