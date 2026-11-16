@@ -181,10 +181,10 @@ dbt last wrote it: eldoc never reads one."
               (entity (car (dbt-mode-definitions target)))
               (file (expand-file-name "manifest.json" (dbt-project-target root)))
               ((dbt-project-manifest-held-p file))
-              (node (dbt-project-manifest-node file (dbt-project-node-id entity))))
-    (funcall callback (string-join (delq nil (list (map-nested-elt node '("config" "materialized"))
-                                                   (map-elt node "relation_name")))
-                                   " "))))
+              (node (dbt-project-manifest-node file (dbt-project-node-id entity)))
+              (said (delq nil (list (map-nested-elt node '("config" "materialized"))
+                                    (map-elt node "relation_name")))))
+    (funcall callback (string-join said " "))))
 
 (defun dbt-node-visit ()
   "Visit the file or the node on point's line, a node where the index has it."

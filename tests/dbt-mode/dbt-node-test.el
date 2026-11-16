@@ -16,7 +16,8 @@
   "Write in ROOT's target a manifest of stg_orders, raw_orders, the table raw.raw_orders and a disabled model off.
 Its shape is dbt 2's: stg_orders with its files, a relation, a
 configuration, columns, what it depends on and a description of two
-lines; off under \"disabled\", the first of an array."
+lines; off under \"disabled\", the first of an array.  The model
+uses_off calls off."
   (make-directory (expand-file-name "target" root) t)
   (write-region
    (json-encode
@@ -42,7 +43,8 @@ lines; off under \"disabled\", the first of an array."
       (disabled . ((model.shop.off . [((unique_id . "model.shop.off") (name . "off") (resource_type . "model")
                                        (package_name . "shop") (config . ((enabled . :json-false))))])))))
    nil (expand-file-name "target/manifest.json" root))
-  (write-region "{{ config(enabled=false) }}\nselect 1 as id\n" nil (expand-file-name "models/marts/off.sql" root)))
+  (write-region "{{ config(enabled=false) }}\nselect 1 as id\n" nil (expand-file-name "models/marts/off.sql" root))
+  (write-region "select * from {{ ref('off') }}\n" nil (expand-file-name "models/marts/uses_off.sql" root)))
 
 (defun dbt-test-node-lines ()
   "Return the lines of the current buffer, without properties."
@@ -146,7 +148,8 @@ Without a manifest, or without the node in it, it says so."
 (ert-deftest dbt-node-gives-eldoc-the-relation-from-a-manifest-held ()
   "Without a server, eldoc on a ref says the materialization and the relation of what it names.
 Only once dbt-mode holds the project's manifest as it is, never reading
-it at idle time; nothing elsewhere than on a ref or a source."
+it at idle time; nothing elsewhere than on a ref or a source, nor for a
+node with neither."
   (dbt-test-with-project root
     (dbt-test-write-manifest root)
     (when (get-buffer " *dbt manifest*")
@@ -165,6 +168,11 @@ it at idle time; nothing elsewhere than on a ref or a source."
       (goto-char (point-min))
       (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
       (should-not said)
+      (switch-to-buffer (dbt-test-visit root "models/marts/uses_off.sql"))
+      (dbt-test-goto "off')")
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should-not said)
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
       ;; A manifest that dbt wrote again is not held any more.
       (dbt-test-goto "stg_orders')")
       (set-file-times manifest (time-add (current-time) 10))
