@@ -13,6 +13,6 @@ embark of the development shell.
 `make check` also runs the tests of the scripts, `make test-python`, the
 check of public text, `make public`, and actionlint on the workflows,
 `make workflows`; `make commits BASE=main` checks the commit messages
-since `main`. CI runs `make check` without a dbt, so without the live
-tests, and `make commits` on a branch other than `main`: see [the
-release pipeline](../reference/release-pipeline.md).
+since `main`. CI runs `make check-static` and `make test` without a dbt,
+so without the live tests, and `make commits` on a branch other than
+`main`: see [the release pipeline](../reference/release-pipeline.md).
