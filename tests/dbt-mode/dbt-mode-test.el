@@ -1163,7 +1163,8 @@ chosen."
                            (buffer-string))))))
       (pcase-let ((`(,status ,output) (funcall parse)))
         (should-not (eq status 0))
-        (should (string-match-p "ambiguous ref('dup').*a_utils.*b_utils" output)))
+        (should (string-match-p "ambiguous ref('dup').*a_utils.*b_utils" output))
+        (should (string-match-p "ambiguous source('ext\\.t').*a_utils.*b_utils" output)))
       (save-window-excursion
         (dolist (file '("models/marts/calls.sql" "dbt_packages/shop_utils/models/pkg_calls.sql"))
           (switch-to-buffer (dbt-test-visit root file))
