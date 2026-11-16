@@ -31,12 +31,21 @@
 
 (defun dbt-node--section (title lines)
   "Insert the section TITLE and its LINES, unless there are none.
-A line with the property `dbt-node-id', a unique id, is a node that RET
-visits."
+A line with the property `dbt-node-id', a unique id, or `dbt-node-file',
+a file, is what RET visits."
   (when lines
     (insert (propertize title 'face 'bold) "\n")
     (dolist (line lines)
-      (insert (propertize (concat "  " line) 'dbt-node-id (get-text-property 0 'dbt-node-id line)) "\n"))))
+      (insert (propertize (concat "  " line)
+                          'dbt-node-id (get-text-property 0 'dbt-node-id line)
+                          'dbt-node-file (get-text-property 0 'dbt-node-file line))
+              "\n"))))
+
+(defun dbt-node--file (label directory relative)
+  "Return the line LABEL of the file RELATIVE to DIRECTORY, which RET visits.
+Nil when either is nil."
+  (when (and directory relative)
+    (propertize (format "%-13s %s" label relative) 'dbt-node-file (expand-file-name relative directory))))
 
 (defun dbt-node--show (root id node from refresh)
   "Show NODE, the node ID of ROOT as dbt gives it, which comes FROM somewhere.
@@ -47,7 +56,8 @@ of no argument, shows the node again, on \\[revert-buffer]."
   (let ((link (lambda (node-id)
                 (propertize (format "%-9s %s" (car (split-string node-id "\\.")) (dbt-lineage-label node-id))
                             'dbt-node-id node-id)))
-        (empty (lambda (value) (member value '(nil :false "" [])))))
+        (empty (lambda (value) (member value '(nil :false "" []))))
+        (directory (nth 1 (assoc (map-elt node "package_name") (dbt-project-packages root)))))
     (with-current-buffer (get-buffer-create (format "*dbt node: %s*" id))
       (let ((inhibit-read-only t))
         (dbt-node-mode)
@@ -62,6 +72,11 @@ of no argument, shows the node again, on \\[revert-buffer]."
         (when-let* ((summary (map-elt node "summary")))
           (insert summary "\n"))
         (insert from "\n\n")
+        (dbt-node--section "Files"
+                           (delq nil (list (dbt-node--file "file" directory (map-elt node "original_file_path"))
+                                           (dbt-node--file "properties" directory
+                                                           (cadr (split-string (format "%s" (map-elt node "patch_path"))
+                                                                               "://"))))))
         (dbt-node--section
          "Configuration"
          (mapcar (pcase-lambda (`(,label . ,value))
@@ -153,14 +168,18 @@ dbt last wrote it: eldoc never reads one."
                                    " "))))
 
 (defun dbt-node-visit ()
-  "Visit the node on point's line, where the index has it."
+  "Visit the file or the node on point's line, a node where the index has it."
   (interactive)
-  (let* ((id (or (get-text-property (line-beginning-position) 'dbt-node-id) (user-error "No node here")))
-         (node (or (seq-find (lambda (node) (equal (plist-get node :id) id)) (dbt-project-graph dbt-node--root))
-                   (user-error "No file of %s in the index" id))))
-    (find-file-other-window (plist-get node :file))
-    (goto-char (point-min))
-    (forward-line (1- (plist-get node :line)))))
+  (let ((file (get-text-property (line-beginning-position) 'dbt-node-file))
+        (id (get-text-property (line-beginning-position) 'dbt-node-id)))
+    (if file
+        (find-file-other-window file)
+      (let ((node (or (seq-find (lambda (node) (equal (plist-get node :id) id))
+                                (dbt-project-graph dbt-node--root))
+                      (user-error (if id (format "No file of %s in the index" id) "No file or node here")))))
+        (find-file-other-window (plist-get node :file))
+        (goto-char (point-min))
+        (forward-line (1- (plist-get node :line)))))))
 
 (defvar-keymap dbt-node-mode-map
   :doc "Keymap of `dbt-node-mode'."

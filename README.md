@@ -138,14 +138,15 @@ Rows and compiled SQL:
 
 `C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
 snapshot or source table that the `ref` or `source` at point names, else
-of the current resource: its relation, materialization, tags, group,
+of the current resource: its file and its YAML entry, its relation,
+materialization, tags, group,
 access, contract, version, whether it is disabled, its columns, its
 tests, what it depends on, what uses it and its description. With
 dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
 summary that its hover shows; otherwise from `target/manifest.json`,
 saying when dbt wrote it, its tests shown with the proxy only. What
 uses the node comes from dbt-mode's index, as for the lineage. `RET`
-visits a node, `TAB` folds a section, `g` shows the node again. Without
+visits a file or a node, `TAB` folds a section, `g` shows the node again. Without
 a server, eldoc on a `ref`
 or a `source` says the materialization and the relation of what it
 names, once dbt-mode holds the project's manifest as dbt last wrote it,

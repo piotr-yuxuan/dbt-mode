@@ -14,15 +14,17 @@
 
 (defun dbt-test-write-manifest (root)
   "Write in ROOT's target a manifest of stg_orders, raw_orders, the table raw.raw_orders and a disabled model off.
-Its shape is dbt 2's: stg_orders with a relation, a configuration,
-columns, what it depends on and a description; off under \"disabled\",
-the first of an array."
+Its shape is dbt 2's: stg_orders with its files, a relation, a
+configuration, columns, what it depends on and a description; off under
+\"disabled\", the first of an array."
   (make-directory (expand-file-name "target" root) t)
   (write-region
    (json-encode
     `((nodes . ((model.shop.stg_orders
                  . ((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
                     (package_name . "shop") (relation_name . "\"shop\".\"main\".\"stg_orders\"")
+                    (original_file_path . "models/staging/stg_orders.sql")
+                    (patch_path . "shop://models/staging/_staging.yml")
                     (config . ((materialized . "view") (tags . ["daily" "finance"]) (enabled . t)
                                (access . "protected") (contract . ((enforced . :json-false)))))
                     (columns . ((order_id . ((name . "order_id") (data_type . "integer")
@@ -46,13 +48,13 @@ the first of an array."
   (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n"))
 
 (ert-deftest dbt-node-shows-a-node-from-the-manifest ()
-  "C-c C-o on a ref shows its node from the manifest: configuration, columns, what it depends on, what uses it, its description.
+  "C-c C-o on a ref shows its node from the manifest: files, configuration, columns, what it depends on, what uses it, its description.
 The heading names the node, its kind and package, and the manifest it
 comes from, with when dbt wrote it.  A value that dbt leaves empty, null
 or false shows nothing.  What uses it is what dbt's child_map names,
 but for tests: an analysis, a model, a snapshot.  C-c C-o again, and g,
-show the node once.  RET on what it depends on, and on what uses it,
-visits that node."
+show the node once.  RET visits its file, its YAML entry, what it
+depends on and what uses it."
   (dbt-test-with-project root
     (dbt-test-write-manifest root)
     (save-window-excursion
@@ -65,6 +67,9 @@ visits that node."
           (should (string-match-p "\\`from target/manifest\\.json, written at [0-9-]+ [0-9:]+\\'" (nth 1 lines)))
           (should (equal (nthcdr 2 lines)
                          '(""
+                           "Files"
+                           "  file          models/staging/stg_orders.sql"
+                           "  properties    models/staging/_staging.yml"
                            "Configuration"
                            "  relation      \"shop\".\"main\".\"stg_orders\""
                            "  materialized  view"
@@ -89,15 +94,15 @@ visits that node."
         (execute-kbd-macro (kbd "C-c C-o"))
         (switch-to-buffer "*dbt node: model.shop.stg_orders*")
         (should (equal (seq-count (lambda (line) (equal line "Configuration")) (dbt-test-node-lines)) 1))
-        (goto-char (point-min))
-        (search-forward "seed      raw_orders")
-        (execute-kbd-macro (kbd "RET"))
-        (should (equal (file-relative-name buffer-file-name root) "seeds/raw_orders.csv"))
-        (switch-to-buffer "*dbt node: model.shop.stg_orders*")
-        (goto-char (point-min))
-        (search-forward "model     orders")
-        (execute-kbd-macro (kbd "RET"))
-        (should (equal (file-relative-name buffer-file-name root) "models/marts/orders.sql"))
+        (pcase-dolist (`(,line ,file) '(("file          models" "models/staging/stg_orders.sql")
+                                        ("properties    models" "models/staging/_staging.yml")
+                                        ("seed      raw_orders" "seeds/raw_orders.csv")
+                                        ("model     orders" "models/marts/orders.sql")))
+          (switch-to-buffer "*dbt node: model.shop.stg_orders*")
+          (goto-char (point-min))
+          (search-forward line)
+          (execute-kbd-macro (kbd "RET"))
+          (should (equal (file-relative-name buffer-file-name root) file)))
         (kill-buffer "*dbt node: model.shop.stg_orders*")))))
 
 (ert-deftest dbt-node-shows-a-source-a-disabled-node-and-says-what-is-missing ()
