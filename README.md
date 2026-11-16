@@ -34,10 +34,15 @@ dbt you have. With [straight.el](https://github.com/radian-software/straight.el)
          ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe)))
 ```
 
-[Install](docs/how-to/install.md) gives the rest: expreg, embark and
-consult, the server, dbt-lsp-plus.
+[Your first project](docs/tutorials/first-project.md) walks through it
+from a clone, with nothing installed, and [Install](docs/how-to/install.md)
+gives the rest: expreg, embark and consult, the server, dbt-lsp-plus.
 
 ## Documentation
+
+**Tutorial**
+
+- [Your first project](docs/tutorials/first-project.md): from a clone to the rows of a model.
 
 **How-to guides**
 
