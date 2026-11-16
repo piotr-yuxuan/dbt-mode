@@ -17,6 +17,7 @@
 (load "lsp-mode-autoloads" nil t)
 (require 'dbt-lsp)
 (require 'cl-lib)
+(require 'ert-x)
 (require 'json)
 
 (defconst dbt-lsp-test-dbt (expand-file-name "bin/dbt" dbt-test-directory)
@@ -1267,6 +1268,47 @@ dbt-mode's own steps aside for the server's hover."
       (let ((said nil))
         (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
         (should-not said)))))
+
+(ert-deftest dbt-lsp-breadcrumb-adds-its-symbols-to-lsp-mode-line ()
+  "With dbt lsp alone, which announces no document symbols, dbt-breadcrumb-mode adds its own after lsp-mode's line.
+lsp-mode turns its breadcrumbs on in each buffer it manages, and draws
+the directories and the file without symbols; the header line then
+names the file once, then the CTE and the block at point."
+  (dbt-lsp-test-with-server root nil
+    (save-window-excursion
+      ;; Each command ends in the selected window's buffer.
+      (switch-to-buffer (current-buffer))
+      (should (bound-and-true-p lsp-headerline-breadcrumb-mode))
+      (dbt-test-goto "where orders.order_date")
+      (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+      (execute-kbd-macro (kbd "C-e"))
+      (ert-run-idle-timers)
+      (let ((line (dbt-test-mode-line header-line-format)))
+        (should (string-match-p "marts.* orders\\.sql > final > if is_incremental()\\'" line))
+        (should (= 2 (length (split-string line "orders\\.sql"))))))))
+
+(ert-deftest dbt-lsp-breadcrumb-steps-aside-for-the-symbols-of-the-server ()
+  "With a server that announces document symbols, as dbt-lsp-plus does, the header line is lsp-mode's alone.
+dbt-breadcrumb-mode on, the CTE at point is named once, as the server's
+symbols name it, and nothing follows it."
+  (dbt-lsp-test-with-server root
+      (let ((range (lambda (start end) `(:start (:line ,start :character 0) :end (:line ,end :character 1)))))
+        `(("$capabilities" (documentSymbolProvider . t))
+          ("textDocument/documentSymbol"
+           . [(:name "orders" :kind 23 :range ,(funcall range 10 12) :selectionRange ,(funcall range 10 10))
+              (:name "final" :kind 23 :range ,(funcall range 18 30) :selectionRange ,(funcall range 18 18))])))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "where orders.order_date")
+      (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+      ;; lsp-mode asks for the symbols once idle, and draws them the next time.
+      (ert-run-idle-timers)
+      (dbt-test-wait (lambda () lsp--document-symbols))
+      (execute-kbd-macro (kbd "C-e"))
+      (ert-run-idle-timers)
+      (let ((line (dbt-test-mode-line header-line-format)))
+        (should (string-match-p "marts.* orders\\.sql .*final\\'" line))
+        (should (= 2 (length (split-string line "final"))))))))
 
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
