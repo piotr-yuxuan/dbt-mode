@@ -294,6 +294,47 @@ commands."
                             :commands)
                    ["dbt-lsp-plus.nodeInfo"]))))
 
+(defun dbt-lsp-test-dbt-lsp-commands ()
+  "Return the commands of dbt lsp that the scripted server was asked, as dbt.show."
+  (seq-filter (lambda (method) (string-prefix-p "workspace/executeCommand dbt." method)) (dbt-lsp-test-methods)))
+
+(ert-deftest dbt-lsp-alone-leaves-dbt-lsp-s-commands-to-dbt ()
+  "With dbt-lsp-plus alone, the rows, a CTE's rows and the compiled SQL come from dbt, as without a server.
+dbt-lsp-plus alone lists none of dbt lsp's commands, and fails them: C-c
+C-p runs dbt show, on the model or the CTE's Jinja; C-c C-v asks for a
+dbt compile first."
+  (let ((process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+    (dbt-lsp-test-alone root nil
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (execute-kbd-macro (kbd "C-c C-p"))
+        (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (dbt-test-goto "select * from {{ ref('stg_customers')")
+        (execute-kbd-macro (kbd "C-u C-c C-p"))
+        (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-v")) :type 'user-error))
+                       "Not compiled yet: run dbt compile, or start dbt lsp")))
+      (should-not (dbt-lsp-test-dbt-lsp-commands))
+      (dolist (name '("*dbt rows: orders*" "*dbt rows: orders/customers*"))
+        (kill-buffer name)))))
+
+(ert-deftest dbt-lsp-alone-lineage-falls-back-to-the-files ()
+  "With dbt-lsp-plus alone, C-c C-g asks its call hierarchy; for a node it has no item of, the calls of the files.
+dbt-lsp-plus alone lists no dbt.listNodes, which dbt lsp alone answers."
+  (dbt-lsp-test-alone root (dbt-lsp-test-hierarchy root)
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (dbt-test-wait (lambda () (assoc "upstream" (dbt-test-lineage-rows))))
+      ;; Asked a level at a time, as only the hierarchy is.
+      (should (equal header-line-format " Lineage of stg_orders, to depth 2"))
+      (kill-buffer)))
+  (dbt-lsp-test-alone root '(("textDocument/prepareCallHierarchy" . []))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (should (member '("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv") (dbt-test-lineage-rows)))
+      (kill-buffer))
+    (should-not (dbt-lsp-test-dbt-lsp-commands))))
+
 (ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
   "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
   (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"

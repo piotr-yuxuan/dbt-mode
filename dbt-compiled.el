@@ -27,10 +27,10 @@
 
 (defun dbt-compiled-with-buffer (callback)
   "Call CALLBACK in the buffer of the current model's compiled SQL, read-only.
-With dbt lsp, once the server compiled the saved buffer; otherwise in
-the file that the last `dbt compile' or run wrote, read again whenever
-dbt writes it."
-  (if (dbt-mode-server-p)
+With dbt lsp, whose server lists dbt.compileFile, once the server
+compiled the saved buffer; otherwise in the file that the last `dbt
+compile' or run wrote, read again whenever dbt writes it."
+  (if (dbt-mode-server-command-p "dbt.compileFile")
       (dbt-lsp-compiled callback)
     (with-current-buffer (find-file-noselect (or (dbt-mode-compiled-file "compiled")
                                                  (user-error "Not compiled yet: run dbt compile, or start dbt lsp")))
@@ -87,7 +87,7 @@ For `post-command-hook'.  Once no window shows the compiled SQL, turn
 (defun dbt-compiled--recompile ()
   "Have dbt lsp compile the saved model again; for `after-save-hook'.
 Without a server, the compiled SQL is read again as dbt writes it."
-  (when (dbt-mode-server-p)
+  (when (dbt-mode-server-command-p "dbt.compileFile")
     (dbt-compiled-with-buffer #'ignore)))
 
 (define-minor-mode dbt-compiled-follow-mode

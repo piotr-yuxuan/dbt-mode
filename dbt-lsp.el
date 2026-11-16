@@ -223,18 +223,32 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
           method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
 
+(defun dbt-lsp--project-workspace ()
+  "Return the workspace of dbt-lsp of the current project, or nil.
+That is the buffer's, else the one on its file or directory: from a
+buffer that the server does not serve, such as that of the lineage, the
+server of the project."
+  (or (dbt-lsp-workspace)
+      (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))))
+
+(defun dbt-lsp-command-p (command)
+  "Return non-nil when the server of the project lists COMMAND.
+That is under executeCommandProvider: dbt lsp lists dbt.compileFile,
+dbt.show and dbt.listNodes; dbt-lsp-plus adds its own; alone, for a dbt
+that lacks dbt lsp, it lists only its own, and fails the others."
+  (when-let* ((workspace (dbt-lsp--project-workspace)))
+    (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities workspace) :executeCommandProvider)
+                             :commands)
+                    command)))
+
 (defun dbt-lsp--request (method params schema callback &optional failed)
   "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
 SCHEMA is as `dbt-lsp--conforms-p' takes it.  An answer that it does not
 fit, and an error, are said in a message instead, naming METHOD, or the
 command of a workspace/executeCommand; FAILED, a function of no
 argument, is then called."
-  ;; From a buffer the server does not serve, such as that of the
-  ;; lineage, the server of the project.
   (let ((name (if (equal method "workspace/executeCommand") (plist-get params :command) method))
-        (workspace (or (dbt-lsp-workspace)
-                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
-                       (user-error "No dbt lsp runs on this project"))))
+        (workspace (or (dbt-lsp--project-workspace) (user-error "No dbt lsp runs on this project"))))
     (with-lsp-workspace workspace
       ;; Unmerged, the answer of the one workspace asked: lsp-mode's
       ;; merging of answers would turn an array into a list.
@@ -272,10 +286,7 @@ no such node, and an error, such as -32803 until the proxy's first
 parse, are said as `dbt-lsp--execute' says them.  OTHERWISE, a function
 of no argument, is called when the server does not list the command, as
 dbt lsp alone."
-  (if (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities (dbt-lsp-workspace))
-                                         :executeCommandProvider)
-                                :commands)
-                      "dbt-lsp-plus.nodeInfo")
+  (if (dbt-lsp-command-p "dbt-lsp-plus.nodeInfo")
       (dbt-lsp--execute "dbt-lsp-plus.nodeInfo" (list id) '(object)
                         ;; One shape whatever `lsp-use-plists' says, false
                         ;; read as nil, as lsp-mode reads it.
