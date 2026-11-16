@@ -22,16 +22,20 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
   `dbt_utils.star(…)` included, goes to its definition, and on
   `ref('m', v=2)` to that version, and on a name that its package lacks
-  says which packages define it; it resolves each as dbt 2.0.11 does:
+  says which packages define it; it resolves each as dbt 2.0.11 does,
+  and goes to the definition that dbt takes, not to its namesakes:
   - a `ref` or a `source` in the calling file's package first (in a
     macro, the macro's, as dbt-mode cannot know the node that calls it),
     or in the project first when its `dbt_project.yml` sets the flag
-    `require_ref_searches_node_package_before_root: false`, and a YAML
-    entry in its own package;
+    `require_ref_searches_node_package_before_root: false`, then in the
+    other packages, where two that define the name make dbt reject the
+    call as ambiguous, and both are listed; a YAML entry in its own
+    package;
   - a `ref` without `v=` to the latest version of each package's model,
     its `latest_version` or else its highest;
   - a `doc` in the project, else in the packages by the order of their
     names, whatever package calls it;
+  - a macro call without a package to every macro of that name;
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;

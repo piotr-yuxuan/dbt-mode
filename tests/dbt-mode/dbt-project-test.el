@@ -423,11 +423,13 @@ A file rewritten with its size, time and mode kept still gives what it held."
                   nil (expand-file-name "dbt_packages/shop_utils/models/_v.yml" root))
     (let ((ids (lambda (name caller)
                  (mapcar #'dbt-project-node-id (dbt-project-resolve root (list :kind 'ref :name name) caller)))))
-      (should (equal (funcall ids "v" "shop") '("model.shop.v.v1" "model.shop_utils.v.v2")))
-      (should (equal (funcall ids "v" "shop_utils") '("model.shop_utils.v.v2" "model.shop.v.v1")))
-      (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2" "model.shop.w.v3")))
+      (should (equal (funcall ids "v" "shop") '("model.shop.v.v1")))
+      (should (equal (funcall ids "v" "shop_utils") '("model.shop_utils.v.v2")))
+      (should (equal (funcall ids "w" "shop") '("model.shop.w.v3")))
+      (should (equal (funcall ids "w" "shop_utils") '("model.shop_utils.w.v2")))
       ;; The latest_version of one package is not that of the other.
-      (should (equal (funcall ids "y" "shop") '("model.shop.y.v2" "model.shop_utils.y.v1"))))))
+      (should (equal (funcall ids "y" "shop") '("model.shop.y.v2")))
+      (should (equal (funcall ids "y" "shop_utils") '("model.shop_utils.y.v1"))))))
 
 (ert-deftest dbt-project-resolve-ref-takes-only-the-version-it-names ()
   "A ref with a version means that version of a model alone, never a model without versions."
@@ -436,9 +438,11 @@ A file rewritten with its size, time and mode kept still gives what it held."
     (write-region "select 1" nil (expand-file-name "dbt_packages/shop_utils/models/orders_v1.sql" root))
     (write-region "models:\n  - name: orders\n    versions:\n      - v: 1\n" nil
                   (expand-file-name "dbt_packages/shop_utils/models/_orders.yml" root))
-    (let ((ids (lambda (target) (mapcar #'dbt-project-node-id (dbt-project-resolve root target "shop")))))
+    (let ((ids (lambda (target &optional caller)
+                 (mapcar #'dbt-project-node-id (dbt-project-resolve root target (or caller "shop"))))))
       (should (equal (funcall ids '(:kind ref :name "orders" :version "1")) '("model.shop_utils.orders.v1")))
-      (should (equal (funcall ids '(:kind ref :name "orders")) '("model.shop.orders" "model.shop_utils.orders.v1")))
+      (should (equal (funcall ids '(:kind ref :name "orders")) '("model.shop.orders")))
+      (should (equal (funcall ids '(:kind ref :name "orders") "shop_utils") '("model.shop_utils.orders.v1")))
       (should-not (funcall ids '(:kind ref :name "stg_orders" :version "1"))))))
 
 (ert-deftest dbt-project-file-entity-needs-no-index ()
@@ -465,10 +469,10 @@ A file rewritten with its size, time and mode kept still gives what it held."
     (let ((packages (lambda ()
                       (mapcar (lambda (entity) (plist-get entity :package))
                               (dbt-project-resolve root '(:kind doc :name "shared") "zzz")))))
-      (should (equal (funcall packages) '("aaa" "zzz")))
+      (should (equal (funcall packages) '("aaa")))
       (write-region "{% docs shared %}\nIn the project.\n{% enddocs %}\n" nil (expand-file-name "models/shared.md" root))
       (dbt-project-forget root)
-      (should (equal (funcall packages) '("shop" "aaa" "zzz"))))))
+      (should (equal (funcall packages) '("shop"))))))
 
 (ert-deftest dbt-project-resolve-prefers-the-caller-then-the-project ()
   "A ref resolves in the given package; else the caller's, then the project's."
@@ -478,8 +482,10 @@ A file rewritten with its size, time and mode kept still gives what it held."
     (let ((packages (lambda (&rest arguments)
                       (mapcar (lambda (entity) (plist-get entity :package))
                               (apply #'dbt-project-resolve root arguments)))))
-      (should (equal (funcall packages '(:kind ref :name "orders")) '("shop" "shop_utils")))
-      (should (equal (funcall packages '(:kind ref :name "orders") "shop_utils") '("shop_utils" "shop")))
+      (should (equal (funcall packages '(:kind ref :name "orders")) '("shop")))
+      (should (equal (funcall packages '(:kind ref :name "orders") "shop_utils") '("shop_utils")))
+      ;; A caller that lacks the name: the project's before another package's.
+      (should (equal (funcall packages '(:kind ref :name "orders") "aaa_utils") '("shop")))
       (should (equal (funcall packages '(:kind ref :qualifier "shop_utils" :name "orders")) '("shop_utils"))))
     (should (equal (plist-get (car (dbt-project-resolve root '(:kind source :qualifier "raw" :name "raw_orders")))
                               :line)
@@ -502,10 +508,11 @@ A file rewritten with its size, time and mode kept still gives what it held."
     (let ((packages (lambda (&rest arguments)
                       (mapcar (lambda (entity) (plist-get entity :package))
                               (apply #'dbt-project-resolve root arguments)))))
-      (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders")) '("shop" "shop_utils")))
+      (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders")) '("shop")))
       (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders") "shop_utils")
-                     '("shop_utils" "shop")))
-      (should (equal (funcall packages '(:kind source :name "raw") "shop_utils") '("shop_utils" "shop"))))))
+                     '("shop_utils")))
+      (should (equal (funcall packages '(:kind source :qualifier "raw" :name "raw_orders") "aaa_utils") '("shop")))
+      (should (equal (funcall packages '(:kind source :name "raw") "shop_utils") '("shop_utils"))))))
 
 (ert-deftest dbt-project-resolve-reads-the-flag-that-puts-the-project-first ()
   "With require_ref_searches_node_package_before_root false in the project, an unqualified ref or source resolves there first.

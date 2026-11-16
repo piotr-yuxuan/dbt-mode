@@ -657,27 +657,30 @@ by its place alone, in the package of `dbt-project-file-package'."
                   (dbt-project-index root))
         (and kind (list :kind kind :name (file-name-base file) :package (car package) :file file :line 1)))))
 
-(defun dbt-project-lookup-rank (root caller)
-  "Return the rank of an entity of ROOT for an unqualified call from CALLER.
-The value is a function of an entity, which gives 0 for the first
-package that a `ref' or a `source' of CALLER, the package of the calling
-file, looks in, 1 for the second, 2 for the others.  dbt 2.0.9 looks in
-CALLER, then in the project, unless the project's dbt_project.yml sets
-the flag require_ref_searches_node_package_before_root to false, which
-puts the project first.  A call in a macro takes the macro's package for
-CALLER, though dbt 2.0.9 takes that of the node calling the macro."
+(defun dbt-project-lookup (root caller candidates)
+  "Return the CANDIDATES of ROOT that a `ref' or a `source' of CALLER takes.
+CALLER is the package of the calling file.  dbt 2.0.9 looks in CALLER,
+then in the project, unless the project's dbt_project.yml sets the flag
+require_ref_searches_node_package_before_root to false, which puts the
+project first, then in the other packages, and takes the candidates of
+the first of these that has any.  Two candidates left, such as those of
+two other packages, dbt 2.0.11 rejects as ambiguous (dbt1005): both are
+returned.  A call in a macro takes the macro's package for CALLER,
+though dbt 2.0.9 takes that of the node calling the macro."
   (let* ((project (car (dbt-project-packages root)))
          (order (if (equal (plist-get (nth 2 project) :package-first) "false")
                     (list (car project) caller)
-                  (list caller (car project)))))
-    (lambda (entity) (or (seq-position order (plist-get entity :package)) 2))))
+                  (list caller (car project))))
+         (rank (lambda (entity) (or (seq-position order (plist-get entity :package)) 2)))
+         (best (apply #'min 2 (mapcar rank candidates))))
+    (seq-filter (lambda (entity) (= (funcall rank entity) best)) candidates)))
 
 (defun dbt-project-resolve-ref (root package name &optional caller version)
-  "Return what `ref' with PACKAGE, NAME and VERSION means in ROOT, best first.
+  "Return what `ref' with PACKAGE, NAME and VERSION resolves to in ROOT.
 PACKAGE is nil for a call with one argument.  The candidates are models,
 seeds and snapshots named NAME: those of PACKAGE when it is given;
-otherwise all, in the order of `dbt-project-lookup-rank' for CALLER, the
-package of the calling file.  As in dbt 2.0.11, with VERSION only the
+otherwise those that `dbt-project-lookup' takes for CALLER, the package
+of the calling file.  As in dbt 2.0.11, with VERSION only the
 models that have that version are candidates, none without versions;
 without VERSION, a model with versions is a candidate through one
 version, the latest_version of the model's package or else the highest
@@ -693,42 +696,45 @@ namesake have versions of their own."
                                                                    (plist-get entity :version)))
                                                             candidates))
                                           (lambda (one other) (string-version-lessp other one))))))))
-    (seq-sort-by (dbt-project-lookup-rank root caller)
-                 #'<
-                 (seq-filter (lambda (entity)
-                               (let ((own (plist-get entity :version)))
-                                 (if version
-                                     (equal version own)
-                                   (or (null own) (equal (funcall latest-version (plist-get entity :package)) own)))))
-                             candidates))))
+    (dbt-project-lookup root caller
+                        (seq-filter (lambda (entity)
+                                      (let ((own (plist-get entity :version)))
+                                        (if version
+                                            (equal version own)
+                                          (or (null own)
+                                              (equal (funcall latest-version (plist-get entity :package)) own)))))
+                                    candidates))))
 
 (defun dbt-project-resolve (root target &optional caller)
-  "Return the entities of ROOT that define TARGET, best first.
-TARGET is a plist (:kind KIND :qualifier QUALIFIER :name NAME :version
-VERSION).  KIND is `ref', `source', `doc', `macro' or `analysis', which
-no call names.  QUALIFIER is the package of a `ref', a `doc', a macro
-or an analysis, or the source of a table, and nil for a source itself.
-VERSION is that of a `ref', nil for the latest.  CALLER is the package
-of the calling file, which a `ref' or a `source' looks in as
-`dbt-project-lookup-rank' says; a `doc' looks in the project first,
-whatever the flag that it reads, then in the packages by the order of
-their names, as dbt 2.0.11 does whatever packages.yml lists first."
+  "Return the entities of ROOT that TARGET resolves to, as dbt does.
+That is the one that dbt takes, or those between which it finds the
+call ambiguous.  TARGET is a plist (:kind KIND :qualifier QUALIFIER
+:name NAME :version VERSION).  KIND is `ref', `source', `doc', `macro'
+or `analysis', which no call names.  QUALIFIER is the package of a
+`ref', a `doc', a macro or an analysis, or the source of a table, and
+nil for a source itself.  VERSION is that of a `ref', nil for the
+latest.  CALLER is the package of the calling file, which a `ref' or a
+`source' looks in as `dbt-project-lookup' says; a `doc' takes the
+project's, whatever the flag that it reads, else that of the first
+package by the order of their names, as dbt 2.0.11 does whatever
+packages.yml lists first.  A macro or an analysis gives every namesake
+of its package, or of all when it has none."
   (let ((qualifier (plist-get target :qualifier))
         (name (plist-get target :name)))
     (pcase (plist-get target :kind)
       ('ref (dbt-project-resolve-ref root qualifier name caller (plist-get target :version)))
-      ('source (seq-sort-by (dbt-project-lookup-rank root caller)
-                            #'<
-                            (if qualifier
-                                (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
-                                            (dbt-project-entities root '(table) name))
-                              (dbt-project-entities root '(source) name))))
+      ('source (dbt-project-lookup root caller
+                                   (if qualifier
+                                       (seq-filter (lambda (table) (equal qualifier (plist-get table :source)))
+                                                   (dbt-project-entities root '(table) name))
+                                     (dbt-project-entities root '(source) name))))
       ('doc (let ((project (dbt-project-name root)))
-              (seq-sort-by (lambda (doc)
-                             (let ((package (plist-get doc :package)))
-                               (if (equal package project) "" package)))
-                           #'string<
-                           (dbt-project-entities root '(doc) name qualifier))))
+              (seq-take (seq-sort-by (lambda (doc)
+                                       (let ((package (plist-get doc :package)))
+                                         (if (equal package project) "" package)))
+                                     #'string<
+                                     (dbt-project-entities root '(doc) name qualifier))
+                        1)))
       ('analysis (dbt-project-entities root '(analysis) name qualifier))
       ('macro (dbt-project-entities root '(macro test) name qualifier)))))
 
