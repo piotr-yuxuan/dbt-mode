@@ -210,6 +210,24 @@ or holds an error, a message says so."
                          :error-handler (lambda (error)
                                           (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
 
+(defun dbt-lsp-node-info (id callback otherwise)
+  "Give CALLBACK the node ID as dbt-lsp-plus knows it, else call OTHERWISE.
+When the server lists the command dbt-lsp-plus.nodeInfo, CALLBACK
+receives the node, a hash table, once the proxy answers; a null answer,
+no such node, and an error, such as -32803 until the proxy's first
+parse, are said as `dbt-lsp--execute' says them.  OTHERWISE, a function
+of no argument, is called when the server does not list the command, as
+dbt lsp alone."
+  (if (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities (dbt-lsp-workspace))
+                                         :executeCommandProvider)
+                                :commands)
+                      "dbt-lsp-plus.nodeInfo")
+      (dbt-lsp--execute "dbt-lsp-plus.nodeInfo" (list id) '(object)
+                        ;; One shape whatever `lsp-use-plists' says, false
+                        ;; read as nil, as lsp-mode reads it.
+                        (lambda (node) (funcall callback (json-parse-string (json-encode node) :null-object nil))))
+    (funcall otherwise)))
+
 (defun dbt-lsp-compiled (callback)
   "Save the current buffer, have the server compile it, then call CALLBACK.
 CALLBACK runs with no argument in the buffer of the compiled SQL, which

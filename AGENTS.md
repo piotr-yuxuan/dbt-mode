@@ -25,6 +25,7 @@ dbt-rows.el                the grid of a query's rows, whoever ran the query
 dbt-compiled.el            the compiled SQL beside its model, and its diff with another state
 dbt-babel.el               Org Babel blocks of dbt
 dbt-dashboard.el           the state of a project, from the artifacts of its runs
+dbt-node.el                what dbt knows of a node, in a buffer of its own
 dbt-consult.el             the resources of a project, read with consult
 dbt-embark.el              embark's actions on a resource
 dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer

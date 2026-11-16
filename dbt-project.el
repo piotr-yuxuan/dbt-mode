@@ -477,27 +477,50 @@ edited."
   "The manifest whose text this buffer holds, as (FILE TIME SIZE).
 FILE is its true name, TIME and SIZE those of the file it names.")
 
+(defun dbt-project--manifest-stamp (file)
+  "Return the stamp of the manifest FILE as it is now.
+It is (TRUE-NAME TIME SIZE): the name of the file that FILE names,
+through its links, its modification time and its size."
+  (let* ((true (file-truename file))
+         (attributes (file-attributes true)))
+    (list true (file-attribute-modification-time attributes) (file-attribute-size attributes))))
+
+(defun dbt-project-manifest-held-p (file)
+  "Return non-nil when the text of the manifest FILE, as it is now, is held.
+`dbt-project-manifest-node' then reads a node of it without reading
+FILE again."
+  (when-let* ((buffer (get-buffer " *dbt manifest*")))
+    (equal (dbt-project--manifest-stamp file) (buffer-local-value 'dbt-project--manifest-stamp buffer))))
+
 (defun dbt-project-manifest-node (file id)
   "Return the node ID of the manifest FILE, as a hash table, or nil.
 Nil when FILE cannot be read or holds no such node.  Only the node is
 parsed, as a manifest grows to tens of MB: its id is the key of an
-object in \"nodes\" or \"sources\" only, as elsewhere, such as in
-\"child_map\", its value is an array.  The text of the last manifest
-read is kept, in one buffer, and read again once the file that FILE
-names, through its links, changes its modification time or its size, as
-the mode line of each model asks.  The manifest is dbt's, read as it is."
+object in \"nodes\" or \"sources\", and of an array elsewhere: under
+\"disabled\", as dbt 2 writes a disabled node, the first element is
+the node, whose unique_id is ID; in \"child_map\" or \"parent_map\",
+an id.  The
+text of the last manifest read is kept, in one buffer, and read again
+once the file that FILE names, through its links, changes its
+modification time or its size, as the mode line of each model asks.
+The manifest is dbt's, read as it is."
   (with-current-buffer (get-buffer-create " *dbt manifest*")
-    (let* ((true (file-truename file))
-           (attributes (file-attributes true))
-           (stamp (list true (file-attribute-modification-time attributes) (file-attribute-size attributes))))
+    (let ((stamp (dbt-project--manifest-stamp file)))
       (unless (equal stamp dbt-project--manifest-stamp)
         (erase-buffer)
-        (ignore-errors (insert-file-contents true))
+        (ignore-errors (insert-file-contents (car stamp)))
         (setq dbt-project--manifest-stamp stamp)))
     (goto-char (point-min))
-    (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
-         (progn (backward-char)
-                (ignore-errors (json-parse-buffer :null-object nil))))))
+    (if (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+        (progn (backward-char)
+               (ignore-errors (json-parse-buffer :null-object nil)))
+      (let (node)
+        (while (and (not node)
+                    (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*\\[") nil t))
+          (backward-char)
+          (let ((first (car (append (ignore-errors (json-parse-buffer :null-object nil)) nil))))
+            (setq node (and (hash-table-p first) (equal (gethash "unique_id" first) id) first))))
+        node))))
 
 (defun dbt-project-default-target (root)
   "Return the target that dbt runs on in ROOT when none is given, or nil.

@@ -60,6 +60,8 @@
 (defvar font-lock-end)
 
 (autoload 'dbt-dispatch "dbt-cli" nil t)
+(autoload 'dbt-describe "dbt-node" nil t)
+(autoload 'dbt-node-eldoc "dbt-node")
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
@@ -728,6 +730,15 @@ its node in the manifest of the user's runs, read only then.  For
             (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
                          " ")))))
 
+(defun dbt-mode-resource-at-point ()
+  "Return the resource that point is on, else the current one, or nil.
+On a `ref' or a `source', it is the model, seed, snapshot or source
+table that the call names, the first that `xref-find-definitions'
+lists; else the current model, seed, snapshot or analysis."
+  (let ((target (dbt-mode-target-at-point)))
+    (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+        (dbt-mode-current-resource))))
+
 (defun dbt-mode-entity-selection (entity)
   "Return dbt's selector of ENTITY, an entity of the index.
 A model, seed or snapshot is NAME or NAME.vVERSION; a source table is
@@ -747,10 +758,7 @@ exposure, exposure:NAME, as a bare NAME selects a model of that name
 too.  Else it is the current resource, or path:FILE for a file of the
 project that holds none, such as a singular test or a properties file,
 as dbt selects by path.  Nil outside a file of a project."
-  (let* ((target (dbt-mode-target-at-point))
-         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource)
-                     (dbt-mode-entity-at-point '(exposure)))))
+  (let ((entity (or (dbt-mode-resource-at-point) (dbt-mode-entity-at-point '(exposure)))))
     (if entity
         (dbt-mode-entity-selection entity)
       (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root)))))))
@@ -1011,11 +1019,7 @@ target/manifest.json, which `dbt parse', `dbt compile' and every run
 write; the message says when it was written."
   (interactive)
   (let* ((root (dbt-mode--root))
-         (target (dbt-mode-target-at-point))
-         (entity (or resource
-                     (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource)
-                     (user-error "No model or source here")))
+         (entity (or resource (dbt-mode-resource-at-point) (user-error "No model or source here")))
          (file (expand-file-name "manifest.json" (dbt-project-target root)))
          (id (dbt-project-node-id entity))
          (node (if (file-readable-p file)
@@ -1173,6 +1177,7 @@ CTE rather than by statement."
   "C-c C-y" #'dbt-visit-properties
   "C-c C-f" #'dbt-find-resource
   "C-c C-e" #'dbt-insert-ref
+  "C-c C-o" #'dbt-describe
   "C-c C-t" #'dbt-visit-tests
   "C-c C-w" #'dbt-copy-relation
   "C-c M-w" #'dbt-copy-build-command
@@ -1195,6 +1200,7 @@ CTE rather than by statement."
     ["YAML properties" dbt-visit-properties]
     ["Find resource..." dbt-find-resource]
     ["Insert ref..." dbt-insert-ref]
+    ["Describe node" dbt-describe]
     ["Tests of this model" dbt-visit-tests]
     ["SQL of the last run" dbt-visit-run]
     ["Compiled SQL against a state..." dbt-compiled-diff]
@@ -1244,6 +1250,7 @@ commentary of dbt-mode.el for the rest.
               imenu-case-fold-search t)
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
+  (add-hook 'eldoc-documentation-functions #'dbt-node-eldoc nil 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
   ;; The target, the materialization and the compilation, after the name.
   (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))
@@ -1264,21 +1271,29 @@ commentary of dbt-mode.el for the rest.
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 
+(defvar-keymap dbt-properties-mode-map
+  :doc "Keymap of `dbt-properties-mode'."
+  "C-c C-o" #'dbt-describe)
+
 ;;;###autoload
 (define-minor-mode dbt-properties-mode
   "Navigate from the YAML files of a dbt project, and complete in them.
 On the `name' of a model, \\[xref-find-definitions] goes to its file,
 and on a call of `ref', `source' or `doc' in a test or a description,
-to what it names; \\[xref-find-references] lists where it is used.
-`dbt-properties-mode-maybe' turns it on in a dbt project's YAML files."
+to what it names; \\[xref-find-references] lists where it is used;
+\\[dbt-describe] shows what dbt knows of it, and eldoc says its
+relation, as in `dbt-mode'.  `dbt-properties-mode-maybe' turns it on in a
+dbt project's YAML files."
   :lighter " dbt"
   (if dbt-properties-mode
       (progn
         (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
         (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
+        (add-hook 'eldoc-documentation-functions #'dbt-node-eldoc nil 'local)
         (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local))
     (remove-hook 'xref-backend-functions #'dbt-mode-xref-backend 'local)
     (remove-hook 'completion-at-point-functions #'dbt-mode-completion-at-point 'local)
+    (remove-hook 'eldoc-documentation-functions #'dbt-node-eldoc 'local)
     (remove-hook 'after-save-hook #'dbt-mode--forget-project 'local)))
 
 ;;;###autoload

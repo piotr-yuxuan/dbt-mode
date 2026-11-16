@@ -136,6 +136,24 @@ Rows and compiled SQL:
   target is protected. The data diff and the dashboard's freshness ask as
   a block does.
 
+`C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
+snapshot or source table that the `ref` or `source` at point names, or
+the YAML entry, else of the current resource: its description, its file
+and its YAML entry, its relation, owner, materialization and its
+settings, tags, group, access, contract, version, whether it is
+disabled, its columns, its tests, what it depends on and what uses it.
+With dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
+summary that its hover shows; otherwise from `target/manifest.json`,
+saying when dbt wrote it, its tests left to the proxy and to `C-c C-t`.
+What uses the node comes from dbt-mode's index, as for the lineage.
+`RET` visits a file or a node, `TAB` folds a section, `g` shows the node
+again. Without a server, eldoc on a `ref` or a `source` says the
+materialization and the relation of what it names, in a model as in
+YAML, once dbt-mode holds the project's manifest as dbt last wrote it:
+after `C-c C-o`, `C-c C-w` or the dashboard in this session, or once the
+mode line of a model that sets no materialization of its own read it.
+eldoc never reads a manifest.
+
 The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
 the project from the artifacts of your own runs, which it never writes, and
 which dbt-mode's previews, diffs and formats leave as they are: the nodes
@@ -196,6 +214,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion, as dbt resolves it here    |
 | `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
 | `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
+| `C-c C-o`     | `dbt-describe`         | What dbt knows of the node at point, a `ref` or a `source`, else of the model |
 | `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s` of what point is on, a `ref` or a `source`, else the model; with `C-u`, `+…+` |
 | `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
 | `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |

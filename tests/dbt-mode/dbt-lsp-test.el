@@ -1051,5 +1051,94 @@ stands."
                                                                      :arguments (vector buffer-file-name)))
                                                   :null-object nil :false-object :json-false))))))))
 
+(ert-deftest dbt-lsp-describes-a-node-from-dbt-lsp-plus ()
+  "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
+A test, no node of the index, is no link; g asks the proxy again; a
+null relation, as the proxy gives a disabled node, shows none.  Its
+error, -32803 until the proxy's first parse, shows its reason; its null
+answer, no such node, says so.  A server that does not list the
+command, as dbt lsp alone, leaves the node to the manifest; eldoc of
+dbt-mode's own steps aside for the server's hover."
+  (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
+                (package_name . "shop") (summary . "view \"shop\".\"main\".\"stg_orders\"\ntags daily")
+                (relation . "\"shop\".\"main\".\"stg_orders\"") (relation_name . "elsewhere")
+                (tests . ["test.shop.not_null_stg_orders_order_id.81cfe2fe64"])
+                (config . ((materialized . "view"))))))
+    (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("workspace/executeCommand dbt-lsp-plus.nodeInfo" . ,node))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
+        (should (equal (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n")
+                       '("stg_orders, a model of shop"
+                         "view \"shop\".\"main\".\"stg_orders\""
+                         "tags daily"
+                         "from dbt-lsp-plus"
+                         ""
+                         "Configuration"
+                         "  relation      \"shop\".\"main\".\"stg_orders\""
+                         "  materialized  view"
+                         "Tests"
+                         "  not_null_stg_orders_order_id"
+                         "Used by, in the index"
+                         "  analysis  order_counts"
+                         "  model     orders"
+                         "  snapshot  orders_snapshot"
+                         "")))
+        ;; A test is no node of the index: RET says so.
+        (switch-to-buffer (current-buffer))
+        (goto-char (point-min))
+        (search-forward "not_null_stg_orders_order_id")
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
+                       "No file or node here"))
+        ;; g asks the proxy again, which has the node, not the manifest,
+        ;; which this project lacks.
+        (let ((inhibit-read-only t))
+          (erase-buffer))
+        (execute-kbd-macro (kbd "g"))
+        (dbt-test-wait (lambda () (string-search "from dbt-lsp-plus" (buffer-string))))
+        (kill-buffer)))
+    ;; The proxy's null relation, as for a disabled node, is no relation.
+    (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                      . ,(append '((relation) (disabled . t))
+                                                 (assq-delete-all 'relation (copy-alist node)))))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
+        (should-not (string-search "relation" (buffer-string)))
+        (should (string-search "  disabled      yes" (buffer-string)))
+        (kill-buffer)))
+    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                                    . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
+      (should-not (get-buffer "*dbt node: model.shop.stg_orders*")))
+    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"]))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo answered nothing")))
+    (dbt-lsp-test-with-server root nil
+      (make-directory (expand-file-name "target" root))
+      (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                            " \"resource_type\": \"model\", \"package_name\": \"shop\"}}}")
+                    nil (expand-file-name "target/manifest.json" root))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer "*dbt node: model.shop.stg_orders*"
+        (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
+        (kill-buffer))
+      ;; The manifest is held, but the server's hover says more.
+      (let ((said nil))
+        (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
+        (should-not said)))))
+
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
