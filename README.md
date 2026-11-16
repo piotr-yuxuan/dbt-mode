@@ -90,6 +90,18 @@ Writing and moving:
   `expreg-expand` also selects the Jinja tag and its contents, the block and
   the CTE around point, once `dbt-edit-expreg-regions` is in
   `expreg-functions` (see Installation);
+- `dbt-breadcrumb-mode`, off by default, says in the header line where
+  point is, once Emacs is idle: the directories from the project's root,
+  the file, then the CTEs and the Jinja blocks that hold point, as
+  `models > marts > orders.sql > final > if is_incremental()`. A macro,
+  test, snapshot, materialization, docs or `set` block shows the name it
+  defines, an `if`, `for` or `call` block its statement, as dbt-lsp-plus
+  names them (the `if`, `for` and `call` blocks once its outline has
+  them). When the server announces document symbols, as the proxy does,
+  lsp-mode's breadcrumbs show them instead; with dbt lsp alone, which
+  announces none, lsp-mode's breadcrumbs name the file and the mode adds
+  the CTEs and blocks after it. `(add-hook 'dbt-mode-hook
+  #'dbt-breadcrumb-mode)` turns it on in every model;
 - `C-c C-a` writes a new staging model from a source table, as dbt Labs'
   style guide lays it out with its YAML entry, a model, an incremental
   model, a macro, a snapshot defined in YAML, the YAML entry of the current
@@ -350,7 +362,9 @@ YAML files of a dbt project.
 | `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
 
 lsp-mode's own options apply: `lsp-lens-enable` shows the "Preview CTE"
-lenses, `lsp-semantic-tokens-enable` the server's semantic tokens.
+lenses, `lsp-semantic-tokens-enable` the server's semantic tokens,
+`lsp-headerline-breadcrumb-enable` its breadcrumbs, whose segments
+`lsp-headerline-breadcrumb-segments` chooses.
 
 ## Formatting and fixes
 
