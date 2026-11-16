@@ -13,9 +13,10 @@
 
 (ert-deftest with-scratch-home-keeps-a-failed-run-without-the-driver-cache ()
   "A failed run keeps its scratch directory, under /tmp whatever TMPDIR says, printed, but for the copy of the driver cache.
-So does a run stopped by TERM, as by a deadline, with status 143.  A run
-that succeeds leaves nothing; a copy that fails runs nothing and keeps
-nothing.  The suite runs in a scratch home, whose TMPDIR is not /tmp."
+So does a run stopped by TERM or HUP, as by a deadline, with status 143
+or 129.  A run that succeeds leaves nothing; a copy that fails runs
+nothing and keeps nothing.  The suite runs in a scratch home, whose
+TMPDIR is not /tmp."
   (let* ((kept nil)
          (tmp (make-temp-file "scratch-test" t))
          (cache (expand-file-name "cache/" tmp))
@@ -23,24 +24,26 @@ nothing.  The suite runs in a scratch home, whose TMPDIR is not /tmp."
          (copied "test -f \"$XDG_CACHE_HOME/com.getdbt/driver\"")
          (run (lambda (&rest command)
                 (with-temp-buffer
-                  (list (apply #'call-process script nil t nil "--dbt-cache" cache command)
-                        (buffer-string)))))
-         (kept-of (lambda (output)
-                    (should (string-match "^with-scratch-home: kept \\(/tmp/dbt-mode-scratch\\.[^/\n]+\\)$"
-                                          output))
-                    (car (push (match-string 1 output) kept)))))
+                  (let ((status (apply #'call-process script nil t nil "--dbt-cache" cache command)))
+                    ;; Each directory kept is removed at the end, whatever fails.
+                    (goto-char (point-min))
+                    (when (re-search-forward "^with-scratch-home: kept \\(/tmp/dbt-mode-scratch\\.[^/\n]+\\)$"
+                                             nil t)
+                      (push (match-string 1) kept))
+                    (list status (buffer-string)))))))
     (unwind-protect
         (progn
           (make-directory cache)
           (write-region "a driver" nil (expand-file-name "driver" cache))
           (pcase-dolist (`(,command ,expected)
                          `((,(concat copied " && exit 3") 3)
-                           (,(concat copied " && kill -TERM $PPID && sleep 1") 143)))
-            (pcase-let* ((`(,status ,output) (funcall run "sh" "-c" command))
-                         (directory (funcall kept-of output)))
+                           (,(concat copied " && kill -TERM $PPID && sleep 1") 143)
+                           (,(concat copied " && kill -HUP $PPID && sleep 1") 129)))
+            (pcase-let ((`(,status ,output) (funcall run "sh" "-c" command)))
               (should (equal status expected))
-              (should (file-directory-p (expand-file-name "home" directory)))
-              (should-not (file-exists-p (expand-file-name "cache/com.getdbt" directory)))))
+              (should (string-match-p "^with-scratch-home: kept /tmp/dbt-mode-scratch\\." output))
+              (should (file-directory-p (expand-file-name "home" (car kept))))
+              (should-not (file-exists-p (expand-file-name "cache/com.getdbt" (car kept))))))
           (should (file-exists-p (expand-file-name "driver" cache)))
           (pcase-let ((`(,status ,output) (funcall run "sh" "-c" (concat copied " && echo \"$HOME\""))))
             (should (= status 0))
