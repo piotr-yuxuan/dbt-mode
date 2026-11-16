@@ -15,6 +15,17 @@
 (require 'dbt-mode)
 (require 'ert-x)
 
+(defun dbt-test-idle (seconds)
+  "Run the idle timers that Emacs runs once idle for SECONDS.
+`ert-run-idle-timers' runs them all, whatever their delay."
+  (dolist (timer (copy-sequence timer-idle-list))
+    (unless (time-less-p seconds (timer--time timer))
+      (timer-event-handler timer))))
+
+(defun dbt-test-breadcrumbs-waiting-p ()
+  "Return non-nil when an update of the header line waits for Emacs to be idle."
+  (seq-some (lambda (timer) (eq (timer--function timer) #'dbt-breadcrumb--update)) timer-idle-list))
+
 (defun dbt-test-breadcrumbs-at (text)
   "Return the header line once point moves into TEXT and Emacs is idle.
 Point goes to the start of TEXT, then `C-f' moves it one character on."
@@ -25,10 +36,12 @@ Point goes to the start of TEXT, then `C-f' moves it one character on."
 
 (ert-deftest dbt-breadcrumb-names-the-file-then-the-cte-and-blocks-at-point ()
   "dbt-breadcrumb-mode, off by default, names the directories from the root, the file, then what holds point.
-The header line follows point once Emacs is idle, not before: in a CTE,
+The header line follows point once Emacs is idle for half a second, not
+before, and a command that moves nothing asks for nothing: in a CTE,
 its name, from the start of its first line, where `C-M-a' leaves point;
 in an `if' block inside a CTE, both, outermost first; after the CTEs,
-the file alone.  Turned off, the header line goes."
+the file alone.  Turned off, the header line goes, and nothing follows
+the commands."
   (dbt-test-with-project root
     (save-window-excursion
       ;; Each command ends in the selected window's buffer.
@@ -40,9 +53,12 @@ the file alone.  Turned off, the header line goes."
       (should (equal (dbt-test-mode-line header-line-format) " models > marts > orders.sql > orders"))
       (dbt-test-goto "where orders.order_date")
       (execute-kbd-macro (kbd "C-e"))
+      (dbt-test-idle 0.4)
       (should (equal (dbt-test-mode-line header-line-format) " models > marts > orders.sql > orders"))
-      (ert-run-idle-timers)
+      (dbt-test-idle 0.5)
       (should (equal (dbt-test-mode-line header-line-format) " models > marts > orders.sql > final > if is_incremental()"))
+      (execute-kbd-macro (kbd "M-x ignore RET"))
+      (should-not (dbt-test-breadcrumbs-waiting-p))
       (execute-kbd-macro (kbd "C-M-a"))
       (should (looking-at "final as ("))
       (ert-run-idle-timers)
@@ -51,7 +67,9 @@ the file alone.  Turned off, the header line goes."
       (ert-run-idle-timers)
       (should (equal (dbt-test-mode-line header-line-format) " models > marts > orders.sql"))
       (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
-      (should-not header-line-format))))
+      (should-not header-line-format)
+      (execute-kbd-macro (kbd "M-<"))
+      (should-not (dbt-test-breadcrumbs-waiting-p)))))
 
 (ert-deftest dbt-breadcrumb-names-a-macro-by-its-name ()
   "In a macro file, the header line names the file then the macro, not its arguments."
