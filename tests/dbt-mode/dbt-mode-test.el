@@ -1043,6 +1043,87 @@ of the package or one of the project calls the macro."
       (should (equal (funcall depends-on "model.shop_utils.pkg_uses") '("model.shop_utils.util")))
       (should (equal (funcall depends-on "model.shop.uses_macro") '("model.shop_utils.util"))))))
 
+(defun dbt-test-write-ambiguous (root)
+  "Write in ROOT calls that dbt rejects as ambiguous, and their namesakes.
+a_utils and b_utils, neither the project nor shop_utils, both define the
+model dup, the table ext.t and the doc shared; a_utils defines only_a,
+and util, which shop_utils defines too.  The project's model calls and
+shop_utils's model pkg_calls call dup and ext.t unqualified; calls also
+calls only_a, and pkg_calls a_utils's dup by its package and util; the
+project's calls.yml describes calls with the doc shared."
+  (dolist (directory '("dbt_packages/a_utils/models" "dbt_packages/b_utils/models" "dbt_packages/shop_utils/models"))
+    (make-directory (expand-file-name directory root) t))
+  (let ((calls "select * from {{ ref('dup') }}\njoin {{ source('ext', 't') }} using (id)\n"))
+    (write-region "select 1 as id\n" nil (expand-file-name "dbt_packages/a_utils/models/only_a.sql" root))
+    (write-region "select 1 as id\n" nil (expand-file-name "dbt_packages/shop_utils/models/util.sql" root))
+    (write-region "{{ config(alias='a_util') }}\nselect 1 as id\n" nil
+                  (expand-file-name "dbt_packages/a_utils/models/util.sql" root))
+    (pcase-dolist (`(,file . ,text)
+                   `(("packages.yml" . ,(concat "packages:\n  - local: dbt_packages/a_utils\n"
+                                                "  - local: dbt_packages/b_utils\n  - local: dbt_packages/shop_utils\n"))
+                     ("dbt_packages/a_utils/dbt_project.yml" . "name: 'a_utils'\nversion: '1.0.0'\nconfig-version: 2\n")
+                     ("dbt_packages/b_utils/dbt_project.yml" . "name: 'b_utils'\nversion: '1.0.0'\nconfig-version: 2\n")
+                     ("dbt_packages/a_utils/models/dup.sql" . "{{ config(alias='a_dup') }}\nselect 1 as id\n")
+                     ("dbt_packages/b_utils/models/dup.sql" . "{{ config(alias='b_dup') }}\nselect 1 as id\n")
+                     ("dbt_packages/a_utils/models/_sources.yml"
+                      . "sources:\n  - name: ext\n    schema: main\n    tables:\n      - name: t\n")
+                     ("dbt_packages/b_utils/models/_sources.yml"
+                      . "sources:\n  - name: ext\n    schema: other\n    tables:\n      - name: t\n")
+                     ("dbt_packages/a_utils/models/docs.md" . "{% docs shared %}\nIn a_utils.\n{% enddocs %}\n")
+                     ("dbt_packages/b_utils/models/docs.md" . "{% docs shared %}\nIn b_utils.\n{% enddocs %}\n")
+                     ("models/marts/calls.sql" . ,(concat calls "join {{ ref('only_a') }} using (id)\n"))
+                     ("models/marts/calls.yml" . "models:\n  - name: calls\n    description: '{{ doc(\"shared\") }}'\n")
+                     ("dbt_packages/shop_utils/models/pkg_calls.sql"
+                      . ,(concat calls "join {{ ref('a_utils', 'dup') }} using (id)\n"
+                                 "join {{ ref('util') }} using (id)\n"))))
+      (write-region text nil (expand-file-name file root)))))
+
+(defun dbt-test-messages-since (start)
+  "Return what *Messages* holds after its position START."
+  (with-current-buffer (messages-buffer)
+    (buffer-substring-no-properties start (point-max))))
+
+(ert-deftest dbt-mode-says-when-dbt-rejects-a-call-as-ambiguous ()
+  "M-. on a ref or a source that dbt rejects as ambiguous lists the definitions and says so.
+dbt rejects an unqualified call that neither the caller's package nor
+the project resolves and that two packages do, from the project as from
+a package.  A call by its package, a source's own entry or identifier,
+a doc, which dbt takes from the packages by name, a name that one
+package defines, one that the caller's package defines, and C-c C-f,
+which names resources, say nothing of it."
+  (dbt-test-with-project root
+    (dbt-test-write-ambiguous root)
+    (save-window-excursion
+      (pcase-dolist (`(,file ,point-on ,keys ,said)
+                     '(("models/marts/calls.sql" "dup')" "M-."
+                        "dbt rejects this call as ambiguous: a_utils and b_utils define dup")
+                       ("models/marts/calls.sql" "t')" "M-."
+                        "dbt rejects this call as ambiguous: a_utils and b_utils define t")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "dup')" "M-."
+                        "dbt rejects this call as ambiguous: a_utils and b_utils define dup")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "'a_utils', 'dup" "M-." nil)
+                       ;; Point on the source's name is on the same call.
+                       ("models/marts/calls.sql" "ext'" "M-."
+                        "dbt rejects this call as ambiguous: a_utils and b_utils define t")
+                       ("dbt_packages/a_utils/models/_sources.yml" "ext" "M-." nil)
+                       ("models/marts/calls.sql" nil "C-u M-. source:ext RET" nil)
+                       ("models/marts/calls.sql" "only_a" "M-." nil)
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "util')" "M-." nil)
+                       ("models/marts/calls.yml" "shared" "M-." nil)
+                       ;; Unqualified by a package: C-c C-f names the two tables.
+                       ("models/marts/calls.sql" nil "C-c C-f source:ext/t RET" nil)))
+        (switch-to-buffer (dbt-test-visit root file))
+        (when (string-suffix-p ".yml" file)
+          (dbt-properties-mode-maybe))
+        (if point-on (dbt-test-goto point-on) (goto-char (point-max)))
+        ;; Else a message equal to the last one only counts it again.
+        (message "Row %s %s" file keys)
+        (let ((start (with-current-buffer (messages-buffer) (point-max))))
+          (execute-kbd-macro (kbd keys))
+          (if said
+              (should (string-search said (dbt-test-messages-since start)))
+            (should-not (string-search "ambiguous" (dbt-test-messages-since start)))))))))
+
 (ert-deftest dbt-mode-inserts-no-ref-to-nothing ()
   "RET on an empty answer inserts no ref: not to the buffer's own model, nor to nothing."
   (dbt-test-with-project root

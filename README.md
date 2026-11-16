@@ -41,7 +41,9 @@ Without any dbt executable, dbt-mode reads the project's files:
   node that calls the macro; a macro call, and `C-c C-f`, list every
   definition; a macro of the project that a package's node calls, as
   through dispatch, which dbt resolves from that package, still goes to
-  the project's;
+  the project's; a `ref` or a `source` that neither the calling
+  package nor the project defines and two packages do, which dbt rejects
+  as ambiguous, lists them and says so;
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;

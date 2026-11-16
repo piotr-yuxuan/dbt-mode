@@ -532,7 +532,9 @@ rare case.  A package's own definition, when dbt takes it, is listed
 first, then the others: dbt skips a package's model that the project
 disables to override it, which the index does not read, and resolves a
 call in a package's macro from the node that calls the macro.  With
-`dbt-mode--every-definition', every definition is listed.
+`dbt-mode--every-definition', every definition is listed.  A call that
+dbt rejects as ambiguous, as `dbt-project-ambiguous' tells, lists its
+definitions, and the echo area says that dbt rejects it.
 
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
@@ -554,11 +556,16 @@ resolve."
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
     (mapcar #'dbt-mode--xref
-            (if (and (memq (plist-get target :kind) '(ref source doc))
-                     (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root)))
-                     (not dbt-mode--every-definition))
-                (list (car definitions))
-              definitions))))
+            (cond (dbt-mode--every-definition definitions)
+                  ((and (memq (plist-get target :kind) '(ref source doc))
+                        (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root))))
+                   (list (car definitions)))
+                  (t
+                   (when-let* ((packages (dbt-project-ambiguous (dbt-project-root) target definitions
+                                                                (dbt-mode-caller (dbt-project-root)))))
+                     (message "dbt rejects this call as ambiguous: %s define %s"
+                              (string-join packages " and ") (plist-get target :name)))
+                   definitions)))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
