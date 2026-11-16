@@ -122,6 +122,10 @@ server announces, as dbt-lsp-plus does, they replace this line; when
 they show the file without them, as with dbt lsp alone, which
 announces none, this mode adds the CTEs and blocks after them."
   :lighter nil
+  (when dbt-breadcrumb--timer
+    (cancel-timer dbt-breadcrumb--timer))
+  (setq dbt-breadcrumb--timer nil
+        dbt-breadcrumb--state nil)
   (if dbt-breadcrumb-mode
       (progn
         ;; After lsp-mode's breadcrumbs, which it puts first.  A list whose
@@ -138,11 +142,7 @@ announces none, this mode adds the CTEs and blocks after them."
         (dbt-breadcrumb--update (current-buffer)))
     (when (consp header-line-format)
       (setq header-line-format (remove dbt-breadcrumb--construct header-line-format)))
-    (remove-hook 'post-command-hook #'dbt-breadcrumb--schedule t)
-    (when dbt-breadcrumb--timer
-      (cancel-timer dbt-breadcrumb--timer))
-    (setq dbt-breadcrumb--timer nil
-          dbt-breadcrumb--state nil)))
+    (remove-hook 'post-command-hook #'dbt-breadcrumb--schedule t)))
 
 (provide 'dbt-breadcrumb)
 ;;; dbt-breadcrumb.el ends here
