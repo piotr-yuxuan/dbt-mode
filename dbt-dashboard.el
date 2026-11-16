@@ -10,12 +10,12 @@
 ;; `dbt-dashboard' shows what your own runs left in the target path,
 ;; read and never written: the nodes that failed, errored, warned or were
 ;; skipped in run_results.json, with dbt's message; the slowest of them;
-;; the sources that sources.json says are stale, and where the error of a
-;; check that failed is, as dbt writes no result for it.  Each section
+;; the sources that sources.json says are stale, then where to see a
+;; check that could not run, which dbt 2 leaves out of it.  Each section
 ;; says which command wrote its file, how many results it holds, and
-;; when.  RET visits a node's file, TAB folds a section, g reads the
-;; files again, and f runs `dbt source freshness', then reads them again
-;; once it ends.
+;; when.  RET visits a node's
+;; file, TAB folds a section, g reads the files again, and f runs `dbt
+;; source freshness', then reads them again once it ends.
 
 ;;; Code:
 
@@ -55,9 +55,9 @@ read or holds no results.  The artifacts are dbt's, read as they are."
 (defun dbt-dashboard--section (title file artifact lines)
   "Insert the section TITLE of FILE, and LINES.
 ARTIFACT is FILE as `dbt-dashboard--read' read it.  Each of LINES is a
-pair (TEXT . ID): ID, a unique id, is what RET visits.  The heading
-says how many results FILE holds and how long ago dbt wrote it, or that
-it holds no results."
+pair (TEXT . ID): ID, a unique id, is what RET visits, or nil for a line
+that names no node.  The heading says how many results FILE holds and
+how long ago dbt wrote it, or that it holds no results."
   (insert (propertize title 'face 'bold)
           (if artifact
               (format ", from %s, %d result%s, written %s ago\n" (file-name-nondirectory file)
@@ -119,15 +119,15 @@ it holds no results."
                                           (dbt-dashboard--age
                                            (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
                                                     (if (numberp age) (max 0 age) 0)))))
-                                ;; A freshness that failed has dbt's error instead.
+                                ;; A check that could not run has dbt's error
+                                ;; instead, as dbt 1.x writes it.
                                 (funcall said result (if (gethash "error" result) "error" "message"))))
                       (gethash "unique_id" result)))
               (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
                           (car sources)))
-      ;; dbt 2 writes no result for a check that failed (probed on
-      ;; dbt-oss 2.0.11 and the proprietary 2.0.9).
-      (list (cons (propertize "A check that failed has no row: dbt writes no result for it.  \
-Its error is in dbt's output and in logs/dbt.log." 'face 'shadow)
+      ;; dbt 2 writes no result for a check that could not run (probed
+      ;; on dbt-oss 2.0.11 and the proprietary 2.0.9).
+      (list (cons (propertize "dbt 2 leaves out a check that could not run: see dbt's output or logs/dbt.log." 'face 'shadow)
                   nil))))
     (goto-char (point-min))))
 
@@ -183,8 +183,8 @@ It runs on the default target, which a protected target asks first, as
   "Show the state of the current project, from the artifacts of your runs.
 The nodes that failed, errored, warned or were skipped in
 target/run_results.json, with dbt's message, the slowest nodes, and the
-sources that target/sources.json says are stale, then where the error of
-a check that failed is, as dbt writes no result for it; each section
+sources that target/sources.json says are stale, then where to see a
+check that could not run, which dbt 2 leaves out of it; each section
 says how many results its file holds, and when dbt wrote it.  See
 `dbt-dashboard-mode'."
   (interactive)

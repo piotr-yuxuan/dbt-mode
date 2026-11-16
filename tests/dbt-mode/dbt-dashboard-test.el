@@ -4,7 +4,7 @@
 
 ;;; Commentary:
 
-;; What the dashboard shows of the artifacts of a run, as dbt 2.0.9 writes
+;; What the dashboard shows of the artifacts of a run, as dbt writes
 ;; them, and what its keys do.
 
 ;;; Code:
@@ -13,12 +13,17 @@
 (require 'dbt-dashboard)
 (require 'dbt-mode)
 
+(defconst dbt-test-freshness-hint
+  "  dbt 2 leaves out a check that could not run: see dbt's output or logs/dbt.log."
+  "The last line of the section of stale sources.")
+
 (defun dbt-test-write-artifacts (root)
   "Write in ROOT's target the artifacts of a failing build and of freshness.
 They have the shape of dbt 2.0.9's: a warned test, a failed one with its
 failing rows, an errored model whose message gives its cause second, a
 model of a package, a skipped node, one with no message, statuses of
-freshness capitalised, a freshness that failed."
+freshness capitalised; and a check that could not run, as dbt 1.x
+writes it and dbt 2 does not."
   (let ((target (expand-file-name "target" root)))
     (make-directory target t)
     (write-region
@@ -69,20 +74,21 @@ freshness capitalised, a freshness that failed."
 (ert-deftest dbt-dashboard-shows-what-to-fix-the-slowest-and-stale-sources ()
   "The dashboard lists the nodes to fix, the most severe first, with dbt's cause; the slowest; the stale sources.
 Each heading says which command wrote its file, how many results it
-holds and how long ago;
-statuses read whatever their case; a freshness that failed shows its
-error; a missing file says so."
+holds and how long ago; statuses read whatever their case; a check that
+could not run, as dbt 1.x writes it, shows its error; a missing file
+says so; the section of stale sources ends with where to see a check
+that dbt 2 leaves out."
   (dbt-test-with-project root
     (dbt-test-visit root "models/marts/orders.sql")
     (dbt-dashboard)
     (with-current-buffer (format "*dbt dashboard: shop*")
       (should (equal (dbt-test-dashboard-lines)
-                     '("Failed, warned or skipped in dbt runs: no results in run_results.json"
+                     `("Failed, warned or skipped in dbt runs: no results in run_results.json"
                        ""
                        "Slowest nodes: no results in run_results.json"
                        ""
                        "Stale sources, of dbt source freshness: no results in sources.json"
-                       "  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log."
+                       ,dbt-test-freshness-hint
                        "" "")))
       (dbt-test-write-artifacts root)
       (let ((dbt-dashboard-slowest 2))
@@ -105,13 +111,14 @@ error; a missing file says so."
         (should-not (seq-find (lambda (line) (string-search "raw_customers" line)) lines))
         ;; The rows, then the hint, which is no row of its own.
         (should (equal (last lines 4)
-                       '("  runtime error events.page_views  Catalog Error: Table page_views does not exist"
-                         "  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log."
+                       `("  runtime error events.page_views  Catalog Error: Table page_views does not exist"
+                         ,dbt-test-freshness-hint
                          "" ""))))
       (switch-to-buffer (current-buffer))
       (goto-char (point-max))
-      (search-backward "A check that failed")
+      (search-backward (string-trim dbt-test-freshness-hint))
       (should (eq (get-text-property (point) 'face) 'shadow))
+      (should (= (next-single-property-change (point) 'face nil (line-end-position)) (line-end-position)))
       (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
                      "No node here"))
       (kill-buffer))))
@@ -182,8 +189,8 @@ target, f asks first, and runs nothing on a no."
           (dbt-test-wait (lambda () (string-search "no results in sources.json" (buffer-string)))))
         (kill-buffer)))))
 
-(ert-deftest dbt-dashboard-live-says-where-a-failed-check-is ()
-  "With the real dbt, a check that failed has no row, and the hint says where its error is.
+(ert-deftest dbt-dashboard-live-points-to-the-checks-dbt-leaves-out ()
+  "With the real dbt, a check that could not run is left out, and the hint says where to see it.
 dbt writes no result for it in sources.json, which a row for raw_missing
 would contradict: the hint would then be wrong."
   (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
@@ -212,7 +219,7 @@ would contradict: the hint would then be wrong."
             (should (string-prefix-p "  warn    raw.raw_orders  loaded " (car (last lines 4))))
             (should (string-match-p "\\`Stale sources, of dbt source freshness, from sources.json, 1 result, written "
                                     (nth (- (length lines) 5) lines)))
-            (should (equal (last lines 3) '("  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log." "" "")))
+            (should (equal (last lines 3) (list dbt-test-freshness-hint "" "")))
             (should-not (seq-find (lambda (line) (string-search "raw_missing" line)) lines)))
           (kill-buffer))))))
 

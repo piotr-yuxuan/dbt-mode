@@ -127,12 +127,16 @@ which dbt-mode's previews, diffs and formats leave as they are: the nodes
 that errored, failed, warned or were skipped in `target/run_results.json`,
 the most severe first, with dbt's message to its cause and a test's
 failing rows, the ten slowest nodes, and the sources that
-`target/sources.json` says are stale, each section saying which command
-wrote its file, how many results it holds and how long ago. dbt writes no result there for a
-freshness check that failed: the last line of the dashboard says that
-its error is in dbt's output and in `logs/dbt.log`. `RET` visits a node's file, `TAB`
-folds a section, `n` and `p` move by line, `g` reads the files again, and
-`f` runs `dbt source freshness`, then reads them again once it ends.
+`target/sources.json` says are stale or, with dbt Core 1.x, could not be
+checked, each section saying which command wrote its file, how many
+results it holds and how long ago. dbt 2 leaves out of
+`target/sources.json` a check that could not run, such as one of a
+missing table, and writes `"results": []` when none could: the last line
+of the section of stale sources says to look at dbt's output, after `f`
+its buffer, or at its log, `logs/dbt.log` unless `DBT_LOG_PATH` or
+`--log-path` moves it. `RET` visits a node's file, `TAB` folds a section,
+`n` and `p` move by line, `g` reads the files again, and `f` runs `dbt
+source freshness`, then reads them again once it ends.
 
 The index knows versioned models, snapshots defined in YAML, flow-style
 YAML, packages under `packages-install-path` and local packages, and leaves
