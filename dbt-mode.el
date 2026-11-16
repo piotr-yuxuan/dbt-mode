@@ -728,6 +728,17 @@ its node in the manifest of the user's runs, read only then.  For
             (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
                          " ")))))
 
+(defun dbt-mode-entity-selection (entity)
+  "Return dbt's selector of ENTITY, an entity of the index.
+A model, seed or snapshot is NAME or NAME.vVERSION; a source table is
+source:SOURCE.TABLE, a source source:SOURCE, an exposure exposure:NAME,
+as a bare NAME selects a model of that name too."
+  (pcase (plist-get entity :kind)
+    ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
+    ('source (format "source:%s" (plist-get entity :name)))
+    ('exposure (format "exposure:%s" (plist-get entity :name)))
+    (_ (dbt-mode-resource-selector entity))))
+
 (defun dbt-mode-selection-at-point ()
   "Return dbt's selector of what point is on, else of the current file.
 On a `ref', it is the model, seed or snapshot that it names, as NAME or
@@ -740,12 +751,9 @@ as dbt selects by path.  Nil outside a file of a project."
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
                      (dbt-mode-current-resource)
                      (dbt-mode-entity-at-point '(exposure)))))
-    (pcase (plist-get entity :kind)
-      ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
-      ('source (format "source:%s" (plist-get entity :name)))
-      ('exposure (format "exposure:%s" (plist-get entity :name)))
-      ((pred identity) (dbt-mode-resource-selector entity))
-      (_ (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root))))))))
+    (if entity
+        (dbt-mode-entity-selection entity)
+      (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root)))))))
 
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).
