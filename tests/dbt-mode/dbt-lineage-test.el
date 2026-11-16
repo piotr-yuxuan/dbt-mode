@@ -213,9 +213,10 @@ last level, + shows every depth.  g asks again, to the depth shown."
       ;; Level 3: n and d call nothing more, so the lineage ends there.
       (execute-kbd-macro (kbd "+"))
       (should (equal (reverse (car asked)) '((upstream "macro.p.n") (downstream "model.p.d"))))
-      (should (equal header-line-format " Lineage of f, at every depth"))
+      (should (equal header-line-format " Lineage of f, to depth 3"))
       (setcar asked nil)
       (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format " Lineage of f, at every depth"))
       (should-not (car asked))
       (execute-kbd-macro (kbd "-"))
       (execute-kbd-macro (kbd "g"))
@@ -238,6 +239,30 @@ last level, + shows every depth.  g asks again, to the depth shown."
       (should (equal header-line-format
                      " Lineage of f, to depth 2; downstream stops at depth 1: its 3 nodes are more than dbt-lineage-level-limit, 2"))
       (should (equal (mapcar #'car (reverse (car asked))) '(upstream upstream downstream)))
+      (kill-buffer))))
+
+(defun dbt-test-answer-pending (pending)
+  "Give the answers on the car of the cons PENDING, oldest first, until none is left.
+The answers that they ask are given in turn."
+  (while (car pending)
+    (let ((answers (reverse (car pending))))
+      (setcar pending nil)
+      (mapc #'funcall answers))))
+
+(ert-deftest dbt-lineage-keeps-the-depth-chosen-while-a-level-is-asked ()
+  "- while a level is asked keeps its depth once the level comes, though it ends the lineage."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    (dbt-test-answer-pending pending)
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (execute-kbd-macro (kbd "+"))
+      (execute-kbd-macro (kbd "-"))
+      (execute-kbd-macro (kbd "-"))
+      (dbt-test-answer-pending pending)
+      (should (equal header-line-format " Lineage of f, to depth 1"))
       (kill-buffer))))
 
 (ert-deftest dbt-lineage-drops-the-answers-of-a-level-asked-again ()

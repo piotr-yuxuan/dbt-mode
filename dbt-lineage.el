@@ -218,7 +218,7 @@ again in DIRECTION since: it then counts for nothing."
                                                                                    reached)))
                        (dbt-lineage--ask direction)
                        (dbt-lineage--compute)
-                       (dbt-lineage--show-depth (and (dbt-lineage--growing-p) dbt-lineage--depth))))))))))
+                       (dbt-lineage--show-depth dbt-lineage--depth)))))))))
 
 (defun dbt-lineage-deeper ()
   "Show one level more of the lineage, asked of a server that gives levels."
