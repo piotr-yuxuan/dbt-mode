@@ -935,7 +935,9 @@ test pkg_test."
 Another package's resource comes with its package, from a package's
 model as from the project's.  In a macro, which dbt resolves from the
 node that calls it, any resource but the project's comes with its
-package.  A buffer that visits no file calls as the project does."
+package.  A buffer that visits no file calls as the project does.  A
+model's own name calls its namesake in another package, as an override
+does, not the model itself."
   (dbt-test-with-project root
     (dbt-test-write-namesakes root)
     (save-window-excursion
@@ -951,6 +953,8 @@ package.  A buffer that visits no file calls as the project does."
                        ("macros/project_macro.sql" "stg_orders" "{{ ref('stg_orders') }}")
                        ("macros/project_macro.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
                        ("dbt_packages/shop_utils/tests/pkg_test.sql" "util" "{{ ref('util') }}")
+                       ("dbt_packages/shop_utils/models/util.sql" "util" "{{ ref('a_utils', 'util') }}")
+                       ("models/staging/stg_orders.sql" "stg_orders" "{{ ref('shop_utils', 'stg_orders') }}")
                        (nil "stg_orders" "{{ ref('stg_orders') }}")
                        (nil "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")))
         (if file
@@ -1079,7 +1083,11 @@ A name alone is the latest version, as for `ref'."
     (insert "\n")
     (dbt-insert-ref "dim.v1")
     (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))
-    ;; The model itself, unpinned, floats to its latest version.
+    ;; From its latest version, the model unpinned is the version itself,
+    ;; a cycle; from another model, it floats to its latest version.
+    (should-error (dbt-insert-ref "dim") :type 'user-error)
+    (dbt-test-visit root "models/marts/uses_v1.sql")
+    (goto-char (point-max))
     (insert "\n")
     (dbt-insert-ref "dim")
     (should (looking-back "^{{ ref('dim') }}" (line-beginning-position)))))
