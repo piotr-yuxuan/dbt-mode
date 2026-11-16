@@ -452,7 +452,7 @@ macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
 the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
 a request on a source, where it says so: the request goes to it."
   (and (dbt-project-root)
-       (or (not (dbt-mode-server-p))
+       (or (not (dbt-mode-dbt-lsp-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
            ;; call names is on the line of a snapshot block only: the
            ;; index is not read for the rest, which the server answers.
@@ -687,6 +687,13 @@ a dbt that lacks dbt lsp: what it answers, each feature asks, as
   "Return non-nil when the server of the project lists the command COMMAND.
 As `dbt-lsp-command-p' says; nil while dbt-lsp.el is not loaded."
   (and (featurep 'dbt-lsp) (dbt-lsp-command-p command)))
+
+(defun dbt-mode-dbt-lsp-p ()
+  "Return non-nil when dbt lsp answers for the project, behind the proxy or not.
+Its server lists dbt.listNodes, which dbt lsp lists and dbt-lsp-plus
+alone does not: alone, the proxy fails what dbt lsp would answer, such
+as the references of a column."
+  (dbt-mode-server-command-p "dbt.listNodes"))
 
 (defun dbt-mode--root ()
   "Return the root of the current project, or signal a `user-error'."

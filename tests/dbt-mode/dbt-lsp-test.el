@@ -335,6 +335,30 @@ dbt-lsp-plus alone lists no dbt.listNodes, which dbt lsp alone answers."
       (kill-buffer))
     (should-not (dbt-lsp-test-dbt-lsp-commands))))
 
+(ert-deftest dbt-lsp-alone-leaves-xref-and-eldoc-to-dbt-mode ()
+  "With dbt-lsp-plus alone, M-. and M-? stay dbt-mode's where dbt lsp would answer, and eldoc speaks.
+dbt-lsp-plus alone fails references off a source, as on a column, and
+hovers only once it has an index; a source stays the proxy's, where it
+says it answers it."
+  (dbt-lsp-test-alone root nil
+    (dbt-test-goto "customers.first_name")
+    (should (eq (xref-find-backend) 'dbt))
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                          " \"resource_type\": \"model\", \"package_name\": \"shop\","
+                          " \"relation_name\": \"\\\"shop\\\".\\\"main\\\".\\\"stg_orders\\\"\","
+                          " \"config\": {\"materialized\": \"view\"}}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (dbt-project-manifest-node (expand-file-name "target/manifest.json" root) "model.shop.stg_orders")
+    (dbt-test-goto "stg_orders')")
+    (let ((said nil))
+      (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
+      (should (string-search "view" said)))
+    (goto-char (point-max))
+    (insert "\n{{ source('raw', 'raw_orders') }}")
+    (dbt-test-goto "raw_orders')")
+    (should (dbt-mode--proxy-answers-p :references (xref-backend-identifier-at-point 'dbt)))))
+
 (ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
   "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
   (dbt-lsp-test-with-dbt dbt "[ \"$1 $2\" = \"lsp --help\" ]"

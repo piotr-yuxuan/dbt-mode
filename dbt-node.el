@@ -172,10 +172,11 @@ write, saying when dbt wrote it."
 
 (defun dbt-node-eldoc (callback &rest _)
   "Give CALLBACK the materialization and relation of the ref or source at point.
-For `eldoc-documentation-functions', without a server, whose hover says
-more.  They come from the project's manifest, once dbt-mode holds it as
-dbt last wrote it: eldoc never reads one."
-  (when-let* (((not (dbt-mode-server-p)))
+For `eldoc-documentation-functions', without dbt lsp, whose hover says
+more: dbt-lsp-plus alone hovers only once it has an index.  They come
+from the project's manifest, once dbt-mode holds it as dbt last wrote
+it: eldoc never reads one."
+  (when-let* (((not (dbt-mode-dbt-lsp-p)))
               (root (dbt-project-root))
               (target (dbt-mode-target-at-point))
               ((memq (plist-get target :kind) '(ref source)))
