@@ -240,15 +240,14 @@ the project is still watched.
 
 With `dbt-oss` and `dbt-lsp-proxy` on, dbt-lsp-plus runs alone, without
 `dbt lsp`, from the files and from its own `dbt parse`, run offline. It
-answers the definitions and references of sources, the definitions of
-refs, docs and YAML entries, the lineage of `C-c C-g` from its call
-hierarchy, `C-c C-o`, the document symbols of the breadcrumbs, and,
+answers `M-.` and `M-?` on sources, the lineage of `C-c C-g` from its
+call hierarchy, `C-c C-o`, the document symbols of the breadcrumbs, and,
 once it has parsed, hover, inlay hints, the parse's problems and the
 last run's results as diagnostics. The rest stays dbt-mode's, as
 without a server: `C-c C-p` and the data diff ask `dbt show`, `C-c C-v`
-reads what `dbt compile` wrote, `M-.` and `M-?` answer what the proxy
-does not, `C-c C-o` and eldoc read the manifest while the proxy has not
-parsed; `dbt-oss` cannot format, and renaming a model or fixing lint
+reads what `dbt compile` wrote, `M-.` and `M-?` answer the rest, `C-c
+C-o` reads the manifest while the proxy has not parsed, and eldoc reads
+it always; `dbt-oss` cannot format, and renaming a model or fixing lint
 issues needs `dbt lsp`. Alone, the proxy keeps of `dbt-lsp-arguments`
 only the profiles directory, profile, target, vars and packages' path,
 `dbt-lsp-enable-linter` does nothing, and the mode line says nothing
