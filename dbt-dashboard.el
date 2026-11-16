@@ -10,10 +10,12 @@
 ;; `dbt-dashboard' shows what your own runs left in the target path,
 ;; read and never written: the nodes that failed, errored, warned or were
 ;; skipped in run_results.json, with dbt's message; the slowest of them;
-;; the sources that sources.json says are stale.  Each section says which
-;; command wrote its file, and when.  RET visits a node's file, TAB folds a
-;; section, g reads the files again, and f runs `dbt source freshness',
-;; then reads them again once it ends.
+;; the sources that sources.json says are stale, then where to see a
+;; check that could not run, which dbt 2 leaves out of it.  Each section
+;; says which command wrote its file, how many results it holds, and
+;; when.  RET visits a node's
+;; file, TAB folds a section, g reads the files again, and f runs `dbt
+;; source freshness', then reads them again once it ends.
 
 ;;; Code:
 
@@ -41,7 +43,8 @@
   "Return the results of the artifact FILE and the command that wrote it.
 The value is (RESULTS . COMMAND): RESULTS its objects of results, as
 hash tables, COMMAND its args.which, or nil.  Nil when FILE cannot be
-read or holds no results.  The artifacts are dbt's, read as they are."
+read or holds no array of results; an empty array gives (nil . COMMAND).
+The artifacts are dbt's, read as they are."
   (let ((json (ignore-errors (with-temp-buffer
                                (insert-file-contents file)
                                (json-parse-buffer :null-object nil)))))
@@ -53,11 +56,14 @@ read or holds no results.  The artifacts are dbt's, read as they are."
 (defun dbt-dashboard--section (title file artifact lines)
   "Insert the section TITLE of FILE, and LINES.
 ARTIFACT is FILE as `dbt-dashboard--read' read it.  Each of LINES is a
-pair (TEXT . ID): ID, a unique id, is what RET visits.  The heading
-says how long ago dbt wrote FILE, or that it holds no results."
+pair (TEXT . ID): ID, a unique id, is what RET visits, or nil for a line
+that names no node.  The heading says how many results FILE holds and
+how long ago dbt wrote it, none included, or else, without ARTIFACT,
+that it holds no results that can be read."
   (insert (propertize title 'face 'bold)
           (if artifact
-              (format ", from %s, written %s ago\n" (file-name-nondirectory file)
+              (format ", from %s, %d result%s, written %s ago\n" (file-name-nondirectory file)
+                      (length (car artifact)) (if (= (length (car artifact)) 1) "" "s")
                       (dbt-dashboard--age (max 0 (round (float-time (time-since (file-attribute-modification-time
                                                                                 (file-attributes file))))))))
             (format ": no results in %s\n" (file-name-nondirectory file))))
@@ -107,18 +113,24 @@ says how long ago dbt wrote FILE, or that it holds no results."
                        dbt-dashboard-slowest)))
     (dbt-dashboard--section
      "Stale sources, of dbt source freshness" sources-file sources
-     (mapcar (lambda (result)
-               (cons (format "%-7s %s  %s" (funcall status result) (funcall name result)
-                             (if (stringp (gethash "max_loaded_at" result))
-                                 (format "loaded %s, %s ago" (gethash "max_loaded_at" result)
-                                         (dbt-dashboard--age
-                                          (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
-                                                   (if (numberp age) (max 0 age) 0)))))
-                               ;; A freshness that failed has dbt's error instead.
-                               (funcall said result (if (gethash "error" result) "error" "message"))))
-                     (gethash "unique_id" result)))
-             (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
-                         (car sources))))
+     (append
+      (mapcar (lambda (result)
+                (cons (format "%-7s %s  %s" (funcall status result) (funcall name result)
+                              (if (stringp (gethash "max_loaded_at" result))
+                                  (format "loaded %s, %s ago" (gethash "max_loaded_at" result)
+                                          (dbt-dashboard--age
+                                           (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
+                                                    (if (numberp age) (max 0 age) 0)))))
+                                ;; A check that could not run has dbt's error
+                                ;; instead, as dbt 1.x writes it.
+                                (funcall said result (if (gethash "error" result) "error" "message"))))
+                      (gethash "unique_id" result)))
+              (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
+                          (car sources)))
+      ;; dbt 2 writes no result for a check that could not run (probed
+      ;; on dbt-oss 2.0.11 and the proprietary 2.0.9).
+      (list (cons (propertize "dbt 2 leaves out a check that could not run: see dbt's output or logs/dbt.log." 'face 'shadow)
+                  nil))))
     (goto-char (point-min))))
 
 (defun dbt-dashboard-visit ()
@@ -173,8 +185,10 @@ It runs on the default target, which a protected target asks first, as
   "Show the state of the current project, from the artifacts of your runs.
 The nodes that failed, errored, warned or were skipped in
 target/run_results.json, with dbt's message, the slowest nodes, and the
-sources that target/sources.json says are stale; each section says when
-dbt wrote its file.  See `dbt-dashboard-mode'."
+sources that target/sources.json says are stale, then where to see a
+check that could not run, which dbt 2 leaves out of it; each section
+says how many results its file holds, and when dbt wrote it.  See
+`dbt-dashboard-mode'."
   (interactive)
   (let ((root (or (dbt-project-root) (user-error "Not in a dbt project"))))
     (with-current-buffer (get-buffer-create (format "*dbt dashboard: %s*" (dbt-project-name root)))
