@@ -538,6 +538,20 @@ A package's model without an entry of its own has none to visit."
     (should (member "ref:stg_orders" (xref-backend-identifier-completion-table 'dbt)))
     (should (member "macro:shop_utils/is_positive" (xref-backend-identifier-completion-table 'dbt)))))
 
+(ert-deftest dbt-mode-finds-a-doc-a-source-and-a-generic-test ()
+  "C-c C-f completes a docs block, a source and a generic test by the call that names each, and visits it.
+TAB completes from the identifiers of the project: a keyboard macro
+that ends in the minibuffer returns its text, whatever it matches."
+  (dbt-test-with-project root
+    (write-region "{% test positive(model, column_name) %}\nselect 1\n{% endtest %}\n" nil
+                  (expand-file-name "macros/positive.sql" root))
+    (save-window-excursion
+      (dolist (case '(("doc:order_st" . "models/docs.md") ("source:ra" . "models/staging/_sources.yml")
+                      ("macro:positiv" . "macros/positive.sql")))
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (execute-kbd-macro (kbd (concat "C-c C-f " (car case) " TAB RET")))
+        (should (equal (file-relative-name buffer-file-name root) (cdr case)))))))
+
 (ert-deftest dbt-mode-finds-analyses ()
   "C-c C-f visits an analysis, and so does M-. on its YAML entry."
   (dbt-test-with-project root
