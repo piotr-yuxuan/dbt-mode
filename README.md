@@ -1,9 +1,19 @@
 # dbt-mode
 
+[![CI](https://github.com/piotr-yuxuan/dbt-mode/actions/workflows/ci.yml/badge.svg)](https://github.com/piotr-yuxuan/dbt-mode/actions/workflows/ci.yml)
+[![CD](https://github.com/piotr-yuxuan/dbt-mode/actions/workflows/cd.yml/badge.svg)](https://github.com/piotr-yuxuan/dbt-mode/actions/workflows/cd.yml)
+[![Release](https://img.shields.io/github/v/release/piotr-yuxuan/dbt-mode?sort=semver)](https://github.com/piotr-yuxuan/dbt-mode/releases)
+[![Licence](https://img.shields.io/github/license/piotr-yuxuan/dbt-mode)](https://github.com/piotr-yuxuan/dbt-mode#licence)
+[![Issues](https://img.shields.io/github/issues/piotr-yuxuan/dbt-mode)](https://github.com/piotr-yuxuan/dbt-mode/issues)
+[![Emacs 31.1+](https://img.shields.io/badge/Emacs-31.1%2B-7f5ab6)](https://www.gnu.org/software/emacs/)
+
 Edit [dbt](https://www.getdbt.com/) projects in Emacs: SQL with Jinja,
 navigation across models, sources, macros and docs, previews of rows,
 lineage, and, with dbt 2's proprietary build, its language server through
-[lsp-mode](https://emacs-lsp.github.io/lsp-mode/).
+[lsp-mode](https://emacs-lsp.github.io/lsp-mode/). It is for those who
+write dbt models in Emacs, whichever dbt they have: much of it reads the
+project's files and needs no dbt at all. It is pre-release, tested with
+`dbt-oss` 2.0.11 and the proprietary 2.0.9.
 
 `dbt-mode` is `sql-mode` that also reads Jinja. A `.sql` file below a
 `dbt_project.yml` opens in it, unless it lies under the project's
@@ -11,339 +21,12 @@ lineage, and, with dbt 2's proprietary build, its language server through
 It keeps the keys of `sql-mode`, but for `C-M-a` and `C-M-e`, which move by
 CTE rather than by statement.
 
-## What it does
+![dbt-mode: SQL and Jinja of dbt projects, in Emacs. An Emacs frame shows a model's CTEs, its mode line, and the lineage of the model below it.](./docs/social-media-preview.png)
 
-Without any dbt executable, dbt-mode reads the project's files:
-
-- Jinja's `{# #}` comments are comments, apostrophes included, and the tags
-  `{{ }}` and `{% %}` show their delimiters, keywords, dbt's functions,
-  packages and macro calls, over several lines too; a string inside a tag
-  is a string, so the apostrophe of `"doesn't"` opens nothing;
-- `M-.` on `ref('…')`, `source('…', '…')`, `doc('…')` or a macro call,
-  `dbt_utils.star(…)` included, goes to its definition, and on
-  `ref('m', v=2)` to that version, and on a name that its package lacks
-  says which packages define it; it resolves each as dbt 2.0.11 does:
-  - a `ref` or a `source` in the calling file's package first (in a
-    macro, the macro's, as dbt-mode cannot know the node that calls it),
-    or in the project first when its `dbt_project.yml` sets the flag
-    `require_ref_searches_node_package_before_root: false`, and a YAML
-    entry in its own package;
-  - a `ref` without `v=` to the latest version of each package's model,
-    its `latest_version` or else its highest;
-  - a `doc` in the project, else in the packages by the order of their
-    names, whatever package calls it;
-
-  where the project and a package define the same name, `M-.` goes
-  straight to the project's definition when dbt takes that one; when
-  dbt takes a package's, it lists it first, then its namesakes, as dbt
-  skips a package's model that the project disables to override it,
-  which dbt-mode does not read, and a call in a macro resolves from the
-  node that calls the macro; a macro call, and `C-c C-f`, list every
-  definition; a macro of the project that a package's node calls, as
-  through dispatch, which dbt resolves from that package, still goes to
-  the project's; a `ref` or a `source` that neither the calling
-  package nor the project defines and two packages or more do, which
-  dbt rejects as ambiguous, lists them, each saying so, and `C-c C-e`
-  asks whose such a name to call;
-- `M-?` lists the calls that resolve to the same definition, so a
-  package's model and the project's namesake stay apart, and the YAML
-  entries of a model;
-- with [consult](https://github.com/minad/consult), `M-x
-  dbt-consult-resource` reads a resource of the project or of its
-  packages, as `C-c C-f` names them, grouped by kind, each with its
-  package and file, and previews the current one at its definition;
-  with [embark](https://github.com/oantolin/embark), `embark-act` acts
-  on the call or the YAML entry at point, and on the candidates of that
-  command and of `C-c C-f`: `RET` goes where `M-.` would, `d` lists every
-  definition, `y` visits the YAML entry of a model, seed or snapshot, `b`
-  builds it, `r` runs a model, `t` tests it, `l` shows its lineage and
-  `w` copies its relation, each where `M-.` would go, and refusing a
-  resource it does not fit, such as a macro to build; embark's general
-  actions stay, but for `w`, its copy of the target (see Installation);
-- completion of the arguments of `ref`, `source` and `doc`, and of macros in
-  a tag;
-- `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
-- the lineage of a model, from its `ref` and `source` calls.
-
-Writing and moving:
-
-- typing `{` then `{`, `%` or `#` gives `{{ | }}`, `{% | %}` or `{# | #}`,
-  point in the middle, when only blanks, a closing bracket or a comma
-  follow, with or without `electric-pair-mode`. A `-` or `+` typed next
-  sticks to the opener, `{%- | %}`; a tag typed in full out of habit, its
-  spaces and its closer included, comes out as typed, but for a space too
-  many before the closer with `electric-pair-mode`; `DEL` deletes an empty
-  pair.
-  `dbt-edit-pair-jinja` turns all of it off;
-- `C-c /` closes the innermost open Jinja block, `{% endif %}` and the like,
-  and `C-c %` moves between a block's opening and closing tags;
-- `TAB` and `C-M-\` indent by what holds a line: a parenthesis or a Jinja
-  block puts its contents one step, `dbt-indent-offset`, in from its line,
-  and `)`, `{% endif %}` or `{% else %}` back at that line, as soon as they
-  are typed; clauses sit at the level, the lines of a clause one step in,
-  as in dbt Labs' style guide; a Jinja tag sits at the level of what it
-  leads to, a clause or a column; a comment line sits as the code after
-  it; a line that starts in a string or a comment stays put, and dbt-mode
-  indents with spaces;
-- CTEs are the defuns of a model: `C-M-a`, `C-M-e`, `C-M-h` and `C-x n d`
-  work on them; with [expreg](https://elpa.gnu.org/packages/expreg.html),
-  `expreg-expand` also selects the Jinja tag and its contents, the block and
-  the CTE around point, once `dbt-edit-expreg-regions` is in
-  `expreg-functions` (see Installation);
-- `dbt-breadcrumb-mode`, off by default, says in the header line where
-  point is, once Emacs is idle: the directories from the project's root,
-  the file, then the CTEs and the Jinja blocks that hold point, as
-  `models > marts > orders.sql > final > if is_incremental()`. A macro,
-  test, snapshot, materialization, docs or `set` block shows the name it
-  defines, an `if`, `for` or `call` block its statement, as dbt-lsp-plus
-  names them (the `if`, `for` and `call` blocks once its outline has
-  them). When lsp-mode's breadcrumbs show the document symbols that the
-  server announces, as the proxy does, they replace the mode's line; with
-  dbt lsp alone, which announces none, lsp-mode's breadcrumbs name the
-  file and the mode adds the CTEs and blocks after it.
-  `(add-hook 'dbt-mode-hook #'dbt-breadcrumb-mode)` turns it on in every
-  model;
-- `C-c C-a` writes a new staging model from a source table, as dbt Labs'
-  style guide lays it out with its YAML entry, a model, an incremental
-  model, a macro, a snapshot defined in YAML, the YAML entry of the current
-  model, seed, snapshot or analysis, or a unit test of the model, named
-  `test_MODEL` by default, with an input for each model and source it
-  reads. An entry joins its list as the file writes its items, and a name
-  that the list has already is refused.
-
-Rows and compiled SQL:
-
-- `C-c C-p` shows the rows of the model, of the region, or, with `C-u`, of
-  the CTE around point, in one grid, whether dbt lsp or `dbt show` runs the
-  query: each row on one line, `NULL` in its own face, a column of numbers
-  sorted as numbers. `/` keeps the rows with a cell that matches a regexp
-  (with `C-u`, in one column), `w` copies the rows shown as CSV, Markdown
-  or Org, `+` asks again with twice the limit, or a numeric prefix's, as
-  dbt has no offset, `g` asks again, and `RET` shows a cell's whole value,
-  in a buffer of its own when it is long or holds a newline. The grid of a
-  CTE or a region is named after its file, as `*dbt rows: orders/final*`.
-  Two columns of one name, as a join gives, show apart, the second renamed
-  `id_1` as dbt lsp does. Without a server, a number shows as JSON reads
-  it: `12.30` as `12.3`. Asked again, a CTE is taken from the model as it
-  is now;
-- `C-c C-v` shows the compiled SQL beside the model and keeps it there:
-  point's line in it faces point's line in the model, CTE by CTE, and
-  saving compiles it again with dbt lsp; without a server, it is read again
-  when dbt writes it. `dbt-compiled-diff` shows how it differs from the
-  compiled SQL of another state, such as that of `dbt compile --target-path
-  STATE` on main, or production's artifacts;
-- `dbt-data-diff` compares the rows of the model, as last built on the
-  default target, with those of its relation in another state, such as
-  production's artifacts: one query on the default target gives the rows
-  that each side lacks, `{{ dbt.except() }}` as dbt writes it for the
-  adapter, in a first column `dbt_diff` naming the side, in the grid of the
-  rows. The columns are the model's, by name, in any order on the other
-  side, which must have them all and be readable from the same connection;
-- in Org, `C-c C-c` on a `#+begin_src dbt` block gives its rows as a table,
-  or its compiled SQL with `:compile yes`; `:limit`, `:target`, `:var`,
-  passed as dbt's `--vars`, and Babel's `:dir` apply; each cell is on one
-  line of the table. A block on a target of `dbt-protected-targets`, `prod`
-  by default, asks first: the target is `:target`, else `DBT_TARGET`, else
-  the profile's default, read from a call of `env_var` as dbt reads it. A
-  default that dbt-mode cannot read, such as other Jinja, asks too while a
-  target is protected. The data diff and the dashboard's freshness ask as
-  a block does.
-
-`C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
-snapshot or source table that the `ref` or `source` at point names, or
-the YAML entry, else of the current resource: its description, its file
-and its YAML entry, its relation, owner, materialization and its
-settings, tags, group, access, contract, version, whether it is
-disabled, its columns, its tests, what it depends on and what uses it.
-With dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
-summary that its hover shows; otherwise from `target/manifest.json`,
-saying when dbt wrote it, its tests left to the proxy and to `C-c C-t`.
-What uses the node comes from dbt-mode's index, as for the lineage.
-`RET` visits a file or a node, `TAB` folds a section, `g` shows the node
-again. Without a server, eldoc on a `ref` or a `source` says the
-materialization and the relation of what it names, in a model as in
-YAML, once dbt-mode holds the project's manifest as dbt last wrote it:
-after `C-c C-o`, `C-c C-w` or the dashboard in this session, or once the
-mode line of a model that sets no materialization of its own read it.
-eldoc never reads a manifest.
-
-The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
-the project from the artifacts of your own runs, which it never writes, and
-which dbt-mode's previews, diffs and formats leave as they are: the nodes
-that errored, failed, warned or were skipped in `target/run_results.json`,
-the most severe first, with dbt's message to its cause and a test's
-failing rows, the ten slowest nodes, and the sources that
-`target/sources.json` says are stale or, with dbt Core 1.x, could not be
-checked, each section saying which command wrote its file, how many
-results it holds and how long ago. dbt 2 leaves out of
-`target/sources.json` a check that could not run, such as one of a
-missing table, and writes `"results": []` when none could: the last line
-of the section of stale sources says to look at dbt's output, after `f`
-its buffer, or at its log, `logs/dbt.log` unless `DBT_LOG_PATH` or
-`--log-path` moves it. `RET` visits a node's file, `TAB` folds a section,
-`n` and `p` move by line, `g` reads the files again, and `f` runs `dbt
-source freshness`, then reads them again once it ends.
-
-The index knows versioned models, snapshots defined in YAML, flow-style
-YAML, packages under `packages-install-path` and local packages, and leaves
-`{# #}` comments out. A project nested in another, such as a package's
-`integration_tests`, is its own project; a package that a project installs
-or declares belongs to that project. Saving re-reads only the files that
-changed.
-
-With dbt 2's proprietary build (`dbt lsp`), `dbt-lsp-deferred` starts the
-server through lsp-mode, which then gives the following; with `dbt-oss`
-it starts dbt-lsp-plus alone when `dbt-lsp-proxy` is on and dbt-lsp-plus
-is installed (below), and otherwise nothing, and `M-x dbt-lsp` says why:
-
-- definitions of what dbt-mode does not resolve, such as dbt's own macros:
-  on a `ref`, a source, a doc or a macro of the project or its packages,
-  `M-.` and `M-?` stay dbt-mode's, as dbt lsp 2.0.9 lists the uses in the
-  current file only, ignores a `ref`'s version and resolves no `doc`;
-- hover with a model's description, parents, children and columns;
-- completion of models, macros and SQL functions;
-- diagnostics as you type, such as a `ref` to a model that does not exist;
-- semantic tokens, and a "Preview CTE" code lens above each CTE;
-- renaming a model, whether by `dbt-lsp-rename-model`, Dired or
-  `rename-visited-file`, renames its `ref` calls in models and its YAML
-  entry; dbt lsp 2.0.9 leaves those of analyses and YAML tests, which
-  `dbt-lsp-rename-model` then lists. A version of a model is not renamed;
-- the compiled SQL, the rows of a model, a region or a CTE, and the lineage
-  as the server computes it. The server compiles and previews the file on
-  disk, so these commands save the buffer first.
-
-Column-level features (column lineage, column definitions and renames)
-need a dbt account: without one, the server says nothing about columns.
-
-With dbt-lsp-plus (`dbt-lsp-proxy`), the results of the last run, whoever
-ran it, are diagnostics too: once `b` in `dbt-dispatch` has built, each
-model that errored and each test that failed or warned shows where it is
-written, a generic test at its YAML entry, through flymake or flycheck,
-as `lsp-diagnostics-provider` says.
-
-dbt writes `logs` and `target` in the project at each run, and dbt lsp at
-each compilation, while dbt lsp asks lsp-mode to watch every file:
-without more, each run sends the server about a hundred events, and has a
-dbt-lsp-plus older than its plan 025 read the project again at each.
-Once dbt-lsp.el is loaded, dbt-mode keeps lsp-mode's file watchers out
-of `logs`, `target` and the `target-path` of `dbt_project.yml`, for any
-server that lsp-mode then starts on a dbt project, by a regexp of their
-true names that it adds to the global value of
-`lsp-file-watch-ignored-directories` for this Emacs session. Customize
-then shows the option as changed outside it, and saving it there would
-keep the regexps. A watch that another server made on the project's
-folder before dbt-lsp.el was loaded keeps watching them, until every
-server on that folder stops; a `.dir-locals.el` at the workspace's root
-that sets the option for every mode replaces the whole list, these
-regexps included; a `DBT_TARGET_PATH` or `DBT_LOG_PATH` elsewhere in
-the project is still watched.
-
-With `dbt-oss` and `dbt-lsp-proxy` on, dbt-lsp-plus runs alone, without
-`dbt lsp`, from the files and from its own `dbt parse`, run offline. It
-answers `M-.` and `M-?` on sources, the lineage of `C-c C-g` from its
-call hierarchy, `C-c C-o`, the document symbols of the breadcrumbs, and,
-once it has parsed, hover, inlay hints, the parse's problems and the
-last run's results as diagnostics. The rest stays dbt-mode's, as
-without a server: `C-c C-p` and the data diff ask `dbt show`, `C-c C-v`
-reads what `dbt compile` wrote, `M-.` and `M-?` answer the rest, `C-c
-C-o` reads the manifest while the proxy has not parsed, and eldoc reads
-it always; `dbt-oss` cannot format, and renaming a model or fixing lint
-issues needs `dbt lsp`. Alone, the proxy keeps of `dbt-lsp-arguments`
-only the profiles directory, profile, target, vars and packages' path,
-`dbt-lsp-enable-linter` does nothing, and the mode line says nothing
-while it parses. dbt Core 1.x, which refuses `dbt lsp` otherwise than
-dbt 2 does, gets no server.
-
-## Keys
-
-| Key           | Command                | What it does                                                     |
-|---------------|------------------------|------------------------------------------------------------------|
-| `C-c C-d`     | `dbt-dispatch`         | Run a dbt command, by default on the current model               |
-| `C-c C-v`     | `dbt-visit-compiled`   | The compiled SQL beside the model, facing point; with `C-u`, the SQL of the last run (`dbt-visit-run`) |
-| `C-c C-p`     | `dbt-preview`          | The rows of the model, or of the region; with `C-u`, of the CTE  |
-| `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
-| `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
-| `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, analysis, macro, docs block or source |
-| `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion, as dbt resolves it here    |
-| `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
-| `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
-| `C-c C-o`     | `dbt-describe`         | What dbt knows of the node at point, a `ref` or a `source`, else of the model |
-| `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s` of what point is on, a `ref` or a `source`, else the model; with `C-u`, `+…+` |
-| `C-c C-a`     | `dbt-new`              | Write a new model, macro, snapshot, YAML entry or unit test      |
-| `C-c /`       | `dbt-close-block`      | Close the innermost open Jinja block                             |
-| `C-c %`       | `dbt-jump-to-matching-tag` | Move between a block's opening and closing tags              |
-| `C-c C-q`     | `dbt-format-buffer`    | Save, then format: with dbt lsp by the server, else by `dbt format` |
-| `M-.`, `M-?`  | `xref`                 | Definition and uses of what point is on                          |
-
-`dbt-dispatch` runs `build`, `run`, `test`, `seed`, `snapshot`, `compile`,
-`show`, `list`, `lint`, `format`, `parse`, `deps`, `debug`, `retry` and
-`docs generate` in a compilation buffer whose errors link to their files;
-with a dbt that cannot format, such as `dbt-oss`, it greys out `lint` and
-`format`, which only dbt 2's proprietary build runs. Its selection
-defaults to what point is on, a `ref` or a `source` as dbt
-selects it (`orders.v2`, `source:raw.orders`), else the current model, else
-the file by path (`path:tests/assert_positive_amount.sql`) for a file that
-holds no model, such as a singular test or a properties file; two switches
-add its upstream (`+model`) or its downstream (`model+`), and "Changed on the
-branch" selects instead, by path, each SQL, Python, YAML or CSV file that git
-sees changed since the merge base with the default branch (`origin/HEAD`,
-else `main`), uncommitted, unsaved and new ones included: dbt selects what a
-file defines, and what a properties file describes and tests; a macro, by
-path, selects nothing, which `state:modified` with `--state` covers. Each command
-gets only the options dbt takes for it: `--full-refresh` goes to `build`,
-`run`, `compile` and `seed`, the limit to `build`, `run`, `test`, `compile`,
-`show` and `list`, `--defer`, `--state` and `--vars` to all but `docs
-generate`. `.` runs the project's last dbt command again, which the menu
-shows, and transient's
-`C-M-p` and `C-M-n` recall earlier options. dbt runs without colours or
-progress bars, whatever `TERM` Emacs passes on, and the project's modified
-buffers are offered for saving first, as `compile` does.
-
-The mode line shows the target that dbt runs on and the model's
-materialization, from its `config()` call or else the manifest of your
-runs, and `compiling` while dbt lsp compiles.  It is computed when the
-buffer opens and at each save, and reads the manifest only for a model
-without `config()`.
-
-The lineage is a tree, upstream above and downstream below: each node shows
-once, under the node through which it is nearest. `TAB` folds a node, `+`
-and `-` show one level more or less, point staying on its node, `m` shows
-or hides the macros, `e` writes the graph within that depth as Graphviz
-dot, each node named by its unique id, and an SVG beside it when `dot` is
-installed, rendered while you go on, and `RET` visits a node's file. With
-dbt-lsp-plus, the lineage comes from its call hierarchy, one level at a
-time: it opens two levels deep, `+` asks the next level, and a level of
-more nodes than `dbt-lineage-level-limit` is the last asked in its
-direction, as the header line says; the macros, which only it gives, are
-hidden at first; a node of which it has no item, such as a snapshot defined
-in YAML, has its lineage from dbt lsp's list of nodes; a call that fails is
-said in a message, the rest of its level shown, and `g` asks again. With
-dbt lsp alone, the lineage comes whole from the server's list of nodes, and
-without a server from the project's files. lsp-mode's own view of the call
-hierarchy, `lsp-treemacs-call-hierarchy` when lsp-treemacs is installed,
-needs nothing of dbt-mode. In the lineage and the rows, `g` asks again:
-with dbt-lsp-plus to the depth shown, two levels at least, and without a
-server the lineage reads the project again.
-The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
-JSON `false` as null, so it shows as `NULL` with dbt lsp.
-
-## Installation
+## Install
 
 dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one
-dbt you have. `dbt-oss`, the open-source build of dbt 2, runs all but the
-language server, the formatter and the linter: `dbt lsp` and `dbt format`
-come with dbt 2's proprietary build only, and `dbt lint` runs only there,
-which `dbt system upgrade-distribution` turns `dbt-oss` into; dbt Core
-1.x has none of the three. dbt-mode asks dbt once whether it has the
-server and the formatter, asks again once dbt is replaced, and does
-without. A dbt that does not answer within ten seconds whether it runs
-a command is taken as lacking that one, as a message says, without
-being asked at each save again; the dispatch menu says that it did not
-answer, and `C-c C-q` and `M-x dbt-lsp`, which you run and may wait for,
-ask it again. It was tested with `dbt-oss` 2.0.11 and the proprietary
-2.0.9.
-
-With [straight.el](https://github.com/radian-software/straight.el) and
+dbt you have. With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:
 
 ```elisp
@@ -353,118 +36,34 @@ With [straight.el](https://github.com/radian-software/straight.el) and
          ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe)))
 ```
 
-With expreg, the regions of dbt-mode join its own:
+[Your first project](docs/tutorials/first-project.md) walks through it
+from a clone, with nothing installed, and [Install](docs/how-to/install.md)
+gives the rest: expreg, embark and consult, the server, dbt-lsp-plus.
 
-```elisp
-(use-package expreg
-  :config
-  ;; expreg-functions is local to each buffer once set: change its default.
-  (setq-default expreg-functions
-                (cons #'dbt-edit-expreg-regions
-                      (remq #'dbt-edit-expreg-regions (default-value 'expreg-functions)))))
-```
+## Documentation
 
-With embark, its actions on a dbt resource join its own; `M-x
-dbt-consult-resource` needs consult alone, and can take the place of
-`C-c C-f`:
+**Tutorial**
 
-```elisp
-(with-eval-after-load 'embark
-  (require 'dbt-embark)
-  (add-to-list 'embark-target-finders #'dbt-embark-target)
-  (add-to-list 'embark-keymap-alist
-               '(dbt-identifier dbt-embark-identifier-map embark-general-map)))
-(keymap-set dbt-mode-map "<remap> <dbt-find-resource>" #'dbt-consult-resource)
-```
+- [Your first project](docs/tutorials/first-project.md): from a clone to the rows of a model.
 
-`dbt-lsp-deferred` makes the root of the dbt project a folder of the lsp
-session before it starts the server, so that the server runs on the
-project, not on an enclosing repository, and each dbt project of a
-repository gets its own server, whatever `lsp-auto-guess-root` says. It
-adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
-it asks once, within ten seconds, and again once dbt is replaced;
-`M-x dbt-lsp` asks again a dbt that did not answer in time.
-`dbt-properties-mode-maybe` turns on `M-.`, `M-?` and completion in the
-YAML files of a dbt project.
+**How-to guides**
 
-## Options
+- [Install](docs/how-to/install.md): which dbt does what, and dbt-mode with expreg, embark, consult and dbt-lsp-plus.
+- [Format and fix](docs/how-to/format-and-fix.md): with the server or `dbt format`, on save or by hand.
+- [Run the tests](docs/how-to/run-the-tests.md): offline, or against a real dbt.
 
-| Option                         | Default | Meaning                                                         |
-|--------------------------------|---------|-----------------------------------------------------------------|
-| `dbt-executable`               | `"dbt"` | The dbt executable                                              |
-| `dbt-lsp-arguments`            | `nil`   | More arguments of `dbt lsp`, such as `("--profiles-dir" "dir")` |
-| `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
-| `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; a request on a source that it lists goes to it |
-| `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
-| `dbt-lineage-level-limit`      | `500`   | The most nodes of a level of the lineage asked of dbt-lsp-plus  |
-| `dbt-indent-offset`            | `4`     | The columns by which a parenthesis or a Jinja block indents     |
-| `dbt-protected-targets`        | `("prod")` | The targets on which an Org block, the data diff and the dashboard's freshness ask first; an unread default asks too |
-| `dbt-project-index-lifetime`   | `30`    | Seconds before the project's files are read again               |
-| `dbt-mode-jinja-max-tag-length`| `4000`  | The longest Jinja tag that font lock looks across               |
+**Reference**
 
-lsp-mode's own options apply: `lsp-lens-enable` shows the "Preview CTE"
-lenses, `lsp-semantic-tokens-enable` the server's semantic tokens,
-`lsp-headerline-breadcrumb-enable` its breadcrumbs, whose segments
-`lsp-headerline-breadcrumb-segments` chooses.
+- [Keys](docs/reference/keys.md): every key, `dbt-dispatch`, the mode line, the lineage and the rows.
+- [Commands](docs/reference/commands.md): writing and moving, rows and compiled SQL, a node, the dashboard.
+- [Options](docs/reference/options.md): every option, with its default.
+- [Limitations](docs/reference/limitations.md): what dbt-mode does not do.
+- [The release pipeline](docs/reference/release-pipeline.md): the two workflows, what a release writes, how to raise a version by hand.
 
-## Formatting and fixes
+**Explanation**
 
-`dbt lsp` 2.0.9 formats the file on disk rather than the buffer, and so does
-its linter's fix-all code action: their edits would corrupt unsaved changes.
-dbt-mode hides both from lsp-mode. `dbt-lsp-format-buffer` saves the buffer
-first, then formats it; `dbt-lsp-fix-all` saves, then fixes and formats,
-whether or not `dbt-lsp-enable-linter` is on; `dbt-dispatch` runs `dbt
-format` and `dbt lint`. lsp-mode's `lsp-format-buffer-on-save` and
-`lsp-fix-all-on-save` are turned off in the buffers of dbt lsp, where they
-could only fail.
-
-`C-c C-q`, `dbt-format-buffer`, saves the buffer, then formats it while you
-go on: with dbt lsp by the server, whose edits leave the buffer modified;
-without one by `dbt format FILE`, which formats the saved file, the buffer
-then showing the result. Text you type meanwhile wins, unformatted, which
-a message says, and the next save asks nothing. A save waits for a
-format that runs, so that an older one never writes over it, and stops
-it after `dbt-cli-format-deadline`, 30 seconds. dbt may format the file
-and still fail on another file of the project: the buffer shows the
-file, and dbt's error, which names the file it is about, is the message. `dbt-format-on-save-mode`, a minor mode to turn on from
-`dbt-mode-hook`, formats after each save, and with dbt lsp saves again
-when that changed the buffer; a failure to format is a message, and the
-save stands. A dbt with neither a server nor `dbt format`, such as
-`dbt-oss`, cannot format: `C-c C-q` saves, then says so, and
-`dbt-format-on-save-mode` leaves saves as they are, which it says once
-for each dbt.
-
-`dbt-lsp-rename-model` refuses a name that another model, seed or snapshot
-of the package already has.
-
-## Limitations
-
-- Indentation knows parentheses, Jinja blocks and the clauses of SQL, not
-  the whole grammar: a `case`, its `when`s and its `end` sit at one column,
-  one step in from their clause.  A Jinja tag typed at the end of the
-  buffer, before what it leads to, sits at the clauses' level until
-  `C-M-\` places it.  A new line inside a block comment starts at the
-  first column.
-- The server gives the YAML files nothing in dbt 2.0.9; dbt-mode's own
-  navigation and completion work there.
-- Without a server, previewing a CTE runs its Jinja as an inline query, with
-  all that comes before its WITH, so a CTE that uses a model's context, such
-  as `is_incremental()`, needs the server, which previews the compiled SQL.
-- `dbt-compiled-diff` compares with a state's manifest, not with another
-  git revision: dbt compiles the project on disk.
-- Only lsp-mode is supported, not Eglot.
-
-## Tests
-
-`make check` in `nix develop` runs the lints and the tests; the lsp client
-is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
-`DBT_MODE_TEST_DBT` naming a dbt 2 executable, the tests also run the real
-dbt on the fixture project, `tests/fixtures/shop`, and, when it is the
-proprietary build, its `dbt lsp` through lsp-mode. `DBT_MODE_TEST_DBT_CACHE`,
-naming a cache of dbt's database drivers such as `~/.cache/com.getdbt`, is
-copied into the scratch home, so that dbt downloads no driver. The tests
-of `dbt-consult-resource` and of embark's actions use the consult and
-embark of the development shell.
+- [How dbt-mode reads a project without dbt](docs/explanation/reading-a-project.md): navigation, completion and the index, as dbt resolves them.
+- [What the server does](docs/explanation/the-server.md): `dbt lsp`, dbt-lsp-plus, and what dbt-mode relies on.
 
 ## Licence
 
