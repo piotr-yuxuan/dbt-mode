@@ -52,19 +52,23 @@
 (require 'map)
 
 (defcustom dbt-lsp-arguments nil
-  "More arguments of `dbt lsp', such as (\"--profiles-dir\" \"/path\")."
+  "More arguments of `dbt lsp', such as (\"--profiles-dir\" \"/path\").
+dbt-lsp-plus alone, for dbt-oss, keeps only the profiles directory,
+profile, target, vars and packages' path, for its `dbt parse'."
   :type '(repeat string)
   :group 'dbt)
 
 (defcustom dbt-lsp-proxy nil
   "Whether dbt lsp runs through dbt-lsp-plus, when that executable exists.
 dbt-lsp-plus adds what dbt lsp lacks, such as the references of sources
-over the project; dbt-mode steps aside where it says that it answers."
+over the project; dbt-mode steps aside where it says that it answers.
+For dbt-oss, which runs no dbt lsp, dbt-lsp-plus then runs alone."
   :type 'boolean
   :group 'dbt)
 
 (defcustom dbt-lsp-enable-linter nil
-  "Whether the server lints the SQL, with dbt's built-in linter."
+  "Whether the server lints the SQL, with dbt's built-in linter.
+dbt lsp lints; dbt-lsp-plus alone does not."
   :type 'boolean
   :group 'dbt)
 
