@@ -15,6 +15,9 @@
 (require 'dbt-mode)
 (require 'ert-x)
 
+(defvar dbt-test-own-header-line "Mine:"
+  "A header line that another mode shows, by a symbol.")
+
 (defun dbt-test-idle (seconds)
   "Run the idle timers that Emacs runs once idle for SECONDS.
 `ert-run-idle-timers' runs them all, whatever their delay."
@@ -152,9 +155,9 @@ comment are none."
       (should (equal (dbt-test-mode-line header-line-format) " models > marts > fct_orders.sql > orders")))))
 
 (ert-deftest dbt-breadcrumb-keeps-the-header-line-of-others ()
-  "A header line of one construct, such as (:eval FORM), keeps it and shows the breadcrumbs after it.
-Turned off, the mode leaves a header line of another mode, even one
-that is a symbol, as it is."
+  "A header line of one construct, (:eval FORM) or a symbol, keeps it and shows the breadcrumbs after it.
+Turned off, the mode shows that construct again, and leaves a header
+line set meanwhile to a symbol as it is."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
@@ -164,10 +167,15 @@ that is a symbol, as it is."
       (should (equal (dbt-test-mode-line header-line-format) "Mine: models > marts > orders.sql > orders"))
       (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
       (should (equal (dbt-test-mode-line header-line-format) "Mine:"))
+      (setq-local header-line-format 'dbt-test-own-header-line)
       (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
-      (setq-local header-line-format 'mode-line-buffer-identification)
+      (should (equal (dbt-test-mode-line header-line-format) "Mine: models > marts > orders.sql > orders"))
       (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
-      (should (eq header-line-format 'mode-line-buffer-identification)))))
+      (should (equal (dbt-test-mode-line header-line-format) "Mine:"))
+      (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+      (setq-local header-line-format 'dbt-test-own-header-line)
+      (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+      (should (eq header-line-format 'dbt-test-own-header-line)))))
 
 (ert-deftest dbt-breadcrumb-leaves-a-killed-buffer-alone ()
   "A buffer killed before Emacs is idle leaves its update nothing to do, and no error.

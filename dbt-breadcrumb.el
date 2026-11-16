@@ -126,12 +126,13 @@ announces none, this mode adds the CTEs and blocks after them."
       (progn
         ;; After lsp-mode's breadcrumbs, which it puts first.  A list whose
         ;; car is a string or a list holds constructs; any other value,
-        ;; such as (:eval FORM), is one.
+        ;; such as (:eval FORM) or a symbol, is one, which a list led by ""
+        ;; holds, as (SYMBOL CONSTRUCT) would be a conditional.
         (setq header-line-format
               (append (if (and (consp header-line-format)
                                (or (stringp (car header-line-format)) (consp (car header-line-format))))
                           (remove dbt-breadcrumb--construct header-line-format)
-                        (and header-line-format (list header-line-format)))
+                        (and header-line-format (list "" header-line-format)))
                       (list dbt-breadcrumb--construct)))
         (add-hook 'post-command-hook #'dbt-breadcrumb--schedule nil t)
         (dbt-breadcrumb--update (current-buffer)))
