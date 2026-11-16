@@ -187,7 +187,9 @@ runs one is asked again."
   (when (eq (dbt-project-command-answer "lsp") 'timeout)
     (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
   (unless (dbt-lsp-server-p)
-    (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss"))
+    (user-error (if (and dbt-lsp-proxy (eq (dbt-project-command-answer "lsp") 'lacks))
+                    "No dbt-lsp-plus on exec-path, which runs alone for this dbt"
+                  "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")))
   (dbt-lsp-add-project-folder)
   (lsp))
 

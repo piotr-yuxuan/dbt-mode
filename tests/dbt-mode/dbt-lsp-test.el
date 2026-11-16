@@ -243,17 +243,19 @@ lsp."
 (ert-deftest dbt-lsp-starts-nothing-with-a-dbt-without-a-server ()
   "With a dbt that runs no dbt lsp, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why.
 That is dbt-oss without dbt-lsp-plus, or with `dbt-lsp-proxy' on but no
-dbt-lsp-plus to run; a dbt Core 1.x, which refuses dbt lsp otherwise
-than dbt 2 does, even with dbt-lsp-plus; and no dbt at all."
+dbt-lsp-plus to run, which the message names; a dbt Core 1.x, which
+refuses dbt lsp otherwise than dbt 2 does, even with dbt-lsp-plus; and
+no dbt at all."
   (dbt-test-with-project root
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
-      (let ((message "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")
-            (proxy (file-name-directory dbt-lsp-test-dbt)))
+      (let* ((message "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")
+             (proxy (file-name-directory dbt-lsp-test-dbt)))
         ;; No dbt-lsp-plus on an `exec-path' of Emacs's own programs only.
-        (dolist (case `((,(dbt-lsp-test-oss-script) nil ,(cons proxy exec-path))
-                        (,(dbt-lsp-test-oss-script) t ,(list exec-directory))
-                        ("echo \"Error: No such command 'lsp'.\" >&2; exit 2" t ,(cons proxy exec-path))))
+        (dolist (case `((,(dbt-lsp-test-oss-script) nil ,(cons proxy exec-path) ,message)
+                        (,(dbt-lsp-test-oss-script) t ,(list exec-directory)
+                         "No dbt-lsp-plus on exec-path, which runs alone for this dbt")
+                        ("echo \"Error: No such command 'lsp'.\" >&2; exit 2" t ,(cons proxy exec-path) ,message)))
           (dbt-lsp-test-with-dbt dbt (nth 0 case)
             (let ((dbt-executable dbt)
                   (dbt-lsp-proxy (nth 1 case))
@@ -261,7 +263,7 @@ than dbt 2 does, even with dbt-lsp-plus; and no dbt at all."
               (dbt-lsp-deferred)
               (should-not (bound-and-true-p lsp--buffer-deferred))
               (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
-                             message))
+                             (nth 3 case)))
               (should-not (dbt-lsp-workspace)))))
         (let ((dbt-executable "no-such-dbt")
               (dbt-lsp-proxy t)
