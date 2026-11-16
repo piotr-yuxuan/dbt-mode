@@ -12,7 +12,9 @@ data.uniqueId is ID: a request without an answer there gets null.  After
 those that the key "$notifications" of the answers lists.  The key
 "$experimental" gives its capabilities an experimental object, the key
 "$capabilities" adds capabilities, as dbt-lsp-plus adds
-callHierarchyProvider, the key "$commands" adds commands to those it lists,
+callHierarchyProvider, the key "$requests" lists the requests, each a
+method and its params, that it sends after `initialized`, as dbt lsp asks
+for a file watcher, the key "$commands" adds commands to those it lists,
 as dbt-lsp-plus adds its own, the key "$errors" maps a key of the answers
 to the error that answers it instead, and the key "$delays" maps a method
 to the seconds it waits before it answers it.
@@ -142,6 +144,8 @@ def main() -> None:
             if method == "initialized":
                 for notification in answers.get("$notifications", NOTIFICATIONS):
                     write_message({"method": notification, "params": {}})
+                for number, request in enumerate(answers.get("$requests", [])):
+                    write_message({"id": f"fake-{number}", **request})
 
 
 if __name__ == "__main__":

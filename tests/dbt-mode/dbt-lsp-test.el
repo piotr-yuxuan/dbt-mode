@@ -26,6 +26,9 @@
 (defvar dbt-lsp-test-log nil
   "The log of the scripted server of the running test.")
 
+(defvar dbt-lsp-test-watch-files nil
+  "Whether lsp-mode watches files in `dbt-lsp-test-with-server', which it does not by default.")
+
 (defvar dbt-lsp-test-messages-start nil
   "Where the messages of the running test start in the *Messages* buffer.")
 
@@ -47,7 +50,7 @@ writes it.  The buffers of rows and lineage are killed afterwards."
               (dbt-executable dbt-lsp-test-dbt)
               (lsp--session nil)
               (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
-              (lsp-enable-file-watchers nil)
+              (lsp-enable-file-watchers dbt-lsp-test-watch-files)
               (lsp-restart 'ignore)
               (lsp-keep-workspace-alive nil)
               (lsp-auto-guess-root nil)
@@ -1323,6 +1326,80 @@ symbols name it, and nothing follows it."
         (ert-run-idle-timers)
         (should (equal (dbt-test-mode-line header-line-format)
                        " models > marts > orders.sql > final > if is_incremental()"))))))
+
+(defconst dbt-lsp-test-watcher
+  '("$requests" . [((method . "client/registerCapability")
+                    (params (registrations . [((id . "watch") (method . "workspace/didChangeWatchedFiles")
+                                               (registerOptions (watchers . [((globPattern . "**/*"))])))])))])
+  "The answer that has the scripted server ask for a watcher of every file.
+dbt lsp 2.0.9 asks for it right after `initialized'.")
+
+(ert-deftest dbt-lsp-keeps-the-watchers-out-of-dbt-outputs ()
+  "lsp-mode's file watchers, which dbt lsp asks for, report a model's change but nothing under the project's logs or target.
+dbt writes there at each run and dbt lsp at each compilation: at each
+event, dbt-lsp-plus would list the graph again, and dbt lsp compile.
+The user's own entries of the option stay, and the directories logs and
+target elsewhere are watched as before."
+  (let ((dbt-lsp-test-watch-files t)
+        (lsp-file-watch-ignored-directories (list "[/\\\\]\\.git\\'")))
+    (dbt-lsp-test-with-server root (list dbt-lsp-test-watcher)
+      (dbt-test-wait (lambda () (lsp--registered-capability "workspace/didChangeWatchedFiles")))
+      (dolist (file '("logs/dbt.log" "target/run_results.json" "models/marts/new_model.sql"))
+        (make-directory (file-name-directory (expand-file-name file root)) t)
+        (write-region "select 1\n" nil (expand-file-name file root)))
+      (let ((changed (lambda ()
+                       (mapcan (lambda (message)
+                                 (and (equal (plist-get message :method) "workspace/didChangeWatchedFiles")
+                                      (mapcar (lambda (change) (plist-get change :uri))
+                                              (plist-get (plist-get message :params) :changes))))
+                               (dbt-lsp-test-received)))))
+        ;; In batch, Emacs reads file notifications only as events.
+        (dbt-test-wait (lambda () (or (seq-find (lambda (uri) (string-suffix-p "/models/marts/new_model.sql" uri))
+                                                (funcall changed))
+                                      (ignore (read-event nil nil 0.1)))))
+        ;; The events of logs and target come first, if any come.
+        (dotimes (_ 10)
+          (read-event nil nil 0.1))
+        (should-not (seq-find (lambda (uri)
+                                (seq-some (lambda (directory)
+                                            (string-prefix-p (expand-file-name directory (file-truename root))
+                                                             (lsp--uri-to-path uri)))
+                                          '("logs/" "target/")))
+                              (funcall changed))))
+      (should (member "[/\\\\]\\.git\\'" lsp-file-watch-ignored-directories))
+      ;; Another project's logs, or a directory logs of this one's models,
+      ;; are watched as before.
+      (dolist (directory (list "/elsewhere/logs" (expand-file-name "models/logs" (file-truename root))))
+        (should-not (seq-find (lambda (regexp) (string-match-p regexp directory)) lsp-file-watch-ignored-directories))))))
+
+(ert-deftest dbt-lsp-keeps-the-watchers-out-by-true-names ()
+  "A project opened through a symbolic link has its logs, target and target-path kept out by their true names.
+lsp-mode watches, and matches, the true names of directories, as on
+macOS, where /var is /private/var; the name of a root may hold
+characters special to regexps.  It holds for a server that lsp-mode's
+own command starts, not only `dbt-lsp'."
+  (dbt-lsp-test-with-server root nil
+    (let* ((project (expand-file-name "a+b[c]/" root))
+           (link (make-temp-name (expand-file-name "dbt-link" temporary-file-directory)))
+           (lsp-file-watch-ignored-directories nil)
+           (buffer nil))
+      (make-directory (expand-file-name "models" project) t)
+      (write-region "name: 'linked'\nprofile: 'shop'\ntarget-path: 'build'\n" nil (expand-file-name "dbt_project.yml" project))
+      (write-region "select 1 as id\n" nil (expand-file-name "models/one.sql" project))
+      (make-symbolic-link (directory-file-name project) link)
+      (unwind-protect
+          (with-current-buffer (setq buffer (find-file-noselect (expand-file-name "models/one.sql" link)))
+            (should (string-prefix-p link buffer-file-name))
+            ;; lsp-mode's own command, as M-x lsp or a restart starts it.
+            (dbt-lsp-add-project-folder)
+            (lsp)
+            (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
+            (dolist (directory '("logs" "target" "build"))
+              (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename project))))
+                                lsp-file-watch-ignored-directories))))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))
+        (delete-file link)))))
 
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here

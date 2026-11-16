@@ -38,7 +38,9 @@
 ;; `dbt-lsp-deferred', for `dbt-mode-hook', makes the root of the dbt
 ;; project a folder of the lsp session before lsp-mode starts, so that
 ;; the server runs on the project, not on an enclosing repository; `dbt-lsp'
-;; does the same at once.
+;; does the same at once.  Loading this file keeps lsp-mode's file watchers
+;; out of the outputs of a dbt project, for every server that it starts
+;; on one: see `dbt-lsp--ignore-outputs'.
 
 ;;; Code:
 
@@ -130,6 +132,33 @@ the buffer, as lsp-mode would guess before it looks at the folders."
       (unless (member folder (lsp-session-folders session))
         (lsp-workspace-folders-add folder))
       (setq-local lsp-auto-guess-root nil))))
+
+(defun dbt-lsp--ignore-outputs ()
+  "Keep lsp-mode's file watchers out of dbt's outputs in the starting workspace.
+For `lsp-before-initialize-hook', so for every server that lsp-mode
+starts, dbt lsp or another one on the same folder, before it asks for a
+watcher: lsp-mode makes one watch per folder of its session, with the
+option's value of that moment.  The outputs are the logs and the target
+of the dbt project at the workspace's root, where dbt lsp writes
+whatever it is told, and the target-path of its dbt_project.yml.  dbt
+writes there at each run and dbt lsp at each compilation, while dbt lsp
+asks to watch every file: a dbt-lsp-plus older than its plan 025 would
+list the graph again at each event, and dbt lsp compile.  lsp-mode reads
+`lsp-file-watch-ignored-directories' in a buffer at the workspace's
+root, and matches true names: one regexp per project, of true names,
+joins the option's global value for this Emacs session, and the user's
+own entries stay.  A .dir-locals.el at the workspace's root that sets
+the option for every mode replaces the whole list, this regexp
+included."
+  (when-let* ((root (dbt-project-root (lsp--workspace-root lsp--cur-workspace)))
+              (regexp (format "\\`\\(?:%s[/\\\\]\\(?:logs\\|target\\)\\|%s\\)\\'"
+                              (regexp-quote (directory-file-name (file-truename root)))
+                              (regexp-quote (directory-file-name (file-truename (dbt-project-target root))))))
+              ((not (member regexp (default-value 'lsp-file-watch-ignored-directories)))))
+    (set-default 'lsp-file-watch-ignored-directories
+                 (cons regexp (default-value 'lsp-file-watch-ignored-directories)))))
+
+(add-hook 'lsp-before-initialize-hook #'dbt-lsp--ignore-outputs)
 
 ;;;###autoload
 (defun dbt-lsp ()
