@@ -785,7 +785,9 @@ or not a language server runs.  Every definition of IDENTIFIER is
 listed, as it names resources, not a call that dbt resolves."
   (interactive
    (list (completing-read "Find dbt resource: "
-                          (xref-backend-identifier-completion-table 'dbt)
+                          ;; The category lets embark act on a candidate.
+                          (completion-table-with-metadata (xref-backend-identifier-completion-table 'dbt)
+                                                          '((category . dbt-identifier)))
                           nil t)))
   (let ((xref-backend-functions (list (lambda () 'dbt)))
         (dbt-mode--every-definition t))

@@ -54,7 +54,7 @@ Without any dbt executable, dbt-mode reads the project's files:
   package and file, and previews the current one at its definition;
   with [embark](https://github.com/oantolin/embark), `embark-act` acts
   on the call or the YAML entry at point, and on the candidates of that
-  command: `RET` goes where `M-.` would, `d` lists every
+  command and of `C-c C-f`: `RET` goes where `M-.` would, `d` lists every
   definition, `y` visits the YAML entry of a model, seed or snapshot, `b`
   builds it, `r` runs a model, `t` tests it, `l` shows its lineage and
   `w` copies its relation, each where `M-.` would go, and refusing a

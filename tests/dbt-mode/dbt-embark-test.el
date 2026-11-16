@@ -74,9 +74,10 @@ target."
       (kill-buffer))))
 
 (ert-deftest dbt-embark-acts-on-a-source-entry-and-a-candidate ()
-  "embark acts on a source table's YAML entry, and on a candidate of dbt-consult-resource.
-The table's relation comes from the manifest; the candidate's lineage
-shows, it builds and its relation is copied."
+  "embark acts on a source table's YAML entry, and on a candidate of dbt-consult-resource and of C-c C-f.
+The table's relation comes from the manifest; the lineage of
+dbt-consult-resource's candidate shows, and C-c C-f's candidate builds
+and its relation is copied."
   (dbt-test-with-project root
     (dbt-test-with-embark
       (make-directory (expand-file-name "target" root))
@@ -103,9 +104,8 @@ shows, it builds and its relation is copied."
         (let ((embark-quit-after-action nil)
               (consult-preview-key nil))
           (unwind-protect
-              (pcase-dolist (`(,command ,action) '(("M-x dbt-consult-resource RET" "l")
-                                                   ("M-x dbt-consult-resource RET" "b")
-                                                   ("M-x dbt-consult-resource RET" "w")))
+              (pcase-dolist (`(,command ,action) '(("M-x dbt-consult-resource RET" "l") ("C-c C-f" "b")
+                                                   ("C-c C-f" "w")))
                 (condition-case nil
                     (execute-kbd-macro (kbd (format "%s ref:stg_orders C-c a %s C-g" command action)))
                   (quit nil)))
