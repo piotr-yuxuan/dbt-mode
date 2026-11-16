@@ -1271,13 +1271,18 @@ commentary of dbt-mode.el for the rest.
 
 (font-lock-add-keywords 'dbt-mode dbt-mode--font-lock-keywords)
 
+(defvar-keymap dbt-properties-mode-map
+  :doc "Keymap of `dbt-properties-mode'."
+  "C-c C-o" #'dbt-describe)
+
 ;;;###autoload
 (define-minor-mode dbt-properties-mode
   "Navigate from the YAML files of a dbt project, and complete in them.
 On the `name' of a model, \\[xref-find-definitions] goes to its file,
 and on a call of `ref', `source' or `doc' in a test or a description,
-to what it names; \\[xref-find-references] lists where it is used.
-`dbt-properties-mode-maybe' turns it on in a dbt project's YAML files."
+to what it names; \\[xref-find-references] lists where it is used;
+\\[dbt-describe] shows what dbt knows of it.  `dbt-properties-mode-maybe'
+turns it on in a dbt project's YAML files."
   :lighter " dbt"
   (if dbt-properties-mode
       (progn

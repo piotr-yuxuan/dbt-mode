@@ -121,7 +121,7 @@ entry, what it depends on and what uses it."
         (kill-buffer "*dbt node: model.shop.stg_orders*")))))
 
 (ert-deftest dbt-node-shows-a-source-a-disabled-node-and-says-what-is-missing ()
-  "C-c C-o shows a disabled model as disabled, and a source table as the lineage names it, each in a buffer of its own unique id.
+  "C-c C-o shows a disabled model as disabled, and a source table as the lineage names it, from a call or its YAML entry, each in a buffer of its own unique id.
 Without a manifest, or without the node in it, it says so."
   (dbt-test-with-project root
     (save-window-excursion
@@ -140,6 +140,13 @@ Without a manifest, or without the node in it, it says so."
                     (expand-file-name "models/staging/from_raw.sql" root))
       (switch-to-buffer (dbt-test-visit root "models/staging/from_raw.sql"))
       (dbt-test-goto "raw_orders'")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer "*dbt node: source.shop.raw.raw_orders*"
+        (should (equal (car (dbt-test-node-lines)) "raw.raw_orders, a source of shop"))
+        (kill-buffer))
+      (switch-to-buffer (dbt-test-visit root "models/staging/_sources.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "raw_orders")
       (execute-kbd-macro (kbd "C-c C-o"))
       (with-current-buffer "*dbt node: source.shop.raw.raw_orders*"
         (should (equal (car (dbt-test-node-lines)) "raw.raw_orders, a source of shop"))

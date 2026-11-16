@@ -157,10 +157,10 @@ wrote it.  \\[revert-buffer] in that buffer shows it again the same way."
 ;;;###autoload
 (defun dbt-describe ()
   "Show what dbt knows of the model, seed, snapshot or source table at point.
-On a `ref' or a `source', it is what the call names, else the current
-resource: its description, its file and YAML entry, its configuration,
-columns, tests, what it depends on and what uses it, in a buffer of
-`dbt-node-mode'.  With
+On a `ref' or a `source', or the name of a YAML entry, it is what the
+call or the entry names, else the current resource: its description,
+its file and YAML entry, its configuration, columns, tests, what it
+depends on and what uses it, in a buffer of `dbt-node-mode'.  With
 dbt-lsp-plus, whose server lists the command dbt-lsp-plus.nodeInfo, it
 comes from the proxy's parse, with its summary; otherwise from
 target/manifest.json, which `dbt parse', `dbt compile' and every run

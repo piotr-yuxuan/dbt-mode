@@ -137,8 +137,8 @@ Rows and compiled SQL:
   a block does.
 
 `C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
-snapshot or source table that the `ref` or `source` at point names, else
-of the current resource: its description, its file and its YAML entry,
+snapshot or source table that the `ref` or `source` at point names, or
+the YAML entry, else of the current resource: its description, its file and its YAML entry,
 its relation, owner, materialization and its settings, tags, group,
 access, contract, version, whether it is disabled, its columns, its
 tests, what it depends on and what uses it. With
