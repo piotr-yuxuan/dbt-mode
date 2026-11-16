@@ -695,11 +695,12 @@ As `dbt-lsp-announced-p' says; nil while dbt-lsp.el is not loaded."
   (and (featurep 'dbt-lsp) (apply #'dbt-lsp-announced-p path)))
 
 (defun dbt-mode-dbt-lsp-p ()
-  "Return non-nil when dbt lsp answers for the project, behind the proxy or not.
+  "Return non-nil when dbt lsp serves the buffer, behind the proxy or not.
 Its server lists dbt.listNodes, which dbt lsp lists and dbt-lsp-plus
 alone does not: alone, the proxy fails what dbt lsp would answer, such
-as the references of a column."
-  (dbt-mode-server-command-p "dbt.listNodes"))
+as the references of a column.  dbt lsp serves no YAML file, though it
+runs on the project."
+  (and (dbt-mode-server-p) (dbt-mode-server-command-p "dbt.listNodes")))
 
 (defun dbt-mode--root ()
   "Return the root of the current project, or signal a `user-error'."

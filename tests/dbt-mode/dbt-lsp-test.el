@@ -675,6 +675,18 @@ Choosing the server reads nothing of the project."
       (dbt-test-goto "orders_snapshot %}")
       (should (eq (xref-find-backend) 'dbt)))))
 
+(ert-deftest dbt-lsp-leaves-yaml-to-dbt-mode ()
+  "In a YAML file, which dbt lsp does not serve, M-. stays dbt-mode's, while dbt lsp runs on the project's SQL."
+  (dbt-lsp-test-with-server root nil
+    (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+      (dbt-properties-mode-maybe)
+      (should-not (dbt-lsp-workspace))
+      (dbt-test-goto "name: stg_orders" 6)
+      (should (eq (xref-find-backend) 'dbt))
+      (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                             (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+                     '("models/staging/stg_orders.sql"))))))
+
 (ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
   "With dbt-lsp-plus listing sources for a request, that request on a source is the server's.
 M-? goes to the server when references lists source, M-. when definition
