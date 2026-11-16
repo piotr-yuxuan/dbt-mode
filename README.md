@@ -145,7 +145,10 @@ dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
 summary that its hover shows; otherwise from `target/manifest.json`,
 saying when dbt wrote it, its tests shown with the proxy only. What
 uses the node comes from dbt-mode's index, as for the lineage. `RET`
-visits a node, `TAB` folds a section.
+visits a node, `TAB` folds a section. Without a server, eldoc on a `ref`
+or a `source` says the materialization and the relation of what it
+names, once dbt-mode holds the project's manifest as dbt last wrote it,
+as when the mode line or `C-c C-o` read it: eldoc never reads one.
 
 The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
 the project from the artifacts of your own runs, which it never writes, and

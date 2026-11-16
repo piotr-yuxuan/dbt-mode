@@ -61,6 +61,7 @@
 
 (autoload 'dbt-dispatch "dbt-cli" nil t)
 (autoload 'dbt-describe "dbt-node" nil t)
+(autoload 'dbt-node-eldoc "dbt-node")
 (autoload 'dbt-lsp-rename-model "dbt-lsp" nil t)
 (autoload 'dbt-lsp-format-buffer "dbt-lsp" nil t)
 (autoload 'dbt-lsp-fix-all "dbt-lsp" nil t)
@@ -1249,6 +1250,7 @@ commentary of dbt-mode.el for the rest.
               imenu-case-fold-search t)
   (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
   (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
+  (add-hook 'eldoc-documentation-functions #'dbt-node-eldoc nil 'local)
   (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local)
   ;; The target, the materialization and the compilation, after the name.
   (setq-local mode-line-process '((dbt-mode--status (" " dbt-mode--status)) (dbt-mode-compiling " compiling")))

@@ -106,5 +106,33 @@ depends on, and on what uses it, visits that node."
         (should (member "  disabled      yes" (dbt-test-node-lines)))
         (kill-buffer)))))
 
+(ert-deftest dbt-node-gives-eldoc-the-relation-from-a-manifest-held ()
+  "Without a server, eldoc on a ref says the materialization and the relation of what it names.
+Only once dbt-mode holds the project's manifest as it is, never reading
+it at idle time; nothing elsewhere than on a ref or a source."
+  (dbt-test-with-project root
+    (dbt-test-write-manifest root)
+    (when (get-buffer " *dbt manifest*")
+      (kill-buffer " *dbt manifest*"))
+    (let ((said nil)
+          (manifest (expand-file-name "target/manifest.json" root)))
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (dbt-test-goto "stg_orders')")
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should-not said)
+      (should-not (get-buffer " *dbt manifest*"))
+      (dbt-project-manifest-node manifest "model.shop.stg_orders")
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should (equal said "view \"shop\".\"main\".\"stg_orders\""))
+      (setq said nil)
+      (goto-char (point-min))
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should-not said)
+      ;; A manifest that dbt wrote again is not held any more.
+      (dbt-test-goto "stg_orders')")
+      (set-file-times manifest (time-add (current-time) 10))
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should-not said))))
+
 (provide 'dbt-node-test)
 ;;; dbt-node-test.el ends here

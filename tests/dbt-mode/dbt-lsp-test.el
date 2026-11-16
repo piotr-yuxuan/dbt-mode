@@ -1055,7 +1055,8 @@ stands."
   "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
 Its error, -32803 until the proxy's first parse, shows its reason; its
 null answer, no such node, says so.  A server that does not list the
-command, as dbt lsp alone, leaves the node to the manifest."
+command, as dbt lsp alone, leaves the node to the manifest; eldoc of
+dbt-mode's own steps aside for the server's hover."
   (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
                 (package_name . "shop") (summary . "view \"shop\".\"main\".\"stg_orders\"\ntags daily")
                 (relation . "\"shop\".\"main\".\"stg_orders\"") (relation_name . "elsewhere")
@@ -1102,7 +1103,11 @@ command, as dbt lsp alone, leaves the node to the manifest."
       (execute-kbd-macro (kbd "C-c C-o"))
       (with-current-buffer "*dbt node: stg_orders*"
         (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
-        (kill-buffer)))))
+        (kill-buffer))
+      ;; The manifest is held, but the server's hover says more.
+      (let ((said nil))
+        (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
+        (should-not said)))))
 
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here

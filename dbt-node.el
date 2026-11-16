@@ -121,6 +121,23 @@ write, saying when dbt wrote it."
         (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus")) from-manifest)
       (funcall from-manifest))))
 
+(defun dbt-node-eldoc (callback &rest _)
+  "Give CALLBACK the materialization and relation of the ref or source at point.
+For `eldoc-documentation-functions', without a server, whose hover says
+more.  They come from the project's manifest, once dbt-mode holds it as
+dbt last wrote it: eldoc never reads one."
+  (when-let* (((not (dbt-mode-server-p)))
+              (root (dbt-project-root))
+              (target (dbt-mode-target-at-point))
+              ((memq (plist-get target :kind) '(ref source)))
+              (entity (car (dbt-mode-definitions target)))
+              (file (expand-file-name "manifest.json" (dbt-project-target root)))
+              ((dbt-project-manifest-held-p file))
+              (node (dbt-project-manifest-node file (dbt-project-node-id entity))))
+    (funcall callback (string-join (delq nil (list (map-nested-elt node '("config" "materialized"))
+                                                   (map-elt node "relation_name")))
+                                   " "))))
+
 (defun dbt-node-visit ()
   "Visit the node on point's line, where the index has it."
   (interactive)
