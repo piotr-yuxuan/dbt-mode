@@ -1053,7 +1053,8 @@ stands."
 
 (ert-deftest dbt-lsp-describes-a-node-from-dbt-lsp-plus ()
   "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
-A null relation, as the proxy gives a disabled node, shows none.  Its
+A test, no node of the index, is no link; a null relation, as the proxy
+gives a disabled node, shows none.  Its
 error, -32803 until the proxy's first parse, shows its reason; its
 null answer, no such node, says so.  A server that does not list the
 command, as dbt lsp alone, leaves the node to the manifest; eldoc of
@@ -1069,7 +1070,7 @@ dbt-mode's own steps aside for the server's hover."
       (dbt-test-goto "stg_orders')")
       (execute-kbd-macro (kbd "C-c C-o"))
       (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
-        (should (equal (seq-take (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n") 9)
+        (should (equal (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n")
                        '("stg_orders, a model of shop"
                          "view \"shop\".\"main\".\"stg_orders\""
                          "tags daily"
@@ -1078,8 +1079,19 @@ dbt-mode's own steps aside for the server's hover."
                          "Configuration"
                          "  relation      \"shop\".\"main\".\"stg_orders\""
                          "  materialized  view"
-                         "Tests")))
-        (should (string-search "  test      not_null_stg_orders_order_id.81cfe2fe64" (buffer-string)))
+                         "Tests"
+                         "  not_null_stg_orders_order_id"
+                         "Used by"
+                         "  analysis  order_counts"
+                         "  model     orders"
+                         "  snapshot  orders_snapshot"
+                         "")))
+        ;; A test is no node of the index: RET says so.
+        (switch-to-buffer (current-buffer))
+        (goto-char (point-min))
+        (search-forward "not_null_stg_orders_order_id")
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
+                       "No file or node here"))
         (kill-buffer)))
     ;; The proxy's null relation, as for a disabled node, is no relation.
     (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])

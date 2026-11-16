@@ -108,7 +108,12 @@ of no argument, shows the node again, on \\[revert-buffer]."
                                                                              '("name" "data_type" "description")))
                                                    "  "))
                                       (map-elt node "columns")))
-        (dbt-node--section "Tests" (mapcar link (map-elt node "tests")))
+        (dbt-node--section "Tests"
+                           (if (map-contains-key node "tests")
+                               (mapcar (lambda (test)
+                                         (replace-regexp-in-string "\\.[0-9a-f]\\{10\\}\\'" "" (dbt-lineage-label test)))
+                                       (map-elt node "tests"))
+                             (list "known to dbt-lsp-plus only: C-c C-t visits the YAML that holds them")))
         (dbt-node--section "Depends on" (mapcar link (map-nested-elt node '("depends_on" "nodes"))))
         (dbt-node--section "Used by"
                            (mapcar link (sort (mapcar (lambda (child) (plist-get child :id))

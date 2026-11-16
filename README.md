@@ -144,7 +144,7 @@ access, contract, version, whether it is disabled, its columns, its
 tests, what it depends on, what uses it and its description. With
 dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
 summary that its hover shows; otherwise from `target/manifest.json`,
-saying when dbt wrote it, its tests shown with the proxy only. What
+saying when dbt wrote it, its tests left to the proxy and to `C-c C-t`. What
 uses the node comes from dbt-mode's index, as for the lineage. `RET`
 visits a file or a node, `TAB` folds a section, `g` shows the node again. Without
 a server, eldoc on a `ref`
