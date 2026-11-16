@@ -100,6 +100,9 @@ runs."
                                  (list file (file-attribute-modification-time (file-attributes file)) command))
                                dbt-project--commands)
       (let* ((output "")
+             ;; Uncoloured, as dbt-lsp-plus asks: clap colours the name.
+             (process-environment (cons "NO_COLOR=1" (seq-remove (lambda (entry) (string-prefix-p "CLICOLOR_FORCE=" entry))
+                                                                 process-environment)))
              (process (ignore-errors
                         (make-process :name (format "dbt %s --help" command)
                                       :command (list executable command "--help")
@@ -110,14 +113,19 @@ runs."
             (progn
               (while (and (process-live-p process) (< (float-time) deadline))
                 (accept-process-output process 0.1))
+              ;; What dbt wrote before it exited, which its exit may outrun.
+              (accept-process-output process 0)
               (cond ((process-live-p process)
                      (message "dbt did not answer dbt %s --help within %s s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
                               command dbt-project--probe-seconds)
                      'timeout)
-                    ((and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                    ;; A dbt that could not run says no.
+                    ((not process) 'no)
+                    ((eq 0 (process-exit-status process))
                      'yes)
-                    ;; clap's message, with which dbt 2 exits 2.
-                    ((string-search (format "unrecognized subcommand '%s'" command) output)
+                    ;; clap's message, with which dbt 2 exits 2, as dbt-lsp-plus asks.
+                    ((and (eq 2 (process-exit-status process))
+                          (string-search (format "unrecognized subcommand '%s'" command) output))
                      'lacks)
                     (t 'no)))
           ;; Also on a quit, as C-g in the first dispatch menu.

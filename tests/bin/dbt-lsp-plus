@@ -8,7 +8,7 @@
 # subcommand 'lsp'", it runs the scripted server alone, as the proxy runs
 # alone; otherwise it runs `DBT lsp ...' all the same, as the proxy does.
 [ "$1" = "--" ] && shift
-help=$("$1" lsp --help 2>&1)
+help=$(NO_COLOR=1 "$1" lsp --help 2>&1 >/dev/null)
 if [ $? -eq 2 ] && printf '%s' "$help" | grep -q "unrecognized subcommand 'lsp'"; then
   FAKE_ALONE=1 exec python3 -I "$(dirname "$0")/fake_dbt_lsp.py" "$@"
 fi
