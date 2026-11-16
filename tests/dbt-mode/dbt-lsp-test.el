@@ -266,7 +266,7 @@ The question's message says so too, and what asks again."
               (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment))
               (start (with-current-buffer (messages-buffer) (point-max))))
           (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
-                         "dbt did not answer dbt format --help in time: C-c C-q asks again"))
+                         "dbt did not answer dbt format --help in time: M-x dbt-format-buffer asks again"))
           (should (string-search "dbt did not answer dbt format --help within 1 s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
                                  (with-current-buffer (messages-buffer) (buffer-substring start (point-max)))))
           (execute-kbd-macro (kbd "C-c C-q"))

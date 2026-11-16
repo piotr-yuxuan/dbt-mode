@@ -1041,7 +1041,7 @@ A dbt that did not answer in time whether it formats is asked again."
       (dbt-project-ask-again "format")
       (pcase (dbt-project-command-answer "format")
         ('yes (dbt-cli-format (current-buffer)))
-        ('timeout (user-error "dbt did not answer dbt format --help in time: C-c C-q asks again"))
+        ('timeout (user-error "dbt did not answer dbt format --help in time: M-x dbt-format-buffer asks again"))
         (_
          ;; Without any dbt, that is what it says.
          (dbt-project-executable)
