@@ -157,8 +157,9 @@ ENVIRONMENT is added to the check's environment."
 (ert-deftest public-exempts-the-pipelines-version-file-from-spdx ()
   (should (equal (car (public-test-run '((".version" . "1.2.3\n")))) 0)))
 
-(ert-deftest public-reads-a-workflow-a-python-file-and-a-stand-in-for-spdx ()
-  (dolist (name '(".github/workflows/ci.yml" "tests/scripts/release_test.py" "tests/bin/fake-gh"))
+(ert-deftest public-reads-each-kind-of-source-file-for-spdx ()
+  (dolist (name '(".github/workflows/ci.yml" "tests/scripts/release_test.py" "tests/bin/fake-gh"
+                  "Makefile" "scripts/x" "flake.nix" "a.el" "scripts/a.sh"))
     (public-test-finds (list (cons name "name: x\n")) (concat name ":1: missing SPDX line"))))
 
 (ert-deftest public-exempts-the-fixture-project-from-spdx ()
