@@ -104,6 +104,7 @@ that dbt 2 leaves out."
                          "  skipped customers  Skipped due to upstream failure"
                          "  skipped not_null_customers_customer_id.5c9bf9911d  "
                          "")))
+        (should (string-match-p "\\`Slowest nodes, from run_results.json, 8 results, written " (nth 8 lines)))
         (should (equal (seq-take (nthcdr 9 lines) 3)
                        '("     1.50 s  orders  error" "     0.75 s  util  error" "")))
         (should (member "  warn    raw.raw_orders  loaded 2018-01-04T00:00:00Z, 3235 days ago" lines))
