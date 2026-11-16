@@ -952,7 +952,8 @@ package or of the project comes by name alone, any other with its
 package.  Within a macro, a generic test or a materialization, which dbt
 resolves from whichever node calls it, any resource but the project's
 comes with its package.  A name that dbt would find ambiguous from the
-file, as `dbt-project-ambiguous' tells, asks whose resource to call.
+file, as `dbt-project-ambiguous' tells once the file's own resource is
+left out, asks whose resource to call, the first package's by default.
 To call another namesake, write the call with its package: completion
 at point offers that package's models."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
@@ -966,7 +967,9 @@ at point offers that package's models."
                              (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
          (packages (dbt-project-ambiguous root (list :kind 'ref) candidates caller))
          (entity (or (if packages
-                         (let ((package (completing-read (format "Whose %s: " (car wanted)) packages nil t)))
+                         (let ((package (completing-read (format-prompt "dbt finds ref:%s ambiguous; call whose"
+                                                                        (car packages) (car wanted))
+                                                         packages nil t nil nil (car packages))))
                            (seq-find (lambda (entity) (equal (plist-get entity :package) package)) candidates))
                        (car candidates))
                      (user-error "No model, seed or snapshot `%s' but this one" selector)))

@@ -1128,15 +1128,26 @@ which names resources, say nothing of it."
 
 (ert-deftest dbt-mode-asks-whose-ref-to-insert-when-dbt-would-find-it-ambiguous ()
   "C-c C-e on a name that dbt would find ambiguous asks whose resource to call, then calls it with its package.
-From the project as from a package that lacks the name."
+From the project as from a package that lacks the name; the first
+package by default.  A name that the project defines too, called from a
+package, is no question, nor one that one package defines."
   (dbt-test-with-project root
     (dbt-test-write-ambiguous root)
     (save-window-excursion
-      (dolist (file '("models/marts/calls.sql" "dbt_packages/shop_utils/models/pkg_calls.sql"))
+      (pcase-dolist (`(,file ,keys ,call)
+                     '(("models/marts/calls.sql" "C-c C-e dup RET a_utils RET" "{{ ref('a_utils', 'dup') }}")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "C-c C-e dup RET b_utils RET"
+                        "{{ ref('b_utils', 'dup') }}")
+                       ("models/marts/calls.sql" "C-c C-e dup RET RET" "{{ ref('a_utils', 'dup') }}")
+                       ;; The ; that follows would answer a question, and fail.
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "C-c C-e stg_orders RET ;"
+                        "{{ ref('stg_orders') }};")
+                       ("models/marts/calls.sql" "C-c C-e only_a RET ;" "{{ ref('a_utils', 'only_a') }};")))
         (switch-to-buffer (dbt-test-visit root file))
         (goto-char (point-max))
-        (execute-kbd-macro (kbd "C-c C-e dup RET b_utils RET"))
-        (should (looking-back "^{{ ref('b_utils', 'dup') }}" (line-beginning-position)))))))
+        (insert "\n")
+        (execute-kbd-macro (kbd keys))
+        (should (equal (buffer-substring-no-properties (line-beginning-position) (point)) call))))))
 
 (ert-deftest dbt-mode-live-rejects-what-dbt-rejects-as-ambiguous ()
   "With the real dbt, the call that M-. says dbt rejects fails dbt parse, and the one that C-c C-e asks for passes.
