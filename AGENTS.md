@@ -2,7 +2,7 @@
 
 This repository holds the Emacs package `dbt-mode`, a major mode for the
 SQL and Jinja of dbt projects with a client of `dbt lsp` for lsp-mode.
-`README.md` describes it for users.
+`README.md` and `docs/` describe it for users.
 
 ## Workflow
 
@@ -35,10 +35,21 @@ tests/helpers/             what the tests share
 tests/dbt-mode/            the tests; dbt-lsp-test.el runs the lsp client offline, *-live-test.el against the real dbt lsp
 tests/fixtures/shop/       the fixture dbt project, on DuckDB
 tests/bin/dbt              a stand-in for dbt; for `dbt lsp' it runs fake_dbt_lsp.py, a scripted server
+tests/bin/fake-gh          a stand-in for `gh api', for the tests of scripts/release.py
 tests/scripts/             tests of scripts/
 scripts/with-scratch-home  runs a command in a scratch home
 scripts/lint.el            byte-compile and checkdoc, one file per Emacs
 scripts/complexity.el      cyclomatic complexity of each definition, at most 10; each binding of a *-let* form counts
+scripts/check-public       what must not be published, or must be there, in the tracked files
+scripts/check-commits      the titles and messages of the commits since a base
+scripts/public-patterns.sh the private text that both checks look for
+scripts/release.py         the release, run by CD
+.github/workflows/         CI, the checks on every push, and CD, a release after each green push to main
+.version                   the last version released, written by the release alone
+docs/tutorials/            lessons: first-project.md, the fixture from a clone
+docs/how-to/               install, format and fix, run the tests
+docs/reference/            keys, commands, options, limitations, the release pipeline
+docs/explanation/          how dbt-mode reads a project without dbt, and what the server does
 flake.nix                  the development shell
 ```
 
