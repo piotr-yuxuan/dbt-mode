@@ -187,28 +187,43 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
           method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
 
+(defun dbt-lsp--request (method params schema callback)
+  "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
+SCHEMA is as `dbt-lsp--conforms-p' takes it.  An answer that it does not
+fit, and an error, are said in a message instead, naming METHOD, or the
+command of a workspace/executeCommand."
+  ;; From a buffer the server does not serve, such as that of the
+  ;; lineage, the server of the project.
+  (let ((name (if (equal method "workspace/executeCommand") (plist-get params :command) method))
+        (workspace (or (dbt-lsp-workspace)
+                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
+                       (user-error "No dbt lsp runs on this project"))))
+    (with-lsp-workspace workspace
+      ;; Unmerged, the answer of the one workspace asked: lsp-mode's
+      ;; merging of answers would turn an array into a list.
+      (lsp-request-async method params
+                         (lambda (answers)
+                           (let ((answer (cdar answers)))
+                             (if (dbt-lsp--conforms-p answer schema)
+                                 (funcall callback answer)
+                               (message "%s" (dbt-lsp--unreadable name answer)))))
+                         :mode 'detached
+                         :no-merge t
+                         :error-handler (lambda (error)
+                                          (message "dbt lsp: %s failed: %s" name (lsp-get error :message)))))))
+
 (defun dbt-lsp--execute (command arguments schema callback)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
 or holds an error, a message says so."
-  ;; From a buffer the server does not serve, such as that of the
-  ;; lineage, the server of the project.
-  (let ((workspace (or (dbt-lsp-workspace)
-                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
-                       (user-error "No dbt lsp runs on this project"))))
-    (with-lsp-workspace workspace
-      (lsp-request-async "workspace/executeCommand"
-                         (list :command command :arguments (vconcat arguments))
-                         (lambda (answer)
-                           (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
-                                 ((dbt-lsp--conforms-p answer '(object (:error stringp)))
-                                  (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
-                                 ((dbt-lsp--conforms-p answer schema) (funcall callback answer))
-                                 (t (message "%s" (dbt-lsp--unreadable command answer)))))
-                         :mode 'detached
-                         :error-handler (lambda (error)
-                                          (message "dbt lsp: %s failed: %s" command (lsp-get error :message)))))))
+  (dbt-lsp--request "workspace/executeCommand" (list :command command :arguments (vconcat arguments))
+                    `(or null (object (:error stringp)) ,schema)
+                    (lambda (answer)
+                      (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
+                            ((dbt-lsp--conforms-p answer '(object (:error stringp)))
+                             (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
+                            (t (funcall callback answer))))))
 
 (defun dbt-lsp-node-info (id callback otherwise)
   "Give CALLBACK the node ID as dbt-lsp-plus knows it, else call OTHERWISE.
