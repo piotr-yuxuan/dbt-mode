@@ -690,7 +690,7 @@ As `dbt-lsp-command-p' says; nil while dbt-lsp.el is not loaded."
   (and (featurep 'dbt-lsp) (dbt-lsp-command-p command)))
 
 (defun dbt-mode-server-announced-p (&rest path)
-  "Return non-nil when the server of the project announced the capability at PATH.
+  "Return non-nil when the server of the buffer announced the capability at PATH.
 As `dbt-lsp-announced-p' says; nil while dbt-lsp.el is not loaded."
   (and (featurep 'dbt-lsp) (apply #'dbt-lsp-announced-p path)))
 

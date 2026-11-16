@@ -252,12 +252,13 @@ that lacks dbt lsp, it lists only its own, and fails the others."
                     command)))
 
 (defun dbt-lsp-announced-p (&rest path)
-  "Return non-nil when the server of the project announced the capability at PATH.
+  "Return non-nil when the server of the buffer announced the capability at PATH.
 PATH is keywords, as :documentFormattingProvider, or :workspace
 :fileOperations :willRename; those that `dbt-lsp--hide-formatting' hid
 from lsp-mode count.  dbt lsp announces formatting, code actions and
-the rename of files; dbt-lsp-plus alone, none of them."
-  (when-let* ((workspace (dbt-lsp--project-workspace)))
+the rename of files; dbt-lsp-plus alone, none of them.  The server is
+the buffer's, as these act on the buffer's file."
+  (when-let* ((workspace (dbt-lsp-workspace)))
     (or (memq (car path) (gethash workspace dbt-lsp--hidden))
         (seq-reduce #'lsp-get path (lsp--workspace-server-capabilities workspace)))))
 
@@ -519,9 +520,9 @@ of a model is not renamed, as the server would edit nothing."
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
   ;; lsp-mode asks the server about the rename only when it says it
-  ;; answers, which dbt-lsp-plus alone does not.
+  ;; answers, which dbt lsp does and dbt-lsp-plus alone does not.
   (unless (dbt-lsp-announced-p :workspace :fileOperations :willRename)
-    (user-error "The server renames no model: dbt lsp does"))
+    (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
          (entity (dbt-project-file-entity root buffer-file-name))
          (file buffer-file-name)
@@ -613,15 +614,17 @@ message."
   "Save the buffer, then fix its lint issues and format it with the server.
 dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   (interactive)
-  (unless (dbt-lsp-announced-p :codeActionProvider)
-    (user-error "The server fixes no lint issue: dbt lsp does"))
-  (save-buffer)
-  (with-lsp-workspace (dbt-lsp--project-workspace)
-    ;; Without its requirement, lsp-mode sends the method that
-    ;; `dbt-lsp--hide-formatting' hid, here only.
-    (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"
-                                                     (copy-alist lsp-method-requirements))))
-      (call-interactively #'lsp-fix-all))))
+  ;; dbt lsp offers code actions, and dbt-lsp-plus alone none.
+  (let ((workspace (if (dbt-lsp-announced-p :codeActionProvider)
+                       (dbt-lsp-workspace)
+                     (user-error "No dbt lsp runs in this buffer"))))
+    (save-buffer)
+    (with-lsp-workspace workspace
+      ;; Without its requirement, lsp-mode sends the method that
+      ;; `dbt-lsp--hide-formatting' hid, here only.
+      (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"
+                                                       (copy-alist lsp-method-requirements))))
+        (call-interactively #'lsp-fix-all)))))
 
 ;;;; The client
 

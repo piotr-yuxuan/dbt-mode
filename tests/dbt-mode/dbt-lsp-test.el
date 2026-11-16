@@ -360,7 +360,7 @@ says it answers it."
     (should (dbt-mode--proxy-answers-p :references (xref-backend-identifier-at-point 'dbt)))))
 
 (ert-deftest dbt-lsp-alone-refuses-what-only-dbt-lsp-does ()
-  "With dbt-lsp-plus alone, C-c C-q asks dbt format, which dbt-oss lacks; renaming a model and fixing lint issues say that the server does neither.
+  "With dbt-lsp-plus alone, C-c C-q asks dbt format, which dbt-oss lacks; renaming a model and fixing lint issues say that no dbt lsp runs.
 dbt-lsp-plus alone announces no formatting, no code action and no
 rename of files, which dbt lsp does."
   (dbt-lsp-test-alone root nil
@@ -369,9 +369,9 @@ rename of files, which dbt lsp does."
       (should (string-prefix-p "This dbt cannot format"
                                (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
       (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-rename-model RET RET")) :type 'user-error))
-                     "The server renames no model: dbt lsp does"))
+                     "No dbt lsp runs in this buffer"))
       (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-fix-all RET")) :type 'user-error))
-                     "The server fixes no lint issue: dbt lsp does")))
+                     "No dbt lsp runs in this buffer")))
     (should-not (seq-intersection '("textDocument/formatting" "textDocument/codeAction" "workspace/willRenameFiles")
                                   (dbt-lsp-test-methods)))))
 
