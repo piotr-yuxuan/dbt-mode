@@ -1373,7 +1373,7 @@ target elsewhere are watched as before."
         (should-not (seq-find (lambda (regexp) (string-match-p regexp directory)) lsp-file-watch-ignored-directories))))))
 
 (ert-deftest dbt-lsp-keeps-the-watchers-out-by-true-names ()
-  "A project opened through a symbolic link has its logs and target kept out by their true names.
+  "A project opened through a symbolic link has its logs, target and target-path kept out by their true names.
 lsp-mode watches, and matches, the true names of directories, as on
 macOS, where /var is /private/var; the name of a root may hold
 characters special to regexps."
@@ -1383,7 +1383,7 @@ characters special to regexps."
            (lsp-file-watch-ignored-directories nil)
            (buffer nil))
       (make-directory (expand-file-name "models" project) t)
-      (write-region "name: 'linked'\nprofile: 'shop'\n" nil (expand-file-name "dbt_project.yml" project))
+      (write-region "name: 'linked'\nprofile: 'shop'\ntarget-path: 'build'\n" nil (expand-file-name "dbt_project.yml" project))
       (write-region "select 1 as id\n" nil (expand-file-name "models/one.sql" project))
       (make-symbolic-link (directory-file-name project) link)
       (unwind-protect
@@ -1391,7 +1391,7 @@ characters special to regexps."
             (should (string-prefix-p link buffer-file-name))
             (dbt-lsp)
             (dbt-test-wait (lambda () (eq 'initialized (lsp--workspace-status (dbt-lsp-workspace)))))
-            (dolist (directory '("logs" "target"))
+            (dolist (directory '("logs" "target" "build"))
               (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename project))))
                                 lsp-file-watch-ignored-directories))))
         (when (buffer-live-p buffer)

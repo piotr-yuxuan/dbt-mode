@@ -140,7 +140,7 @@ starts, dbt lsp or another one on the same folder, before it asks for a
 watcher: lsp-mode makes one watch per folder of its session, with the
 option's value of that moment.  The outputs are the logs and the target
 of the dbt project at the workspace's root, where dbt lsp writes
-whatever it is told.  dbt
+whatever it is told, and the target-path of its dbt_project.yml.  dbt
 writes there at each run and dbt lsp at each compilation, while dbt lsp
 asks to watch every file: a dbt-lsp-plus older than its plan 025 would
 list the graph again at each event, and dbt lsp compile.  lsp-mode reads
@@ -151,8 +151,9 @@ own entries stay.  A .dir-locals.el at the workspace's root that sets
 the option for every mode replaces the whole list, this regexp
 included."
   (when-let* ((root (dbt-project-root (lsp--workspace-root lsp--cur-workspace)))
-              (regexp (format "\\`%s[/\\\\]\\(?:logs\\|target\\)\\'"
-                              (regexp-quote (directory-file-name (file-truename root)))))
+              (regexp (format "\\`\\(?:%s[/\\\\]\\(?:logs\\|target\\)\\|%s\\)\\'"
+                              (regexp-quote (directory-file-name (file-truename root)))
+                              (regexp-quote (directory-file-name (file-truename (dbt-project-target root))))))
               ((not (member regexp (default-value 'lsp-file-watch-ignored-directories)))))
     (set-default 'lsp-file-watch-ignored-directories
                  (cons regexp (default-value 'lsp-file-watch-ignored-directories)))))
