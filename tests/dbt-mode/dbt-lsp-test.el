@@ -272,6 +272,34 @@ The question's message says so too, and what asks again."
           (execute-kbd-macro (kbd "C-c C-q"))
           (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n" (buffer-string)))))))))
 
+(ert-deftest dbt-lsp-keeps-the-timeout-of-a-dbt-that-hangs ()
+  "A dbt that hangs when asked whether it formats costs its wait once: neither format on save, nor its saves, nor dispatch asks again.
+None says that it cannot format; dispatch says that it did not answer."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exec sleep 20"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt)
+              (dbt-project--probe-seconds 1)
+              (dbt-mode--told-cannot-format nil)
+              (start (with-current-buffer (messages-buffer) (point-max))))
+          (dbt-format-on-save-mode 1)
+          (dotimes (_ 2)
+            (goto-char (point-min))
+            (insert "-- edited\n")
+            (let ((before (float-time)))
+              (execute-kbd-macro (kbd "C-x C-s"))
+              (should (< (- (float-time) before) 0.5))))
+          (execute-kbd-macro (kbd "C-c C-d"))
+          (let ((menu (with-current-buffer " *transient*" (buffer-string))))
+            (execute-kbd-macro (kbd "C-g"))
+            (should (string-search "= format (dbt did not answer)" menu))
+            (should (string-search "L lint (dbt did not answer)" menu)))
+          (should-not (string-search "cannot format" (with-current-buffer (messages-buffer)
+                                                       (buffer-substring start (point-max)))))
+          (should-not dbt-mode--told-cannot-format))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
+
 (ert-deftest dbt-lsp-asks-again-from-its-command ()
   "M-x dbt-lsp asks again a dbt that did not answer in time whether it runs a server, and says that it did not answer."
   (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exec sleep 20"

@@ -223,9 +223,10 @@ which `dbt system upgrade-distribution` turns `dbt-oss` into; dbt Core
 server and the formatter, asks again once dbt is replaced, and does
 without. A dbt that does not answer within ten seconds whether it runs
 a command is taken as lacking that one, as a message says, without
-being asked at each save again; `C-c C-q` and `M-x dbt-lsp`, which you
-run and may wait for, ask it again. It was tested with `dbt-oss` 2.0.11
-and the proprietary 2.0.9.
+being asked at each save again; the dispatch menu says that it did not
+answer, and `C-c C-q` and `M-x dbt-lsp`, which you run and may wait for,
+ask it again. It was tested with `dbt-oss` 2.0.11 and the proprietary
+2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:

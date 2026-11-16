@@ -1055,7 +1055,9 @@ while you go on, and the buffer shows the result unless you modified it
 meanwhile.  A failure to format is a message, and the save stands.  A
 dbt with neither a server nor `dbt format', such as dbt-oss, leaves
 saves as they are, which the mode says once for each dbt, in the first
-buffer that turns it on."
+buffer that turns it on.  A dbt that did not answer in time leaves
+saves as they are too, as the message of the question says, until
+`dbt-format-buffer' asks it again."
   :lighter " Fmt"
   (if dbt-format-on-save-mode
       (progn
@@ -1064,7 +1066,7 @@ buffer that turns it on."
         ;; proprietary build; dbt-oss has neither.
         (when-let* ((executable (executable-find dbt-executable))
                     ((not (member executable dbt-mode--told-cannot-format)))
-                    ((not (dbt-project-command-p "format"))))
+                    ((eq (dbt-project-command-answer "format") 'no)))
           (push executable dbt-mode--told-cannot-format)
           (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2 (on dbt-oss, dbt system upgrade-distribution installs it)")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
