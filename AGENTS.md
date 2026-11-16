@@ -25,6 +25,7 @@ dbt-rows.el                the grid of a query's rows, whoever ran the query
 dbt-compiled.el            the compiled SQL beside its model, and its diff with another state
 dbt-babel.el               Org Babel blocks of dbt
 dbt-dashboard.el           the state of a project, from the artifacts of its runs
+dbt-consult.el             the resources of a project, read with consult
 dbt-cli.el                 dbt-dispatch, dbt's commands in a compilation buffer
 dbt-lsp.el                 the lsp-mode client of dbt lsp and its custom commands
 tests/run-ert.el           strict ERT runner: a skip must have an allowed reason

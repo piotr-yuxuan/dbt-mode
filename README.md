@@ -48,6 +48,10 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;
+- with [consult](https://github.com/minad/consult), `M-x
+  dbt-consult-resource` reads a resource of the project or of its
+  packages, as `C-c C-f` names them, grouped by kind, each with its
+  package and file, and previews the current one at its definition;
 - completion of the arguments of `ref`, `source` and `doc`, and of macros in
   a tag;
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
@@ -350,7 +354,8 @@ is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
 dbt on the fixture project, `tests/fixtures/shop`, and, when it is the
 proprietary build, its `dbt lsp` through lsp-mode. `DBT_MODE_TEST_DBT_CACHE`,
 naming a cache of dbt's database drivers such as `~/.cache/com.getdbt`, is
-copied into the scratch home, so that dbt downloads no driver.
+copied into the scratch home, so that dbt downloads no driver. The tests
+of `dbt-consult-resource` use the consult of the development shell.
 
 ## Licence
 

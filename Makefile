@@ -13,7 +13,7 @@
 EMACS ?= emacs
 DEPS ?=
 SCRATCH := scripts/with-scratch-home
-PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-babel.el dbt-dashboard.el dbt-lsp.el
+PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-babel.el dbt-dashboard.el dbt-lsp.el dbt-consult.el
 TOOL_EL := $(wildcard scripts/*.el tests/helpers/*.el) tests/run-ert.el
 LOAD := -L . $(addprefix -L ,$(DEPS))
 # The value $(1), quoted for the shell.
