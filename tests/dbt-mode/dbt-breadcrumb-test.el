@@ -136,6 +136,21 @@ comment are none."
                      (concat " macros > helper.sql > helper > rows > outer_cte > inner_cte"
                              " > for column in columns > if loop.index % 2 == 0"))))))
 
+(ert-deftest dbt-breadcrumb-follows-a-renamed-file ()
+  "Renaming the visited file renames it in the header line once Emacs is idle."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (dbt-test-goto "select * from {{ ref('stg_orders')")
+      (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+      (ert-run-idle-timers)
+      (should (equal (dbt-test-mode-line header-line-format) " models > marts > orders.sql > orders"))
+      ;; Neither point nor the text moves.
+      (execute-kbd-macro (kbd "M-x rename-visited-file RET fct_orders.sql RET"))
+      (should (string-suffix-p "/models/marts/fct_orders.sql" buffer-file-name))
+      (ert-run-idle-timers)
+      (should (equal (dbt-test-mode-line header-line-format) " models > marts > fct_orders.sql > orders")))))
+
 (ert-deftest dbt-breadcrumb-leaves-a-killed-buffer-alone ()
   "A buffer killed before Emacs is idle leaves its update nothing to do, and no error.
 An error in a timer only shows in *Messages*."

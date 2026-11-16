@@ -31,7 +31,7 @@ that hold point, each after \" > \".")
   "The idle timer that computes `dbt-breadcrumb--line', while it waits.")
 
 (defvar-local dbt-breadcrumb--state nil
-  "Point and the buffer's modification count when the line was computed.")
+  "Point, the modification count and the file when the line was computed.")
 
 (defvar lsp-headerline-breadcrumb-segments)
 (declare-function dbt-lsp-symbols-p "dbt-lsp")
@@ -63,13 +63,14 @@ next, `), final as (', which is the next one's."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq dbt-breadcrumb--timer nil
-            dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick)))
+            dbt-breadcrumb--state (list (point) (buffer-chars-modified-tick) buffer-file-name))
       (save-excursion
         (save-restriction
           (widen)
           (let* ((case-fold-search t)
                  (position (point))
-                 (root (dbt-project-root))
+                 (file (expand-file-name (or (buffer-file-name (buffer-base-buffer)) (buffer-name))))
+                 (root (dbt-project-root file))
                  (symbols nil))
             (dolist (block (cdr (dbt-edit-blocks position)))
               (let ((statement (replace-regexp-in-string
@@ -94,19 +95,19 @@ next, `), final as (', which is the next one's."
                   (cons (string-replace
                          "%" "%%"
                          (concat " " (string-join
-                                      (append (and root (delete "." (split-string (file-relative-name default-directory root)
+                                      (append (and root (delete "." (split-string (file-relative-name (file-name-directory file) root)
                                                                                   "/" t)))
-                                              (list (file-name-nondirectory (or buffer-file-name (buffer-name)))))
+                                              (list (file-name-nondirectory file)))
                                       " > ")))
                         (string-replace "%" "%%" (mapconcat (lambda (symbol) (concat " > " (cdr symbol)))
                                                             (sort symbols #'car-less-than-car))))))))
       (force-mode-line-update))))
 
 (defun dbt-breadcrumb--schedule ()
-  "Have the header line computed once Emacs is idle, if point or the text moved.
+  "Have the header line computed once Emacs is idle, if point, text or file moved.
 For `post-command-hook'.  Half a second, lsp-mode's `lsp-idle-delay'."
   (unless (or dbt-breadcrumb--timer
-              (equal dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick))))
+              (equal dbt-breadcrumb--state (list (point) (buffer-chars-modified-tick) buffer-file-name)))
     (setq dbt-breadcrumb--timer (run-with-idle-timer 0.5 nil #'dbt-breadcrumb--update (current-buffer)))))
 
 ;;;###autoload
