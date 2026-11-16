@@ -53,10 +53,13 @@ Without any dbt executable, dbt-mode reads the project's files:
   packages, as `C-c C-f` names them, grouped by kind, each with its
   package and file, and previews the current one at its definition;
   with [embark](https://github.com/oantolin/embark), `embark-act` acts
-  on the call or the YAML entry at point, and on those candidates: `o`
-  lists its definitions, `y` visits its YAML entry, `b` builds it, `t`
-  tests it, `l` shows its lineage and `w` copies its relation, each where
-  `M-.` would go (see Installation);
+  on the call or the YAML entry at point, and on the candidates of that
+  command: `RET` goes where `M-.` would, `d` lists every
+  definition, `y` visits the YAML entry of a model, seed or snapshot, `b`
+  builds it, `r` runs a model, `t` tests it, `l` shows its lineage and
+  `w` copies its relation, each where `M-.` would go, and refusing a
+  resource it does not fit, such as a macro to build; embark's general
+  actions stay, but for `w`, its copy of the target (see Installation);
 - completion of the arguments of `ref`, `source` and `doc`, and of macros in
   a tag;
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
@@ -278,13 +281,16 @@ With expreg, the regions of dbt-mode join its own:
 ```
 
 With embark, its actions on a dbt resource join its own; `M-x
-dbt-consult-resource` needs consult alone:
+dbt-consult-resource` needs consult alone, and can take the place of
+`C-c C-f`:
 
 ```elisp
 (with-eval-after-load 'embark
   (require 'dbt-embark)
   (add-to-list 'embark-target-finders #'dbt-embark-target)
-  (add-to-list 'embark-keymap-alist '(dbt-identifier dbt-embark-identifier-map)))
+  (add-to-list 'embark-keymap-alist
+               '(dbt-identifier dbt-embark-identifier-map embark-general-map)))
+(keymap-set dbt-mode-map "<remap> <dbt-find-resource>" #'dbt-consult-resource)
 ```
 
 `dbt-lsp-deferred` makes the root of the dbt project a folder of the lsp

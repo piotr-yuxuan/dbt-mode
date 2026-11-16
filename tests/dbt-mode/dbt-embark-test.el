@@ -20,29 +20,46 @@
   "Run BODY with dbt-embark's target finder and keymap given to embark."
   (declare (indent 0) (debug t))
   `(let ((embark-target-finders (cons #'dbt-embark-target embark-target-finders))
-         (embark-keymap-alist (cons '(dbt-identifier dbt-embark-identifier-map) embark-keymap-alist))
+         (embark-keymap-alist (cons '(dbt-identifier dbt-embark-identifier-map embark-general-map)
+                                    embark-keymap-alist))
          (dbt-executable (expand-file-name "bin/dbt" dbt-test-directory)))
      ,@body))
 
 (ert-deftest dbt-embark-acts-on-the-call-at-point ()
-  "embark's actions on a ref at point visit its definition and its YAML entry, show its lineage, build and test it.
-Each acts on what M-. would go to; outside dbt-mode, no target."
+  "embark's actions on a ref at point visit its definition and its YAML entry, show its lineage, build, run and test it.
+Each acts on what M-. would go to; a macro is not built, and no dbt
+runs for it; outside dbt-mode, or while the region is active, no dbt
+target."
   (dbt-test-with-project root
     (dbt-test-with-embark
       (save-window-excursion
         (pcase-dolist (`(,key ,check)
-                       `(("o" ,(lambda () (equal (file-relative-name buffer-file-name root)
+                       `(("RET" ,(lambda () (equal (file-relative-name buffer-file-name root)
+                                                   "models/staging/stg_orders.sql")))
+                         ("d" ,(lambda () (equal (file-relative-name buffer-file-name root)
                                                  "models/staging/stg_orders.sql")))
                          ("y" ,(lambda () (and (equal (file-relative-name buffer-file-name root)
                                                       "models/staging/_staging.yml")
                                                (looking-at ".*name: stg_orders"))))
                          ("l" ,(lambda () (get-buffer "*dbt lineage: stg_orders*")))
                          ("b" ,(lambda () (dbt-test-ran "build" "^arguments: build --select stg_orders$")))
+                         ("r" ,(lambda () (dbt-test-ran "run" "^arguments: run --select stg_orders$")))
                          ("t" ,(lambda () (dbt-test-ran "test" "^arguments: test --select stg_orders$")))))
           (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
           (dbt-test-goto "stg_orders')")
           (execute-kbd-macro (kbd (concat "M-x embark-act RET " key)))
           (should (funcall check)))
+        (switch-to-buffer (dbt-test-visit root "models/staging/stg_orders.sql"))
+        (dbt-test-goto "cents_to_dollars")
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x embark-act RET b")) :type 'user-error))
+                       "Not for a macro, only for a table, model, seed, snapshot"))
+        (should-not (get-buffer "*dbt shop: build*"))
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (dbt-test-goto "stg_orders')")
+        (set-mark (line-beginning-position))
+        (activate-mark)
+        (should-not (dbt-embark-target))
+        (deactivate-mark)
         (with-temp-buffer
           (insert "{{ ref('stg_orders') }}")
           (goto-char 10)
@@ -59,11 +76,12 @@ Each acts on what M-. would go to; outside dbt-mode, no target."
 (ert-deftest dbt-embark-acts-on-a-source-entry-and-a-candidate ()
   "embark acts on a source table's YAML entry, and on a candidate of dbt-consult-resource.
 The table's relation comes from the manifest; the candidate's lineage
-shows, and it builds."
+shows, it builds and its relation is copied."
   (dbt-test-with-project root
     (dbt-test-with-embark
       (make-directory (expand-file-name "target" root))
-      (write-region (concat "{\"nodes\": {}, \"sources\": {\"source.shop.raw.raw_orders\":"
+      (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"relation_name\": \"db.main.stg_orders\"}},"
+                            " \"sources\": {\"source.shop.raw.raw_orders\":"
                             " {\"relation_name\": \"raw.main.raw_orders\"}}}")
                     nil (expand-file-name "target/manifest.json" root))
       (save-window-excursion
@@ -73,6 +91,10 @@ shows, and it builds."
         (execute-kbd-macro (kbd "M-x embark-act RET w"))
         (should (equal (current-kill 0) "raw.main.raw_orders"))
         (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        ;; Another test's lineage of stg_orders would pass for this one's.
+        (dolist (buffer (buffer-list))
+          (when (string-prefix-p "*dbt lineage: " (buffer-name buffer))
+            (kill-buffer buffer)))
         ;; The maps of completion inherit this keymap, not the variable.
         (keymap-set minibuffer-local-map "C-c a" #'embark-act)
         ;; Quitting the minibuffer first would end the keyboard macro
@@ -81,15 +103,55 @@ shows, and it builds."
         (let ((embark-quit-after-action nil)
               (consult-preview-key nil))
           (unwind-protect
-              (dolist (action '("l" "b"))
+              (pcase-dolist (`(,command ,action) '(("M-x dbt-consult-resource RET" "l")
+                                                   ("M-x dbt-consult-resource RET" "b")
+                                                   ("M-x dbt-consult-resource RET" "w")))
                 (condition-case nil
-                    (execute-kbd-macro (kbd (format "M-x dbt-consult-resource RET ref:stg_orders C-c a %s C-g"
-                                                    action)))
+                    (execute-kbd-macro (kbd (format "%s ref:stg_orders C-c a %s C-g" command action)))
                   (quit nil)))
             (keymap-unset minibuffer-local-map "C-c a" t)))
         (should (get-buffer "*dbt lineage: stg_orders*"))
-        ;; Built where it is defined, not where point is.
-        (should (dbt-test-ran "build" "^arguments: build --select stg_orders$"))))))
+        ;; Built and copied for the candidate, not for what point is on.
+        (should (dbt-test-ran "build" "^arguments: build --select stg_orders$"))
+        (should (equal (current-kill 0) "db.main.stg_orders"))))))
+
+(ert-deftest dbt-embark-acts-from-the-project-on-a-package ()
+  "embark builds a model of a local package outside the project from the project, and shows the lineage of the namesake M-. takes.
+A package's model whose name the project's model shares is the
+package's own from the package's files."
+  (dbt-test-with-project root
+    (let ((shared (file-name-as-directory (make-temp-file "dbt-shared" t))))
+      (unwind-protect
+          (dbt-test-with-embark
+            (make-directory (expand-file-name "models" shared))
+            (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+            (pcase-dolist (`(,file . ,text)
+                           `((,(expand-file-name "dbt_project.yml" shared)
+                              . "name: 'shared'\nversion: '1.0.0'\nconfig-version: 2\n")
+                             (,(expand-file-name "models/shared_model.sql" shared) . "select 1 as id\n")
+                             (,(expand-file-name "packages.yml" root)
+                              . ,(format "packages:\n  - local: dbt_packages/shop_utils\n  - local: %s\n" shared))
+                             (,(expand-file-name "models/marts/uses_shared.sql" root)
+                              . "select * from {{ ref('shared_model') }}\n")
+                             (,(expand-file-name "dbt_packages/shop_utils/models/stg_orders.sql" root)
+                              . "select 1 as id\n")
+                             (,(expand-file-name "dbt_packages/shop_utils/models/pkg_calls.sql" root)
+                              . "select * from {{ ref('stg_orders') }}\n")))
+              (write-region text nil file))
+            (save-window-excursion
+              (switch-to-buffer (dbt-test-visit root "models/marts/uses_shared.sql"))
+              (dbt-test-goto "shared_model")
+              (execute-kbd-macro (kbd "M-x embark-act RET b"))
+              (should (dbt-test-ran "build" "^arguments: build --select shared_model$"))
+              (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/pkg_calls.sql"))
+              (dbt-test-goto "stg_orders")
+              (execute-kbd-macro (kbd "M-x embark-act RET l"))
+              (should (equal (buffer-local-value 'dbt-lineage--focus (get-buffer "*dbt lineage: stg_orders*"))
+                             "model.shop_utils.stg_orders"))))
+        (dolist (buffer (buffer-list))
+          (when (string-prefix-p shared (or (buffer-file-name buffer) ""))
+            (kill-buffer buffer)))
+        (delete-directory shared t)))))
 
 (provide 'dbt-embark-test)
 ;;; dbt-embark-test.el ends here
