@@ -152,7 +152,13 @@ wrote it.  \\[revert-buffer] in that buffer shows it again the same way."
                                                                  (file-attributes file))))
                             refresh))))
     (if (dbt-mode-server-p)
-        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus" refresh)) from-manifest)
+        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus" refresh))
+                           ;; Called from lsp-mode's handler of the answer, which
+                           ;; would wrap the error in its own message.
+                           (lambda ()
+                             (condition-case err
+                                 (funcall from-manifest)
+                               (user-error (message "%s" (error-message-string err))))))
       (funcall from-manifest))))
 
 ;;;###autoload
