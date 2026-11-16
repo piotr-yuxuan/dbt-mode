@@ -195,7 +195,7 @@ dbt last wrote it: eldoc never reads one."
         (find-file-other-window file)
       (let ((node (or (seq-find (lambda (node) (equal (plist-get node :id) id))
                                 (dbt-project-graph dbt-node--root))
-                      (user-error (if id (format "No file of %s in the index" id) "No file or node here")))))
+                      (user-error (if id "No file of %s in the index" "No file or node here") id))))
         (find-file-other-window (plist-get node :file))
         (goto-char (point-min))
         (forward-line (1- (plist-get node :line)))))))
