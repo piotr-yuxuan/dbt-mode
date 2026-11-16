@@ -103,6 +103,41 @@ time; C-c C-q says that dbt-oss cannot format."
     (should (string-prefix-p "This dbt cannot format"
                              (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))))
 
+(defun dbt-test-alone-xref (keys)
+  "Press KEYS, M-. or M-?, at point, and return what xref shows.
+Each item is (FILE LINE COLUMN), FILE relative to the project's root,
+LINE from 1 and COLUMN from 0."
+  (let* ((root (dbt-project-root))
+         (position (point))
+         shown
+         (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher))))
+         (xref-show-definitions-function xref-show-xrefs-function))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char position)
+      (execute-kbd-macro (kbd keys)))
+    (mapcar (lambda (item)
+              (let ((location (xref-item-location item)))
+                (list (file-relative-name (xref-location-group location) root)
+                      (xref-location-line location) (xref-file-location-column location))))
+            shown)))
+
+(ert-deftest dbt-lsp-alone-live-answers-what-it-lists ()
+  "With dbt-lsp-plus alone, M-. and M-? on what version 2 of its flag lists go to it, from SQL and YAML.
+M-. on a ref in a model leads to the model's file; M-? on it lists its
+uses, the model's own among them; M-. on a doc in YAML, a file that
+lsp-mode does not serve, lands on the doc's name, where dbt-mode would
+land at the start of its line."
+  (dbt-test-with-proxy-alone root
+    (dbt-test-alone-parsed)
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should (equal (dbt-test-alone-xref "M-.") '(("models/staging/stg_orders.sql" 1 0))))
+    (should (assoc "models/marts/orders.sql" (dbt-test-alone-xref "M-?")))
+    (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "doc(\"order_status\")" 6)
+      (should (equal (dbt-test-alone-xref "M-.") '(("models/docs.md" 1 8)))))))
+
 (ert-deftest dbt-lsp-alone-live-shows-a-failed-test-of-a-build ()
   "With dbt-lsp-plus alone, a build that fails a test shows as a diagnostic at the test's YAML entry.
 As plan 009's second criterion asks: the proxy reads the run's results
