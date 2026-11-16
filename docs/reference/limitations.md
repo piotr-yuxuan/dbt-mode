@@ -5,7 +5,9 @@
   one step in from their clause.  A Jinja tag typed at the end of the
   buffer, before what it leads to, sits at the clauses' level until
   `C-M-\` places it.  A new line inside a block comment starts at the
-  first column.
+  first column.  Within a `{% raw %}` block, a line that starts like a
+  closing tag, `{% endif %}`, sits at the raw block's column, though dbt
+  reads it as text.
 - The server gives the YAML files nothing in dbt 2.0.9; dbt-mode's own
   navigation and completion work there.
 - Without a server, previewing a CTE runs its Jinja as an inline query, with

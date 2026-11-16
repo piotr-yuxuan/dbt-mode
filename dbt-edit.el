@@ -111,6 +111,21 @@ otherwise, or with an active region, this is `delete-backward-char'."
     "materialization" "block" "with")
   "The Jinja statements that open a block, which `end' and their name close.")
 
+(defconst dbt-edit--lexeme-regexp
+  "{\\(?:\\(?1:#\\)\\|{\\|%[-+]?[ \t\n]*\\(?2:end\\)?\\(?3:[a-z_]+\\)\\_>\\)"
+  "What starts a Jinja comment (group 1), an expression or a statement.
+Group 3 is a statement's keyword, group 2 the `end' before it in a
+closing tag.  `-' or `+', Jinja's whitespace control, may follow `{%'.")
+
+(defconst dbt-edit--verbatim-blocks
+  '(("raw" . "{%[-+]?[ \t\n]*\\(?2:end\\)\\(?3:raw\\)[ \t\n]*[-+]?%}"))
+  "Alist from a block whose contents Jinja takes as text to what it reads there.
+That is the first tag that ends the block, with nothing but blanks and
+whitespace control around its keyword, groups as in
+`dbt-edit--lexeme-regexp'.  Jinja's lexer reads by a table of its
+states, a raw block being one; elsewhere, it reads
+`dbt-edit--lexeme-regexp'.")
+
 (defvar-local dbt-edit--scans (list (list 0))
   "The states that `dbt-edit-blocks' resumes its scan from, the last first.
 Each is (POSITION CLOSED . OPEN), the blocks of the tags before
@@ -130,13 +145,16 @@ to `dbt-mode-jinja-max-tag-length' further on.  For
   "Return the Jinja blocks of the buffer before LIMIT, as (CLOSED . OPEN).
 CLOSED lists the closed blocks, OPEN those still open at LIMIT,
 innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
-CLOSE-END), the last two only when it is closed.  A `set' opens a block
-only without `=', and a tag in a `{# #}' comment or not closed yet
-counts for nothing; a tag that starts before LIMIT counts whole.  The
-scan resumes from the last of `dbt-edit--scans' before LIMIT, unless the
-buffer is narrowed, and keeps the states it reaches when it resumed from
-the last of them.  The lists are those of the states: never modify
-them."
+CLOSE-END), the last two only when it is closed.  The tags are read as
+Jinja reads them, whatever the SQL around them: a tag in a SQL comment
+or string counts, and none in a `{# #}' comment, which ends at its first
+`#}', or the buffer's end, nor in a string of a tag, nor in a raw
+block, as `dbt-edit--verbatim-blocks' says.  A `set' opens a
+block only without `=', and a tag not closed yet counts for nothing; a
+tag that starts before LIMIT counts whole.  The scan resumes from the
+last of `dbt-edit--scans' before LIMIT, unless the buffer is narrowed,
+and keeps the states it reaches when it resumed from the last of them.
+The lists are those of the states: never modify them."
   (add-hook 'before-change-functions #'dbt-edit--forget-scans nil t)
   (save-excursion
     (let* ((scans (if (buffer-narrowed-p) (list (list 0)) dbt-edit--scans))
@@ -148,13 +166,20 @@ them."
            (open (cddar scans)))
       (goto-char (caar scans))
       ;; After a tag that ends past LIMIT, no search may bound behind point.
-      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
-        ;; dbt-mode-jinja-bounds searches: read the match before it.
+      (while (re-search-forward (alist-get (caar open) dbt-edit--verbatim-blocks dbt-edit--lexeme-regexp nil #'equal)
+                                (max limit (point)) t)
         (let* ((start (match-beginning 0))
-               (closing (match-beginning 1))
-               (keyword (match-string-no-properties 2))
-               (end (and (not (nth 4 (save-excursion (syntax-ppss start))))
-                         (cdr (dbt-mode-jinja-bounds (match-end 0))))))
+               (comment (match-beginning 1))
+               (closing (match-beginning 2))
+               (keyword (match-string-no-properties 3))
+               ;; A tag not closed is skipped from its opener on: the end
+               ;; of one skips its strings, which may run across lines.
+               (end (save-excursion
+                      (goto-char (+ start 2))
+                      (if comment
+                          ;; Unbounded, so that no state is kept within one.
+                          (progn (search-forward "#}" nil 'move) (point))
+                        (dbt-mode--tag-end (min (point-max) (+ start dbt-mode-jinja-max-tag-length)))))))
           (when end
             (cond (closing
                    (when-let* ((block (assoc keyword open)))
@@ -190,8 +215,12 @@ them."
           "\\|\\_<\\(?:rows\\|range\\|groups\\)[ \t]+\\(?:between\\|unbounded\\|current\\|[0-9]\\)\\)")
   "The keywords that start a clause of SQL, on a line of their own level.")
 
+(defconst dbt-edit--sql-comment-regexp "\\(?:\\(?:--\\|/\\*\\)[ \t]*\\)?"
+  "The opener of a SQL comment, if any, before a tag that starts a line.
+Jinja reads the tag all the same, so the line sits as the tag would.")
+
 (defconst dbt-edit--closer-regexp
-  "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
+  (concat "\\(?:[])}]\\|" dbt-edit--sql-comment-regexp "{%[-+]?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)")
   "What a line starts with when it closes the construct that holds it.")
 
 (defconst dbt-edit--base-regexp
@@ -203,7 +232,7 @@ them."
             ;; A tag, past tags, comments and blank lines, 50 at most,
             ;; before one, a closer or the end: {% if is_incremental() %}
             ;; then where.
-            "\\|" tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
+            "\\|" dbt-edit--sql-comment-regexp tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
             "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
   "What a line starts with when it stays at the base of its construct.
 A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
@@ -224,7 +253,9 @@ for a position after the line's start.
 The nearest construct open at the line's start, a parenthesis or a Jinja
 block, indents it by `dbt-indent-offset' from the line that opened it.
 A line that starts by closing it, with `)', `]', `}' or a tag such as
-`{% endif %}' or `{% else %}', is at that line's column.  At that base,
+`{% endif %}' or `{% else %}', is at that line's column.  A tag after
+the opener of a SQL comment, `-- {% endif %}', counts as one that starts
+the line, as Jinja reads it all the same.  At that base,
 a line that starts with a clause keyword, such as select or from, or
 with a CTE, NAME as (, stays at the base, and so does a Jinja statement
 tag that leads to one of them, to a closer or to the end of the buffer,
@@ -250,13 +281,15 @@ one step in from its block."
              (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
                (beginning-of-line)
                (while (and (not found)
-                           (re-search-backward (concat "^[ \t]*\\(?:{%-?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
+                           (re-search-backward (concat "^[ \t]*\\(?:" dbt-edit--sql-comment-regexp
+                                                       "{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
                                                        dbt-edit-clause-regexp "\\)")
                                                bound t))
                  (let ((other (dbt-edit--opener (point) blocks)))
                    (cond ((> other opener) (goto-char other))
                          ((nth 8 (syntax-ppss (point))))
-                         ((looking-at-p "[ \t]*{%-?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
+                         ((looking-at-p (concat "[ \t]*" dbt-edit--sql-comment-regexp "{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>"))
+                          (setq found column))
                          (t (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
@@ -264,7 +297,9 @@ one step in from its block."
   "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
 A line that starts in a string or a comment keeps its indentation.  A
 line that starts a comment, with `--', `/*' or `{#', indents as the line
-of code after it, unless that code is on its own line or closes."
+of code after it, unless that code is on its own line or closes, or the
+comment, a SQL one, holds a Jinja tag on that line, which Jinja reads:
+the line is one of Jinja then, whose block may hold that code."
   (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
     (indent-line-to
      (save-excursion
@@ -273,7 +308,8 @@ of code after it, unless that code is on its own line or closes."
          (let ((start (point))
                (end (line-end-position)))
            (forward-comment (buffer-size))
-           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
+           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp)
+                     (save-excursion (goto-char start) (looking-at-p "\\(?:--\\|/\\*\\).*{%.*%}")))
              (goto-char start))))
        (dbt-edit-indentation blocks)))))
 
@@ -320,7 +356,7 @@ starts it, as `end...', `else' and `elif' move it."
       (back-to-indentation)
       (cond ((memq char '(?\) ?\] ?\})) (= (1+ (point)) end))
             ((or (eq char ?_) (<= ?a char ?z))
-             (and (looking-at "{%-?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
+             (and (looking-at "{%[-+]?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
 
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.

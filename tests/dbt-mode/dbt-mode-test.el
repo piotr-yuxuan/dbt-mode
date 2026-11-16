@@ -866,6 +866,15 @@ The tag of a Jinja block open at the WITH, as a legacy snapshot's, does not."
       (dbt-test-goto "select {%")
       (should (equal (cdr (dbt-mode-cte-query)) (concat "{% set cols = ['a'] %}\n\n" chain "\nselect * from x"))))))
 
+(ert-deftest dbt-mode-cte-query-leaves-out-a-block-opened-in-a-comment ()
+  "A tag in a SQL comment is one for dbt: the tag of a block it opens before the WITH is left out of a CTE's query.
+Kept, the query would hold an `if' that it never closes, which dbt refuses."
+  (with-temp-buffer
+    (insert "-- {% if var('recent', false) %}\nwith x as (\n    select 1 as a\n)\nselect * from x\n-- {% endif %}\n")
+    (dbt-mode)
+    (dbt-test-goto "select 1")
+    (should (equal (cdr (dbt-mode-cte-query)) "-- \nwith x as (\n    select 1 as a\n)\nselect * from x"))))
+
 (ert-deftest dbt-mode-knows-when-no-server-runs ()
   "A buffer that no dbt lsp serves has no server, whether dbt-lsp is loaded or not."
   (dbt-test-with-project root

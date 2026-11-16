@@ -514,5 +514,129 @@ narrowing alone."
     (widen)
     (should (equal (buffer-string) "{% macro m() %}\nselect\nid\n    from t\n{% endmacro %}\n"))))
 
+(ert-deftest dbt-edit-reads-the-plus-trim-marker ()
+  "`{%+' opens, closes and splits blocks as `{%' and `{%-' do, as dbt reads it.
+dbt renders `{%+ if false +%} x {%+ endif %}' as nothing; C-c /, C-c %,
+C-x h C-M-\\ and typing a closer take its tags as tags."
+  (dbt-test-with-window "{%+ if a %}\n    select 1\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "    select 1\n{% endif %}" (buffer-string))))
+  (dbt-test-with-window "{%+ if a %}\nx\n{%+ endif +%}\n"
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{%\\+ endif")))
+  (should (equal (dbt-test-indented "select\nid,\n{%+ if x %}\nname,\n{%+ else %}\nother,\n{%+ endif %}\nlast\nfrom t\n")
+                 (concat "select\n    id,\n    {%+ if x %}\n        name,\n    {%+ else %}\n        other,\n"
+                         "    {%+ endif %}\n    last\nfrom t\n")))
+  (dbt-test-with-window "select\n    id,\n{%+ if x %}\n    name,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{%+ endif")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{%+ if x %}\n    name,\n{%+ endif-!- %}"))))
+
+(ert-deftest dbt-edit-reads-tags-in-sql-comments ()
+  "A tag in a SQL comment is a tag, as dbt renders it; only a `{# #}' comment hides one.
+A `{#' opens that comment in a SQL comment or string too, up to its
+first `#}', and a `{%' in the string of a tag is text."
+  (dbt-test-with-window "select 1 as a\n-- {% if a %}\n, 2 as b\n"
+    (dbt-test-keys "C-c /")
+    ;; At the column of its opening tag, as C-c / places it.
+    (should (string-suffix-p ", 2 as b\n   {% endif %}" (buffer-string))))
+  (dbt-test-with-window "select 1 as a\n/* {% for x in y %} */\n, 2 as b\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p ", 2 as b\n   {% endfor %}" (buffer-string))))
+  (dbt-test-with-window "{% if a %}\nselect 1\n-- {% endif %}\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{% endif %}\n\\'")))
+  (dolist (text '("select 1 as a -- {#\n{% if a %}\n#}\n"
+                  "select '{#' as a\n{% if a %}\n#}' as b\n"
+                  "select '{{ \"{% if a %}\" }}' as a\n"
+                  "{% set x = \"{% if a %}{#\" %}\nselect 1\n"))
+    (dbt-test-with-window text
+      (should-error (dbt-test-keys "C-c /") :type 'user-error)))
+  ;; The where that dbt renders only in an incremental run is in the if.
+  (dbt-test-with-window "select *\nfrom t\n-- {% if is_incremental() %}\nwhere a > 1\n-- {% endif %}\norder by 1\n"
+    (dbt-test-goto "where")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 4))
+    (dbt-test-goto "order")
+    (dbt-test-keys "TAB")
+    (should (= (current-indentation) 0)))
+  ;; A comment's end, deleted, hides what follows from the next command.
+  (dbt-test-with-window "{# note #}\n{% if x %}\nselect 1\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "select 1\n{% endif %}" (buffer-string)))
+    (dbt-test-goto "#}")
+    (dbt-test-keys "C-d C-d")
+    (goto-char (point-max))
+    (insert "\n")
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)))
+
+(ert-deftest dbt-edit-indents-a-tag-in-a-sql-comment-as-the-tag ()
+  "A line whose SQL comment holds a tag sits as the tag would: its block, else and end as uncommented.
+C-x h C-M-\\ leaves what it indented as it is, as TAB on each line does."
+  (dolist (case '(("select *\nfrom t\n-- {% if is_incremental() %}\nwhere a > 1\n-- {% endif %}\norder by 1\n"
+                   . "select *\nfrom t\n-- {% if is_incremental() %}\n    where a > 1\n-- {% endif %}\norder by 1\n")
+                  ("select\nid\n-- {% if a %}\n, b\n/* {% else %} */\n, c\n-- {% endif %}\nfrom t\n"
+                   . "select\n    id\n    -- {% if a %}\n        , b\n    /* {% else %} */\n        , c\n    -- {% endif %}\nfrom t\n")))
+    (should (equal (dbt-test-indented (car case)) (cdr case)))
+    (should (equal (dbt-test-indented (cdr case)) (cdr case)))
+    (dbt-test-with-window (car case)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (dbt-test-keys "TAB")
+        (forward-line 1))
+      (should (equal (buffer-string) (cdr case)))))
+  ;; A `{%' that closes no tag on the line leaves a comment line as one.
+  (should (equal (dbt-test-indented "select\n    id\nfrom t\n-- a stray {% here\nwhere a\n")
+                 "select\n    id\nfrom t\n-- a stray {% here\nwhere a\n")))
+
+(ert-deftest dbt-edit-keeps-its-states-across-comments-and-raw ()
+  "The blocks read from the states kept after a comment that runs past the limit are those of a scan from the start."
+  (let ((fresh (lambda (limit) (let ((dbt-edit--scans (list (list 0)))) (dbt-edit-blocks limit)))))
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% if a %}\n{# x\n{% for b in c %}\n#}\n{% for d in e %}\nselect\n")
+      (dbt-edit-blocks (progn (goto-char (point-min)) (search-forward "{# x") (point)))
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))
+      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for" "if"))))
+    ;; Resumed within a raw block, the scan still reads nothing but its end.
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% raw %}\n{% if a %}\n{% endraw %}\n{% for b in c %}\nselect\n")
+      (dbt-edit-blocks (progn (goto-char (point-min)) (search-forward "{% raw %}\n") (point)))
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))
+      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for"))))))
+
+(ert-deftest dbt-edit-reads-nothing-in-a-raw-block-but-its-end ()
+  "Within a raw block, dbt reads no tag but the first `{% endraw %}' as written, whatever the trim markers.
+So C-c / closes the raw block, C-c % moves between its tags only, an
+`if' within indents nothing after it and expreg offers no block within
+it; `{% endraw x %}' ends nothing."
+  (dbt-test-with-window "{% raw %}\n{% if a %}\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "{% if a %}\n{% endraw %}" (buffer-string)))
+    (insert "\n")
+    (should-error (dbt-test-keys "C-c /") :type 'user-error))
+  (dbt-test-with-window "{%- raw -%}\n{% if a %}\n{%+ endraw +%}\n"
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{%\\+ endraw"))
+    (dbt-test-goto "{% if")
+    (should-error (dbt-test-keys "C-c %") :type 'user-error))
+  (dbt-test-with-window "{% raw %}a{% endraw x %}{% if a %}{% endraw %}\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{% endraw %}\n")))
+  (should (equal (dbt-test-indented "{% raw %}{% if a %}{% endraw %}\nselect\nid\n")
+                 "{% raw %}{% if a %}{% endraw %}\nselect\n    id\n"))
+  (dbt-test-with-window "select 1\n{% raw %}{% if a %}x{% endif %}{% endraw %}\n"
+    (dbt-test-goto "x{%")
+    (should (equal (mapcar (lambda (region) (buffer-substring-no-properties (cadr region) (cddr region)))
+                           (seq-filter (lambda (region) (eq (car region) 'dbt-block)) (dbt-edit-expreg-regions)))
+                   '("{% raw %}{% if a %}x{% endif %}{% endraw %}")))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
