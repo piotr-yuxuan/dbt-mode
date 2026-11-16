@@ -97,6 +97,8 @@
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
+(declare-function dbt-lsp-hierarchy-p "dbt-lsp")
+(declare-function dbt-lsp-hierarchy-lineage "dbt-lsp")
 
 ;;;; Faces
 
@@ -941,9 +943,10 @@ preview's do."
 SELECTOR is its name, or NAME.vVERSION for a version of a model; a name
 alone is that of its latest version, as for `ref'.  RESOURCE, the
 entity of the index that SELECTOR names, settles which of namesakes it
-is.  With dbt lsp, the server gives the lineage; otherwise the `ref'
-and `source' calls of the project's files give it, read again when the
-lineage is asked for again."
+is.  With dbt-lsp-plus, its call hierarchy gives the lineage, one level
+at a time; with dbt lsp alone, the server's list of nodes; otherwise
+the `ref' and `source' calls of the project's files, read again when
+the lineage is asked for again."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
   (let* ((root (dbt-mode--root))
@@ -953,13 +956,17 @@ lineage is asked for again."
                      (user-error "No model, seed or snapshot %s" selector)))
          (id (dbt-project-node-id entity))
          refresh)
-    (if (dbt-mode-server-p)
-        (dbt-lsp-lineage (dbt-mode-resource-selector entity) id)
+    (cond
+     ((and (dbt-mode-server-p) (dbt-lsp-hierarchy-p))
+      (dbt-lsp-hierarchy-lineage (plist-get entity :file) (plist-get entity :line) id))
+     ((dbt-mode-server-p)
+      (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))
+     (t
       (setq refresh (lambda ()
                       (dbt-project-forget root)
                       (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))
       ;; Read again on `g' only: the cached graph serves the first time.
-      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh))))
+      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))))
 
 (defun dbt-insert-ref (selector)
   "Insert a call of `ref' to SELECTOR, read with completion.

@@ -351,6 +351,66 @@ orders or orders.v2."
         "dbt lsp"
         (lambda () (let ((default-directory root)) (dbt-lsp-lineage selector id))))))))
 
+(defun dbt-lsp-hierarchy-p ()
+  "Return non-nil when the server of the buffer announces a call hierarchy.
+dbt-lsp-plus does; dbt lsp alone does not."
+  (let ((workspace (dbt-lsp-workspace)))
+    (and workspace (lsp-get (lsp--workspace-server-capabilities workspace) :callHierarchyProvider))))
+
+(defconst dbt-lsp--item
+  '(object (:name stringp) (:uri stringp) (:range (object (:start (object (:line natnump)))))
+           (:data (object (:uniqueId stringp) (:resourceType stringp))))
+  "The schema of an item of dbt-lsp-plus's call hierarchy, as dbt-mode reads it.
+`data.uniqueId' is dbt's unique id of the node.")
+
+(defun dbt-lsp-hierarchy-lineage (file line id)
+  "Show the lineage of the node ID, at LINE of FILE, from the call hierarchy.
+dbt-lsp-plus answers it from the project's files, and dbt lsp's nodes
+once listed, macros included.  The item of the node comes from the start
+of LINE, which must be that of ID; then outgoing calls give what each
+node depends on, upstream, and incoming calls what depends on it,
+downstream, one level at a time, as `dbt-lineage-show' asks them."
+  (let* ((root (dbt-project-root))
+         (items (make-hash-table :test #'equal))
+         (node (lambda (item)
+                 (let ((id (lsp-get (lsp-get item :data) :uniqueId))
+                       (path (lsp--uri-to-path (lsp-get item :uri))))
+                   (puthash id item items)
+                   (list :id id :name (lsp-get item :name) :type (intern (lsp-get (lsp-get item :data) :resourceType))
+                         :package (nth 1 (split-string id "\\.")) :file (and (file-regular-p path) path)
+                         :line (1+ (lsp-get (lsp-get (lsp-get item :range) :start) :line))))))
+         (calls (lambda (ids direction callback)
+                  (pcase-let ((`(,method ,key) (if (eq direction 'upstream)
+                                                   '("callHierarchy/outgoingCalls" :to)
+                                                 '("callHierarchy/incomingCalls" :from)))
+                              (left (length ids))
+                              (found nil))
+                    (dolist (asked ids)
+                      (let ((default-directory root))
+                        (dbt-lsp--request
+                         method (list :item (gethash asked items)) `(or null (array (object (,key ,dbt-lsp--item))))
+                         (lambda (answer)
+                           (seq-doseq (call answer)
+                             (let ((other (funcall node (lsp-get call key))))
+                               ;; What ASKED depends on, upstream; what depends on it, downstream.
+                               (push (if (eq key :to)
+                                         (list other asked (plist-get other :id))
+                                       (list other (plist-get other :id) asked))
+                                     found)))
+                           (when (zerop (setq left (1- left)))
+                             (funcall callback (nreverse found)))))))))))
+    (dbt-lsp--request
+     "textDocument/prepareCallHierarchy"
+     (list :textDocument (list :uri (lsp--path-to-uri file)) :position (list :line (1- line) :character 0))
+     `(or null (array ,dbt-lsp--item))
+     (lambda (answer)
+       (if-let* ((item (seq-find (lambda (item) (equal (lsp-get (lsp-get item :data) :uniqueId) id)) answer)))
+           (dbt-lineage-show root id (list (funcall node item)) "dbt-lsp-plus"
+                             (lambda () (let ((default-directory root)) (dbt-lsp-hierarchy-lineage file line id)))
+                             calls)
+         (message "dbt lsp: textDocument/prepareCallHierarchy gives no item of %s in %s"
+                  id (file-relative-name file root)))))))
+
 (defun dbt-lsp-rename-model (name)
   "Rename the model of the current buffer to NAME, and the uses of it.
 lsp-mode asks the server what renaming the file changes, and the server
