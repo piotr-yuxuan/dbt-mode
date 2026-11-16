@@ -194,7 +194,8 @@ An error in a timer only shows in *Messages*."
 
 (ert-deftest dbt-breadcrumb-names-the-blocks-that-dbt-reads ()
   "The header line names the blocks as dbt reads their tags, as dbt-lsp-plus does.
-A `for' opened by `{%+' is one, as is an `if' opened in a SQL comment."
+A `for' opened by `{%+' is one, as is an `if' opened in a SQL comment;
+an `if' within a raw block is text."
   (dbt-test-with-project root
     (write-region (concat "with src as (\n"
                           "    select 1 as a\n"
@@ -202,6 +203,7 @@ A `for' opened by `{%+' is one, as is an `if' opened in a SQL comment."
                           "    AT_COMMENTED\n"
                           "    -- {% endif %}\n"
                           "    {%+ for x in y %} AT_PLUS {% endfor %}\n"
+                          "    {% raw %}{% if raw %} AT_RAW {% endraw %}\n"
                           ")\n"
                           "select * from src\n")
                   nil (expand-file-name "models/marts/tags.sql" root))
@@ -209,7 +211,8 @@ A `for' opened by `{%+' is one, as is an `if' opened in a SQL comment."
       (switch-to-buffer (dbt-test-visit root "models/marts/tags.sql"))
       (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
       (should (equal (dbt-test-breadcrumbs-at "AT_COMMENTED") " models > marts > tags.sql > src > if is_incremental()"))
-      (should (equal (dbt-test-breadcrumbs-at "AT_PLUS") " models > marts > tags.sql > src > for x in y")))))
+      (should (equal (dbt-test-breadcrumbs-at "AT_PLUS") " models > marts > tags.sql > src > for x in y"))
+      (should (equal (dbt-test-breadcrumbs-at "AT_RAW") " models > marts > tags.sql > src")))))
 
 (provide 'dbt-breadcrumb-test)
 ;;; dbt-breadcrumb-test.el ends here

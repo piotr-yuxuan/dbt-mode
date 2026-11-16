@@ -117,6 +117,15 @@ otherwise, or with an active region, this is `delete-backward-char'."
 Group 3 is a statement's keyword, group 2 the `end' before it in a
 closing tag.  `-' or `+', Jinja's whitespace control, may follow `{%'.")
 
+(defconst dbt-edit--verbatim-blocks
+  '(("raw" . "{%[-+]?[ \t\n]*\\(?2:end\\)\\(?3:raw\\)[ \t\n]*[-+]?%}"))
+  "Alist from a block whose contents Jinja takes as text to what it reads there.
+That is the first tag that ends the block, with nothing but blanks and
+whitespace control around its keyword, groups as in
+`dbt-edit--lexeme-regexp'.  Jinja's lexer reads by a table of its
+states, a raw block being one; elsewhere, it reads
+`dbt-edit--lexeme-regexp'.")
+
 (defvar-local dbt-edit--scans (list (list 0))
   "The states that `dbt-edit-blocks' resumes its scan from, the last first.
 Each is (POSITION CLOSED . OPEN), the blocks of the tags before
@@ -139,7 +148,8 @@ innermost first.  A block is (KEYWORD OPEN-START OPEN-END CLOSE-START
 CLOSE-END), the last two only when it is closed.  The tags are read as
 Jinja reads them, whatever the SQL around them: a tag in a SQL comment
 or string counts, and none in a `{# #}' comment, which ends at its first
-`#}', or the buffer's end, nor in a string of a tag.  A `set' opens a
+`#}', or the buffer's end, nor in a string of a tag, nor in a raw
+block, as `dbt-edit--verbatim-blocks' says.  A `set' opens a
 block only without `=', and a tag not closed yet counts for nothing; a
 tag that starts before LIMIT counts whole.  The scan resumes from the
 last of `dbt-edit--scans' before LIMIT, unless the buffer is narrowed,
@@ -156,7 +166,8 @@ The lists are those of the states: never modify them."
            (open (cddar scans)))
       (goto-char (caar scans))
       ;; After a tag that ends past LIMIT, no search may bound behind point.
-      (while (re-search-forward dbt-edit--lexeme-regexp (max limit (point)) t)
+      (while (re-search-forward (alist-get (caar open) dbt-edit--verbatim-blocks dbt-edit--lexeme-regexp nil #'equal)
+                                (max limit (point)) t)
         (let* ((start (match-beginning 0))
                (comment (match-beginning 1))
                (closing (match-beginning 2))

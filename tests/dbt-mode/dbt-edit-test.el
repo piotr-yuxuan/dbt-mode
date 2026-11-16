@@ -597,7 +597,43 @@ C-x h C-M-\\ leaves what it indented as it is, as TAB on each line does."
       (insert "{% if a %}\n{# x\n{% for b in c %}\n#}\n{% for d in e %}\nselect\n")
       (dbt-edit-blocks (progn (goto-char (point-min)) (search-forward "{# x") (point)))
       (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))
-      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for" "if"))))))
+      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for" "if"))))
+    ;; Resumed within a raw block, the scan still reads nothing but its end.
+    (with-temp-buffer
+      (dbt-mode)
+      (insert "{% raw %}\n{% if a %}\n{% endraw %}\n{% for b in c %}\nselect\n")
+      (dbt-edit-blocks (progn (goto-char (point-min)) (search-forward "{% raw %}\n") (point)))
+      (should (equal (dbt-edit-blocks (point-max)) (funcall fresh (point-max))))
+      (should (equal (mapcar #'car (cdr (dbt-edit-blocks (point-max)))) '("for"))))))
+
+(ert-deftest dbt-edit-reads-nothing-in-a-raw-block-but-its-end ()
+  "Within a raw block, dbt reads no tag but the first `{% endraw %}' as written, whatever the trim markers.
+So C-c / closes the raw block, C-c % moves between its tags only, an
+`if' within indents nothing after it and expreg offers no block within
+it; `{% endraw x %}' ends nothing."
+  (dbt-test-with-window "{% raw %}\n{% if a %}\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "{% if a %}\n{% endraw %}" (buffer-string)))
+    (insert "\n")
+    (should-error (dbt-test-keys "C-c /") :type 'user-error))
+  (dbt-test-with-window "{%- raw -%}\n{% if a %}\n{%+ endraw +%}\n"
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{%\\+ endraw"))
+    (dbt-test-goto "{% if")
+    (should-error (dbt-test-keys "C-c %") :type 'user-error))
+  (dbt-test-with-window "{% raw %}a{% endraw x %}{% if a %}{% endraw %}\n"
+    (should-error (dbt-test-keys "C-c /") :type 'user-error)
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{% endraw %}\n")))
+  (should (equal (dbt-test-indented "{% raw %}{% if a %}{% endraw %}\nselect\nid\n")
+                 "{% raw %}{% if a %}{% endraw %}\nselect\n    id\n"))
+  (dbt-test-with-window "select 1\n{% raw %}{% if a %}x{% endif %}{% endraw %}\n"
+    (dbt-test-goto "x{%")
+    (should (equal (mapcar (lambda (region) (buffer-substring-no-properties (cadr region) (cddr region)))
+                           (seq-filter (lambda (region) (eq (car region) 'dbt-block)) (dbt-edit-expreg-regions)))
+                   '("{% raw %}{% if a %}x{% endif %}{% endraw %}")))))
 
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
