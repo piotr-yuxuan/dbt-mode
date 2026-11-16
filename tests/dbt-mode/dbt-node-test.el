@@ -153,7 +153,7 @@ Without a manifest, or without the node in it, it says so."
         (kill-buffer)))))
 
 (ert-deftest dbt-node-gives-eldoc-the-relation-from-a-manifest-held ()
-  "Without a server, eldoc on a ref says the materialization and the relation of what it names.
+  "Without a server, eldoc on a ref says the materialization and the relation of what it names, in a model as in YAML.
 Only once dbt-mode holds the project's manifest as it is, never reading
 it at idle time; nothing elsewhere than on a ref or a source, nor for a
 node with neither."
@@ -179,6 +179,12 @@ node with neither."
       (dbt-test-goto "off')")
       (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
       (should-not said)
+      (switch-to-buffer (dbt-test-visit root "models/staging/_sources.yml"))
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "raw_orders")
+      (run-hook-with-args-until-success 'eldoc-documentation-functions (lambda (text &rest _) (setq said text)))
+      (should (equal said "\"shop\".\"main\".\"raw_orders\""))
+      (setq said nil)
       (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
       ;; A manifest that dbt wrote again is not held any more.
       (dbt-test-goto "stg_orders')")

@@ -1281,16 +1281,19 @@ commentary of dbt-mode.el for the rest.
 On the `name' of a model, \\[xref-find-definitions] goes to its file,
 and on a call of `ref', `source' or `doc' in a test or a description,
 to what it names; \\[xref-find-references] lists where it is used;
-\\[dbt-describe] shows what dbt knows of it.  `dbt-properties-mode-maybe'
-turns it on in a dbt project's YAML files."
+\\[dbt-describe] shows what dbt knows of it, and eldoc says its
+relation, as in `dbt-mode'.  `dbt-properties-mode-maybe' turns it on in a
+dbt project's YAML files."
   :lighter " dbt"
   (if dbt-properties-mode
       (progn
         (add-hook 'xref-backend-functions #'dbt-mode-xref-backend -50 'local)
         (add-hook 'completion-at-point-functions #'dbt-mode-completion-at-point -50 'local)
+        (add-hook 'eldoc-documentation-functions #'dbt-node-eldoc nil 'local)
         (add-hook 'after-save-hook #'dbt-mode--forget-project nil 'local))
     (remove-hook 'xref-backend-functions #'dbt-mode-xref-backend 'local)
     (remove-hook 'completion-at-point-functions #'dbt-mode-completion-at-point 'local)
+    (remove-hook 'eldoc-documentation-functions #'dbt-node-eldoc 'local)
     (remove-hook 'after-save-hook #'dbt-mode--forget-project 'local)))
 
 ;;;###autoload
