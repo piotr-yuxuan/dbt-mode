@@ -249,6 +249,34 @@ files of the Nix store do: only their true names tell them apart."
       (should-not (dbt-lsp-server-p))
       (should (< (- (float-time) start) 5)))))
 
+(ert-deftest dbt-lsp-asks-again-a-dbt-that-did-not-answer ()
+  "A dbt that did not say in time whether it formats is asked again after a while, and C-c C-q then formats.
+The timeout says so, and within the while dbt is not asked again, so
+that a dbt that hangs costs its wait once."
+  (dbt-lsp-test-with-dbt dbt (concat "case \"$1 $2\" in\n"
+                                     "  \"format --help\") [ -e \"$LOG\" ] && exit 0; echo asked > \"$LOG\"; exec sleep 20 ;;\n"
+                                     "  \"lsp --help\") exit 2 ;;\n"
+                                     "esac\n"
+                                     "exec " (shell-quote-argument (expand-file-name "bin/dbt" dbt-test-directory))
+                                     " \"$@\"")
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt)
+              (dbt-project--probe-seconds 1)
+              (dbt-project--probe-retry-seconds 2)
+              (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment))
+              (start (with-current-buffer (messages-buffer) (point-max))))
+          (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+          (should (string-search "dbt did not answer dbt format --help within 1 s"
+                                 (with-current-buffer (messages-buffer) (buffer-substring start (point-max)))))
+          ;; dbt would answer now, but is not asked yet, timers having run.
+          (accept-process-output nil 0.5)
+          (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+          (accept-process-output nil 2)
+          (execute-kbd-macro (kbd "C-c C-q"))
+          (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n" (buffer-string)))))))))
+
 (ert-deftest dbt-lsp-stops-asking-a-dbt-on-a-quit ()
   "A quit while dbt is asked whether it runs a command, as C-g in the first dispatch menu, stops the dbt it started."
   (dbt-lsp-test-with-dbt dbt "exec sleep 20"
