@@ -728,6 +728,15 @@ its node in the manifest of the user's runs, read only then.  For
             (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
                          " ")))))
 
+(defun dbt-mode-resource-at-point ()
+  "Return the resource that point is on, else the current one, or nil.
+On a `ref' or a `source', it is the model, seed, snapshot or source
+table that the call names, the first that `xref-find-definitions'
+lists; else the current model, seed, snapshot or analysis."
+  (let ((target (dbt-mode-target-at-point)))
+    (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+        (dbt-mode-current-resource))))
+
 (defun dbt-mode-entity-selection (entity)
   "Return dbt's selector of ENTITY, an entity of the index.
 A model, seed or snapshot is NAME or NAME.vVERSION; a source table is
@@ -747,10 +756,7 @@ exposure, exposure:NAME, as a bare NAME selects a model of that name
 too.  Else it is the current resource, or path:FILE for a file of the
 project that holds none, such as a singular test or a properties file,
 as dbt selects by path.  Nil outside a file of a project."
-  (let* ((target (dbt-mode-target-at-point))
-         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource)
-                     (dbt-mode-entity-at-point '(exposure)))))
+  (let ((entity (or (dbt-mode-resource-at-point) (dbt-mode-entity-at-point '(exposure)))))
     (if entity
         (dbt-mode-entity-selection entity)
       (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root)))))))
@@ -1011,11 +1017,7 @@ target/manifest.json, which `dbt parse', `dbt compile' and every run
 write; the message says when it was written."
   (interactive)
   (let* ((root (dbt-mode--root))
-         (target (dbt-mode-target-at-point))
-         (entity (or resource
-                     (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource)
-                     (user-error "No model or source here")))
+         (entity (or resource (dbt-mode-resource-at-point) (user-error "No model or source here")))
          (file (expand-file-name "manifest.json" (dbt-project-target root)))
          (id (dbt-project-node-id entity))
          (node (if (file-readable-p file)
