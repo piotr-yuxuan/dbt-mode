@@ -509,8 +509,24 @@ a model, YAML properties, a singular test."
                                  (plist-get entity :name)))
              (xref-make-file-location (plist-get entity :file) (plist-get entity :line) 0)))
 
+(defvar dbt-mode--every-definition nil
+  "Non-nil while a command asks for every definition of an identifier.
+`dbt-find-resource' does: an identifier that it reads names resources,
+not a call that dbt resolves.")
+
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
-  "Return the definitions of IDENTIFIER.
+  "Return the definitions of IDENTIFIER, the one dbt takes first.
+For a `ref', a `source' or a `doc', the project's definition, when dbt
+takes it from the current file, is the only one: dbt takes it then from
+any file of the project, and from a package's file that defines no
+namesake.  It is wrong for a macro of the project that a package's node
+calls, as through dispatch, which dbt resolves from that package, a
+rare case.  A package's own definition, when dbt takes it, is listed
+first, then the others: dbt skips a package's model that the project
+disables to override it, which the index does not read, and resolves a
+call in a package's macro from the node that calls the macro.  With
+`dbt-mode--every-definition', every definition is listed.
+
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
 YAML entry of a package's model, which dbt reads as unused.  xref's
@@ -530,7 +546,12 @@ resolve."
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
-    (mapcar #'dbt-mode--xref definitions)))
+    (mapcar #'dbt-mode--xref
+            (if (and (memq (plist-get target :kind) '(ref source doc))
+                     (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root)))
+                     (not dbt-mode--every-definition))
+                (list (car definitions))
+              definitions))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
@@ -738,12 +759,14 @@ of the current buffer, unless NO-DEFAULT, or unless it is none of these."
   "Visit the definition of IDENTIFIER, read with completion.
 The identifiers name every model, seed, snapshot, analysis, macro, test,
 docs block, source and table of the project and its packages, whether
-or not a language server runs."
+or not a language server runs.  Every definition of IDENTIFIER is
+listed, as it names resources, not a call that dbt resolves."
   (interactive
    (list (completing-read "Find dbt resource: "
                           (xref-backend-identifier-completion-table 'dbt)
                           nil t)))
-  (let ((xref-backend-functions (list (lambda () 'dbt))))
+  (let ((xref-backend-functions (list (lambda () 'dbt)))
+        (dbt-mode--every-definition t))
     (xref-find-definitions identifier)))
 
 (defun dbt-visit-properties ()

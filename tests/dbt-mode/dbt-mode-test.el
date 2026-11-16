@@ -405,6 +405,61 @@ root model finds that model."
       (should (string-match-p "\\`No util_orders in package shop, only in \\(aaa_utils, shop_utils\\|shop_utils, aaa_utils\\)\\'"
                               (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)))))))
 
+(ert-deftest dbt-mode-goes-to-the-project-s-namesake-that-dbt-takes ()
+  "M-. on a ref, a source or a doc goes to the project's definition when dbt takes it, though a package defines a namesake.
+A package's own definition, which dbt takes for the package's calls
+unless the project disables it, which the index does not read, is
+listed with the project's, first.  A macro call, which dbt resolves
+from the caller's package first, and an identifier read by C-c C-f,
+which names resources, list every definition too."
+  (dbt-test-with-project root
+    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
+    (let ((calls (concat "select * from {{ ref('stg_orders') }}\n"
+                         "join {{ source('raw', 'raw_orders') }} using (id)\n"
+                         "where {{ cents_to_dollars('x') }} > 0\n")))
+      (pcase-dolist (`(,file . ,text)
+                     `(("dbt_packages/shop_utils/models/stg_orders.sql" . "select 1 as id\n")
+                       ("dbt_packages/shop_utils/models/_utils.yml"
+                        . ,(concat "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n"
+                                   "models:\n  - name: pkg_calls\n    description: '{{ doc(\"order_status\") }}'\n"))
+                       ("dbt_packages/shop_utils/models/docs.md"
+                        . "{% docs order_status %}\nIn the package.\n{% enddocs %}\n")
+                       ("dbt_packages/shop_utils/macros/cents_to_dollars.sql"
+                        . "{% macro cents_to_dollars(x) %}{{ x }}{% endmacro %}\n")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" . ,calls)
+                       ("models/marts/calls.sql" . ,calls)))
+        (write-region text nil (expand-file-name file root))))
+    (save-window-excursion
+      (pcase-dolist (`(,file ,keys ,visited)
+                     '(("models/marts/calls.sql" "stg_orders" "models/staging/stg_orders.sql")
+                       ("models/marts/calls.sql" "raw_orders" "models/staging/_sources.yml")
+                       ("models/staging/_staging.yml" "order_status" "models/docs.md")
+                       ("dbt_packages/shop_utils/models/_utils.yml" "order_status" "models/docs.md")))
+        (switch-to-buffer (dbt-test-visit root file))
+        (when (string-suffix-p ".yml" file)
+          (dbt-properties-mode-maybe))
+        (dbt-test-goto keys)
+        (execute-kbd-macro (kbd "M-."))
+        (should (equal (file-relative-name buffer-file-name root) visited)))
+      ;; EARLIER, then LATER, in the list.
+      (pcase-dolist (`(,file ,point-on ,keys ,earlier ,later)
+                     '(("dbt_packages/shop_utils/models/pkg_calls.sql" "stg_orders" "M-."
+                        "shop_utils/models/stg_orders.sql" "staging/stg_orders.sql")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "raw_orders" "M-."
+                        "shop_utils/models/_utils.yml" "staging/_sources.yml")
+                       ("models/marts/calls.sql" "cents_to_dollars" "M-."
+                        "cents_to_dollars.sql" "cents_to_dollars.sql")
+                       ("models/marts/calls.sql" nil "C-c C-f ref:stg_orders RET"
+                        "staging/stg_orders.sql" "shop_utils/models/stg_orders.sql")
+                       ;; Though point is on a call of the same identifier.
+                       ("models/marts/calls.sql" "stg_orders" "C-c C-f ref:stg_orders RET"
+                        "staging/stg_orders.sql" "shop_utils/models/stg_orders.sql")))
+        (switch-to-buffer (dbt-test-visit root file))
+        (if point-on (dbt-test-goto point-on) (goto-char (point-max)))
+        (execute-kbd-macro (kbd keys))
+        (should (equal (buffer-name) "*xref*"))
+        (should (string-search later (buffer-string) (1+ (string-search earlier (buffer-string)))))))))
+
 (ert-deftest dbt-mode-finds-no-source-named-as-a-package ()
   "M-. on source('shop_utils', 'events') finds nothing: no source is shop_utils, and a package of that name is no source.
 The project has a source events, which a message taking shop_utils for
@@ -484,6 +539,36 @@ The project's namesakes and their uses come after, or not at all."
     (dbt-test-goto "raw_orders")
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/pkg_src.sql" . 1))))))
+
+(ert-deftest dbt-mode-resolves-from-a-package-reached-through-a-link ()
+  "A call in a local package's file, visited through the link that dbt deps makes in dbt_packages, resolves in that package first.
+So does one in a file of a project reached through a link."
+  (dbt-test-with-project root
+    (let ((link (concat (directory-file-name root) "-link")))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name "libs/zzz/models" root) t)
+            (write-region "name: 'aaa'\n" nil (expand-file-name "libs/zzz/dbt_project.yml" root))
+            (write-region "select 1 as id" nil (expand-file-name "libs/zzz/models/stg_orders.sql" root))
+            (write-region "select * from {{ ref('stg_orders') }}\n" nil
+                          (expand-file-name "libs/zzz/models/aaa_calls.sql" root))
+            (write-region "  - local: libs/zzz\n" nil (expand-file-name "packages.yml" root) 'append)
+            (make-symbolic-link "../libs/zzz" (expand-file-name "dbt_packages/aaa" root))
+            (make-symbolic-link (directory-file-name root) link)
+            (pcase-dolist (`(,top ,file) `((,root "dbt_packages/aaa/models/aaa_calls.sql")
+                                           (,(file-name-as-directory link) "libs/zzz/models/aaa_calls.sql")))
+              (with-current-buffer (dbt-test-visit top file)
+                (dbt-test-goto "stg_orders")
+                (should (equal (car (dbt-test-xref-files (xref-backend-definitions
+                                                          'dbt (xref-backend-identifier-at-point 'dbt))
+                                                         top))
+                               '("libs/zzz/models/stg_orders.sql" . 1)))
+                ;; Else the next visit of the same file finds this buffer.
+                (kill-buffer))))
+        (dolist (buffer (buffer-list))
+          (when (string-prefix-p link (or (buffer-file-name buffer) ""))
+            (kill-buffer buffer)))
+        (delete-file link)))))
 
 (ert-deftest dbt-mode-visits-the-properties-of-its-own-package ()
   "C-c C-y visits the YAML entry of the model in its own package, never that of a namesake in another.

@@ -657,10 +657,13 @@ is looked up in a table, built once for each index."
 It is the package whose directory is the nearest above FILE: an
 installed package rather than the project, the project rather than a
 local package that holds it, such as the `../' of a package's
-integration_tests.  Nil when FILE is in none."
-  (let ((file (expand-file-name file)))
-    (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
-                      (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
+integration_tests.  Nil when FILE is in none.  True names are compared,
+so that a file reached through a link, such as the link to a local
+package that dbt deps makes in dbt_packages, is in the package it is
+in."
+  (let ((file (file-truename file)))
+    (car (seq-sort-by (lambda (package) (length (file-truename (nth 1 package)))) #'>
+                      (seq-filter (lambda (package) (string-prefix-p (file-truename (nth 1 package)) file))
                                   (dbt-project-packages root))))))
 
 (defun dbt-project-file-entity (root file)
