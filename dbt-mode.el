@@ -1192,7 +1192,7 @@ saves as they are too, as the message of the question says, until
         ;; proprietary build; dbt-oss has neither.
         (when-let* ((executable (executable-find dbt-executable))
                     ((not (member executable dbt-mode--told-cannot-format)))
-                    ((eq (dbt-project-command-answer "format") 'no)))
+                    ((memq (dbt-project-command-answer "format") '(no lacks))))
           (push executable dbt-mode--told-cannot-format)
           (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2 (on dbt-oss, dbt system upgrade-distribution installs it)")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))

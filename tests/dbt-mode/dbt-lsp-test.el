@@ -515,7 +515,8 @@ again or on in another buffer says nothing; another dbt that cannot
 format is told again; dbt 2's proprietary build is not, nor is the
 lack of any dbt, which each save then says."
   (dbt-lsp-test-with-dbt dbt "exit 2"
-    (dbt-lsp-test-with-dbt other "exit 2"
+    ;; dbt-oss, which refuses dbt format as dbt 2 does.
+    (dbt-lsp-test-with-dbt other (dbt-lsp-test-oss-script)
       (dbt-test-with-project root
         (save-window-excursion
           (let ((dbt-mode--told-cannot-format nil)
