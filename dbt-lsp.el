@@ -69,9 +69,15 @@ over the project; dbt-mode steps aside where it says that it answers."
   :group 'dbt)
 
 (defun dbt-lsp-server-p ()
-  "Return non-nil when `dbt-executable' runs a language server, `dbt lsp'.
-Only dbt 2.0's proprietary build does, as `dbt-project-command-p' asks."
-  (dbt-project-command-p "lsp"))
+  "Return non-nil when dbt-mode runs a language server for `dbt-executable'.
+That is `dbt lsp', which only dbt 2.0's proprietary build runs, through
+dbt-lsp-plus with `dbt-lsp-proxy'; or, with `dbt-lsp-proxy' on and
+dbt-lsp-plus found, dbt-lsp-plus alone for a dbt 2 that lacks dbt lsp,
+such as dbt-oss, as the proxy decides by the same question.  A dbt
+Core 1.x, which refuses dbt lsp otherwise, or no dbt, gets none."
+  (pcase (dbt-project-command-answer "lsp")
+    ('yes t)
+    ('lacks (and dbt-lsp-proxy (executable-find "dbt-lsp-plus") t))))
 
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.
@@ -163,14 +169,15 @@ included."
 ;;;###autoload
 (defun dbt-lsp ()
   "Start dbt lsp for the current buffer, on the root of its dbt project.
-A dbt that runs no server, such as dbt-oss, is an error.  A dbt that
-did not answer in time whether it runs one is asked again."
+Or dbt-lsp-plus alone, for dbt-oss, as `dbt-lsp-server-p' says.  A dbt
+with neither is an error.  A dbt that did not answer in time whether it
+runs one is asked again."
   (interactive)
   (dbt-project-ask-again "lsp")
-  (pcase (dbt-project-command-answer "lsp")
-    ('yes nil)
-    ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
-    (_ (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does")))
+  (when (eq (dbt-project-command-answer "lsp") 'timeout)
+    (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
+  (unless (dbt-lsp-server-p)
+    (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss"))
   (dbt-lsp-add-project-folder)
   (lsp))
 

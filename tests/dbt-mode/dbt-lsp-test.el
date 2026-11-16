@@ -26,6 +26,9 @@
 (defvar dbt-lsp-test-log nil
   "The log of the scripted server of the running test.")
 
+(defvar dbt-lsp-test-executable nil
+  "The dbt of `dbt-lsp-test-with-server' when non-nil, rather than `dbt-lsp-test-dbt'.")
+
 (defvar dbt-lsp-test-watch-files nil
   "Whether lsp-mode watches files in `dbt-lsp-test-with-server', which it does not by default.")
 
@@ -47,7 +50,7 @@ writes it.  The buffers of rows and lineage are killed afterwards."
               (process-environment (append (list (concat "DBT_MODE_FAKE_ANSWERS=" ,answers-file)
                                                  (concat "DBT_MODE_FAKE_LOG=" dbt-lsp-test-log))
                                            process-environment))
-              (dbt-executable dbt-lsp-test-dbt)
+              (dbt-executable (or dbt-lsp-test-executable dbt-lsp-test-dbt))
               (lsp--session nil)
               (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
               (lsp-enable-file-watchers dbt-lsp-test-watch-files)
@@ -216,18 +219,80 @@ files of the Nix store do: only their true names tell them apart."
       (make-symbolic-link (expand-file-name "oss" directory) profile)
       (should-not (dbt-project-command-p "format")))))
 
+(defun dbt-lsp-test-oss-script ()
+  "Return a script of dbt that lacks dbt lsp, dbt format and dbt lint, as dbt-oss.
+It refuses them as dbt 2 refuses a command it lacks, exit 2 and clap's
+message, and runs the other commands as the fake dbt does."
+  (concat "case \"$1\" in lsp|format|lint) echo \"error: unrecognized subcommand '$1'\" >&2; exit 2 ;; esac\n"
+          "exec " (shell-quote-argument dbt-lsp-test-dbt) " \"$@\""))
+
+(defmacro dbt-lsp-test-alone (root answers &rest body)
+  "Run BODY as `dbt-lsp-test-with-server', with dbt-oss and dbt-lsp-plus alone.
+The dbt is that of `dbt-lsp-test-oss-script'; `dbt-lsp-proxy' is on, and
+the fake dbt-lsp-plus of tests/bin, found on `exec-path', runs the
+scripted server alone, as dbt-lsp-plus runs for a dbt that lacks dbt
+lsp."
+  (declare (indent 2) (debug (symbolp form body)))
+  (let ((dbt (make-symbol "dbt")))
+    `(dbt-lsp-test-with-dbt ,dbt (dbt-lsp-test-oss-script)
+       (let ((dbt-lsp-test-executable ,dbt)
+             (dbt-lsp-proxy t)
+             (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
+         (dbt-lsp-test-with-server ,root ,answers ,@body)))))
+
 (ert-deftest dbt-lsp-starts-nothing-with-a-dbt-without-a-server ()
-  "With a dbt that runs no dbt lsp, such as dbt-oss, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why."
-  (dbt-lsp-test-with-dbt dbt "exit 2"
-    (dbt-test-with-project root
-      (save-window-excursion
-        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
-        (let ((dbt-executable dbt))
+  "With a dbt that runs no dbt lsp, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why.
+That is dbt-oss without dbt-lsp-plus, or with `dbt-lsp-proxy' on but no
+dbt-lsp-plus to run; a dbt Core 1.x, which refuses dbt lsp otherwise
+than dbt 2 does, even with dbt-lsp-plus; and no dbt at all."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let ((message "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")
+            (proxy (file-name-directory dbt-lsp-test-dbt)))
+        ;; No dbt-lsp-plus on an `exec-path' of Emacs's own programs only.
+        (dolist (case `((,(dbt-lsp-test-oss-script) nil ,(cons proxy exec-path))
+                        (,(dbt-lsp-test-oss-script) t ,(list exec-directory))
+                        ("echo \"Error: No such command 'lsp'.\" >&2; exit 2" t ,(cons proxy exec-path))))
+          (dbt-lsp-test-with-dbt dbt (nth 0 case)
+            (let ((dbt-executable dbt)
+                  (dbt-lsp-proxy (nth 1 case))
+                  (exec-path (nth 2 case)))
+              (dbt-lsp-deferred)
+              (should-not (bound-and-true-p lsp--buffer-deferred))
+              (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
+                             message))
+              (should-not (dbt-lsp-workspace)))))
+        (let ((dbt-executable "no-such-dbt")
+              (dbt-lsp-proxy t)
+              (exec-path (cons proxy exec-path)))
           (dbt-lsp-deferred)
-          (should-not (bound-and-true-p lsp--buffer-deferred))
-          (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
-                         "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
-          (should-not (dbt-lsp-workspace)))))))
+          (should-not (bound-and-true-p lsp--buffer-deferred)))))))
+
+(ert-deftest dbt-lsp-starts-dbt-lsp-plus-alone-for-dbt-oss ()
+  "With dbt-oss and `dbt-lsp-proxy' on, dbt-mode starts dbt-lsp-plus, which runs alone.
+The hook defers the start; M-x dbt-lsp starts it, with the same command
+line as through dbt lsp, and the server lists none of dbt lsp's
+commands."
+  (dbt-lsp-test-with-dbt dbt (dbt-lsp-test-oss-script)
+    (dbt-test-with-project root
+      (let* ((dbt-executable dbt)
+             (dbt-lsp-proxy t)
+             (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path))
+             (lsp--session nil)
+             (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
+             (buffer (dbt-test-visit root "models/marts/orders.sql")))
+        (unwind-protect
+            (with-current-buffer buffer
+              (dbt-lsp-deferred)
+              (should lsp--buffer-deferred))
+          (kill-buffer buffer)))))
+  (dbt-lsp-test-alone root nil
+    (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 5)
+                   (list "dbt-lsp-plus" "--" dbt-executable "lsp" "--project-dir")))
+    (should (equal (lsp-get (lsp-get (lsp--workspace-server-capabilities (dbt-lsp-workspace)) :executeCommandProvider)
+                            :commands)
+                   ["dbt-lsp-plus.nodeInfo"]))))
 
 (ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
   "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
