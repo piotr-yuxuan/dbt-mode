@@ -4,15 +4,18 @@
 
 It answers `initialize` with capabilities like those of dbt lsp 2.0.9,
 formatting and code actions included, and every other request from a JSON
-file of answers, whose keys are a method, or "workspace/executeCommand
-COMMAND" for a command: a request without an answer there gets null.  After
+file of answers, whose keys are a method, "workspace/executeCommand
+COMMAND" for a command, or "callHierarchy/incomingCalls ID" and
+"callHierarchy/outgoingCalls ID" for the calls of the item whose
+data.uniqueId is ID: a request without an answer there gets null.  After
 `initialized`, it sends the notifications of its own that dbt lsp sends, or
 those that the key "$notifications" of the answers lists.  The key
 "$experimental" gives its capabilities an experimental object, the key
-"$commands" adds commands to those it lists, as dbt-lsp-plus adds its own,
-the key "$errors" maps a key of the answers to the error that answers it
-instead, and the key "$delays" maps a method to the seconds it waits before
-it answers it.
+"$capabilities" adds capabilities, as dbt-lsp-plus adds
+callHierarchyProvider, the key "$commands" adds commands to those it lists,
+as dbt-lsp-plus adds its own, the key "$errors" maps a key of the answers
+to the error that answers it instead, and the key "$delays" maps a method
+to the seconds it waits before it answers it.
 
 Environment:
 - DBT_MODE_FAKE_ANSWERS: the file of answers, optional;
@@ -96,6 +99,8 @@ def key(message: dict[str, JSON]) -> str:
     method = message["method"]
     if method == "workspace/executeCommand":
         return method + " " + message["params"]["command"]
+    if method.startswith("callHierarchy/"):
+        return method + " " + message["params"]["item"]["data"]["uniqueId"]
     return method
 
 
@@ -107,7 +112,8 @@ def answer(message: dict[str, JSON], answers: dict[str, JSON]) -> JSON:
         commands = CAPABILITIES["executeCommandProvider"]["commands"]
         commands = commands + answers.get("$commands", [])
         listed = {"executeCommandProvider": {"commands": commands}}
-        return {"capabilities": CAPABILITIES | extra | listed}
+        added = answers.get("$capabilities", {})
+        return {"capabilities": CAPABILITIES | extra | listed | added}
     return answers.get(key(message))
 
 
