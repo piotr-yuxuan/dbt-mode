@@ -213,7 +213,8 @@ last level, + shows every depth.  g asks again, to the depth shown."
       ;; Level 3: n and d call nothing more, so the lineage ends there.
       (execute-kbd-macro (kbd "+"))
       (should (equal (reverse (car asked)) '((upstream "macro.p.n") (downstream "model.p.d"))))
-      (should (equal header-line-format " Lineage of f, to depth 3"))
+      ;; As deep as the lineage goes, its macros hidden.
+      (should (equal header-line-format " Lineage of f, to depth 2"))
       (setcar asked nil)
       (execute-kbd-macro (kbd "+"))
       (should (equal header-line-format " Lineage of f, at every depth"))
@@ -265,6 +266,23 @@ The answers that they ask are given in turn."
       (should (equal header-line-format " Lineage of f, to depth 1"))
       (kill-buffer))))
 
+(ert-deftest dbt-lineage-goes-no-deeper-than-its-end ()
+  "+ pressed again and again while a level is asked shows no deeper than where the lineage ends.
+It asks nothing more while the level is asked."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (execute-kbd-macro (kbd "+ + + + +"))
+      (should (equal (length (car asked)) 2))
+      (dbt-test-answer-pending pending)
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (execute-kbd-macro (kbd "-"))
+      (should (equal header-line-format " Lineage of f, to depth 1"))
+      (kill-buffer))))
+
 (ert-deftest dbt-lineage-asks-no-level-again-while-it-is-asked ()
   "+ while a level is asked asks it no more: its answer asks the next level, as deep as shown."
   (let ((asked (list nil))
@@ -285,7 +303,7 @@ The answers that they ask are given in turn."
                      '((upstream "model.p.f") (downstream "model.p.f")
                        (upstream "seed.p.s" "macro.p.m") (downstream "model.p.a" "model.p.b" "model.p.c")
                        (upstream "macro.p.n") (downstream "model.p.d"))))
-      (should (equal header-line-format " Lineage of f, to depth 3"))
+      (should (equal header-line-format " Lineage of f, to depth 2"))
       (kill-buffer))))
 
 (ert-deftest dbt-lineage-says-where-plus-stops ()

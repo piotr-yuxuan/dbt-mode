@@ -110,7 +110,8 @@ Nil in a direction that has no level left to ask.")
   "The identifier of the node whose lineage this buffer shows.")
 
 (defvar-local dbt-lineage--depth nil
-  "The deepest level that this buffer shows, or nil for every one.")
+  "The deepest level that this buffer shows, or nil for every one.
+Never nil while the lineage has a level left to ask of its server.")
 
 (defvar-local dbt-lineage--reach nil
   "The reach of this buffer's focus, as an alist from a direction.
@@ -195,7 +196,7 @@ count for nothing."
         (ids (alist-get direction dbt-lineage--frontier))
         (asked (alist-get direction dbt-lineage--asked 0))
         (walk dbt-lineage--walk))
-    (when (and ids (not (memq direction dbt-lineage--asking)) (< asked (or dbt-lineage--depth 0)))
+    (when (and ids (not (memq direction dbt-lineage--asking)) (< asked dbt-lineage--depth))
       (if (> (length ids) dbt-lineage-level-limit)
           (setf (alist-get direction dbt-lineage--frontier) nil
                 dbt-lineage--stops (cons (format "%s stops at depth %d: its %d nodes are more than dbt-lineage-level-limit, %d"
@@ -223,7 +224,11 @@ count for nothing."
                                                                                    reached)))
                        (dbt-lineage--ask direction)
                        (dbt-lineage--compute)
-                       (dbt-lineage--show-depth dbt-lineage--depth)))))))))
+                       ;; Past its end, no deeper than it goes, whatever +
+                       ;; asked meanwhile; a - meanwhile stays.
+                       (dbt-lineage--show-depth (if (dbt-lineage--growing-p)
+                                                    dbt-lineage--depth
+                                                  (min dbt-lineage--depth (dbt-lineage--deepest))))))))))))
 
 (defun dbt-lineage-deeper ()
   "Show one level more of the lineage, asked of a server that gives levels."
