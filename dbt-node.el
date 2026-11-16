@@ -9,8 +9,11 @@
 
 ;; `dbt-describe' shows what dbt knows of the model, seed, snapshot or
 ;; source table at point, or of the current resource: its configuration,
-;; columns, what it depends on, what uses it and its description, from
-;; the user's target/manifest.json, as dbt last wrote it.  What uses the node comes from the index, as for the
+;; columns, tests, what it depends on, what uses it and its description.
+;; With dbt-lsp-plus, whose server lists the command
+;; dbt-lsp-plus.nodeInfo, the node comes from the proxy's parse, with its
+;; summary; otherwise from the user's target/manifest.json, as dbt last
+;; wrote it.  What uses the node comes from the index, as for the
 ;; lineage.  RET visits a node, TAB folds a section.
 
 ;;; Code:
@@ -20,6 +23,8 @@
 (require 'dbt-lineage)
 (require 'map)
 (require 'outline)
+
+(declare-function dbt-lsp-node-info "dbt-lsp")
 
 (defvar-local dbt-node--root nil
   "The root of the project of this buffer's node.")
@@ -92,8 +97,10 @@ value that is empty, null or false shows nothing."
 (defun dbt-describe ()
   "Show what dbt knows of the model, seed, snapshot or source table at point.
 On a `ref' or a `source', it is what the call names, else the current
-resource: its configuration, columns, what it depends on, what uses it
-and its description, in a buffer of `dbt-node-mode', from
+resource: its configuration, columns, tests, what it depends on, what
+uses it and its description, in a buffer of `dbt-node-mode'.  With
+dbt-lsp-plus, whose server lists the command dbt-lsp-plus.nodeInfo, it
+comes from the proxy's parse, with its summary; otherwise from
 target/manifest.json, which `dbt parse', `dbt compile' and every run
 write, saying when dbt wrote it."
   (interactive)
@@ -110,7 +117,9 @@ write, saying when dbt wrote it."
                             (format "from %s, written at %s" (file-relative-name file root)
                                     (format-time-string "%F %R" (file-attribute-modification-time
                                                                  (file-attributes file))))))))
-    (funcall from-manifest)))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus")) from-manifest)
+      (funcall from-manifest))))
 
 (defun dbt-node-visit ()
   "Visit the node on point's line, where the index has it."

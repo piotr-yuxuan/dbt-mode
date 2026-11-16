@@ -139,11 +139,13 @@ Rows and compiled SQL:
 `C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
 snapshot or source table that the `ref` or `source` at point names, else
 of the current resource: its relation, materialization, tags, group,
-access, contract, version, whether it is disabled, its columns, what it
-depends on, what uses it and its description, from
-`target/manifest.json`, saying when dbt wrote it. What uses the node
-comes from dbt-mode's index, as for the lineage. `RET` visits a node,
-`TAB` folds a section.
+access, contract, version, whether it is disabled, its columns, its
+tests, what it depends on, what uses it and its description. With
+dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
+summary that its hover shows; otherwise from `target/manifest.json`,
+saying when dbt wrote it, its tests shown with the proxy only. What
+uses the node comes from dbt-mode's index, as for the lineage. `RET`
+visits a node, `TAB` folds a section.
 
 The dashboard, `dbt-dashboard` or `h` in `dbt-dispatch`, shows the state of
 the project from the artifacts of your own runs, which it never writes, and

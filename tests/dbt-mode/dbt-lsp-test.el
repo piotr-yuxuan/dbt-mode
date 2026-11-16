@@ -1051,5 +1051,58 @@ stands."
                                                                      :arguments (vector buffer-file-name)))
                                                   :null-object nil :false-object :json-false))))))))
 
+(ert-deftest dbt-lsp-describes-a-node-from-dbt-lsp-plus ()
+  "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
+Its error, -32803 until the proxy's first parse, shows its reason; its
+null answer, no such node, says so.  A server that does not list the
+command, as dbt lsp alone, leaves the node to the manifest."
+  (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
+                (package_name . "shop") (summary . "view \"shop\".\"main\".\"stg_orders\"\ntags daily")
+                (relation . "\"shop\".\"main\".\"stg_orders\"") (relation_name . "elsewhere")
+                (tests . ["test.shop.not_null_stg_orders_order_id.81cfe2fe64"])
+                (config . ((materialized . "view"))))))
+    (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("workspace/executeCommand dbt-lsp-plus.nodeInfo" . ,node))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: stg_orders*")))
+        (should (equal (seq-take (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n") 9)
+                       '("stg_orders, a model of shop"
+                         "view \"shop\".\"main\".\"stg_orders\""
+                         "tags daily"
+                         "from dbt-lsp-plus"
+                         ""
+                         "Configuration"
+                         "  relation      \"shop\".\"main\".\"stg_orders\""
+                         "  materialized  view"
+                         "Tests")))
+        (should (string-search "  test      not_null_stg_orders_order_id.81cfe2fe64" (buffer-string)))
+        (kill-buffer)))
+    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                     ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                                    . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
+      (should-not (get-buffer "*dbt node: stg_orders*")))
+    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"]))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo answered nothing")))
+    (dbt-lsp-test-with-server root nil
+      (make-directory (expand-file-name "target" root))
+      (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                            " \"resource_type\": \"model\", \"package_name\": \"shop\"}}}")
+                    nil (expand-file-name "target/manifest.json" root))
+      (switch-to-buffer (current-buffer))
+      (dbt-test-goto "stg_orders')")
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (with-current-buffer "*dbt node: stg_orders*"
+        (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
+        (kill-buffer)))))
+
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
