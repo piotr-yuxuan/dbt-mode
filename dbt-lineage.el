@@ -26,8 +26,9 @@
 (defcustom dbt-lineage-level-limit 500
   "The most nodes of a level of the lineage whose calls a server is asked.
 dbt-lsp-plus gives the lineage through its call hierarchy, one level at
-a time, a request for each node: past this many nodes in one level, the
-lineage asks no further in that direction, and its header line says so."
+a time, a request for each node: past this many nodes in one level,
+hidden macros included, the lineage asks no further in that direction,
+and its header line says so."
   :type 'natnum
   :group 'dbt)
 
