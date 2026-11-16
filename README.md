@@ -263,13 +263,14 @@ time: it opens two levels deep, `+` asks the next level, and a level of
 more nodes than `dbt-lineage-level-limit` is the last asked in its
 direction, as the header line says; the macros, which only it gives, are
 hidden at first; a node of which it has no item, such as a snapshot defined
-in YAML, has its lineage from dbt lsp's list of nodes. With dbt lsp alone,
-the lineage comes whole from the server's list of nodes, and without a
-server from the project's files. lsp-mode's own view of the call hierarchy,
-`lsp-treemacs-call-hierarchy` when lsp-treemacs is installed, needs nothing
-of dbt-mode. In the lineage and the rows, `g` asks again: with dbt-lsp-plus
-to the depth shown, two levels at least, and without a server the lineage
-reads the project again.
+in YAML, has its lineage from dbt lsp's list of nodes; a call that fails is
+said in a message, the rest of its level shown, and `g` asks again. With
+dbt lsp alone, the lineage comes whole from the server's list of nodes, and
+without a server from the project's files. lsp-mode's own view of the call
+hierarchy, `lsp-treemacs-call-hierarchy` when lsp-treemacs is installed,
+needs nothing of dbt-mode. In the lineage and the rows, `g` asks again:
+with dbt-lsp-plus to the depth shown, two levels at least, and without a
+server the lineage reads the project again.
 The rows show nested values as JSON and newlines as `\n`; lsp-mode reads
 JSON `false` as null, so it shows as `NULL` with dbt lsp.
 
