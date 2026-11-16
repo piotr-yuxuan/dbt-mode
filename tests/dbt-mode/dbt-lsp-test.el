@@ -1053,10 +1053,10 @@ stands."
 
 (ert-deftest dbt-lsp-describes-a-node-from-dbt-lsp-plus ()
   "With a server that lists dbt-lsp-plus.nodeInfo, C-c C-o shows its node, with the proxy's summary, relation and tests.
-A test, no node of the index, is no link; a null relation, as the proxy
-gives a disabled node, shows none.  Its
-error, -32803 until the proxy's first parse, shows its reason; its
-null answer, no such node, says so.  A server that does not list the
+A test, no node of the index, is no link; g asks the proxy again; a
+null relation, as the proxy gives a disabled node, shows none.  Its
+error, -32803 until the proxy's first parse, shows its reason; its null
+answer, no such node, says so.  A server that does not list the
 command, as dbt lsp alone, leaves the node to the manifest; eldoc of
 dbt-mode's own steps aside for the server's hover."
   (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
@@ -1092,6 +1092,12 @@ dbt-mode's own steps aside for the server's hover."
         (search-forward "not_null_stg_orders_order_id")
         (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
                        "No file or node here"))
+        ;; g asks the proxy again, which has the node, not the manifest,
+        ;; which this project lacks.
+        (let ((inhibit-read-only t))
+          (erase-buffer))
+        (execute-kbd-macro (kbd "g"))
+        (dbt-test-wait (lambda () (string-search "from dbt-lsp-plus" (buffer-string))))
         (kill-buffer)))
     ;; The proxy's null relation, as for a disabled node, is no relation.
     (dbt-lsp-test-with-server root `(("$commands" . ["dbt-lsp-plus.nodeInfo"])
