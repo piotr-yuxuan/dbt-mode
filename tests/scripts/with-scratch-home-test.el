@@ -12,7 +12,7 @@
 (require 'dbt-mode-test-helpers)
 
 (ert-deftest with-scratch-home-keeps-a-failed-run-in-tmpdir ()
-  "A scratch directory goes under TMPDIR; a failed run keeps it, printed.
+  "A scratch directory goes under TMPDIR; a failed run keeps it, printed, but for the copy of the driver cache.
 A run that succeeds leaves nothing."
   (let* ((tmp (make-temp-file "scratch-test" t))
          (cache (expand-file-name "cache/" tmp))
@@ -35,6 +35,7 @@ A run that succeeds leaves nothing."
             (let ((kept (match-string 1 output)))
               (should (string-prefix-p (expand-file-name "tmp/" tmp) kept))
               (should (file-directory-p (expand-file-name "home" kept)))
+              (should-not (file-exists-p (expand-file-name "cache/com.getdbt" kept)))
               (should (file-exists-p (expand-file-name "driver" cache)))
               (delete-directory kept t)))
           (should (equal (funcall run 0) '(0 "")))

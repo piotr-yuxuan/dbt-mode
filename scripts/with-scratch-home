@@ -12,7 +12,7 @@
 # cache's com.getdbt, where dbt looks for its driver before it downloads
 # one; the original stays as it is.  The scratch directory, under TMPDIR
 # or else /tmp, is deleted when COMMAND succeeds, and kept and printed
-# when it fails.
+# when it fails, but for that copy, which is most of its size.
 
 set -uo pipefail
 
@@ -41,7 +41,7 @@ scratch=$(mktemp -d "${tmp%/}/dbt-mode-scratch.XXXXXX") || exit 2
 mkdir -p "$scratch"/{home,config,cache,data,state,tmp}
 touch "$scratch/home/.dbt-mode-scratch"
 if [[ -n "$cache" ]] && ! cp -R -- "$cache/." "$scratch/cache/com.getdbt/"; then
-  echo "with-scratch-home: kept $scratch" >&2
+  rm -rf -- "$scratch"
   exit 2
 fi
 
@@ -63,6 +63,7 @@ status=$?
 if (( status == 0 )); then
   rm -rf -- "$scratch"
 else
+  rm -rf -- "$scratch/cache/com.getdbt"
   echo "with-scratch-home: kept $scratch" >&2
 fi
 exit "$status"
