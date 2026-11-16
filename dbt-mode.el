@@ -532,7 +532,9 @@ rare case.  A package's own definition, when dbt takes it, is listed
 first, then the others: dbt skips a package's model that the project
 disables to override it, which the index does not read, and resolves a
 call in a package's macro from the node that calls the macro.  With
-`dbt-mode--every-definition', every definition is listed.
+`dbt-mode--every-definition', every definition is listed.  A call that
+dbt rejects as ambiguous, as `dbt-project-ambiguous' tells, lists its
+definitions, each of which says so.
 
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
@@ -553,12 +555,17 @@ resolve."
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
-    (mapcar #'dbt-mode--xref
-            (if (and (memq (plist-get target :kind) '(ref source doc))
-                     (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root)))
-                     (not dbt-mode--every-definition))
-                (list (car definitions))
-              definitions))))
+    (cond (dbt-mode--every-definition (mapcar #'dbt-mode--xref definitions))
+          ((and (memq (plist-get target :kind) '(ref source doc))
+                (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root))))
+           (list (dbt-mode--xref (car definitions))))
+          (t
+           ;; Said by each item, which every display of xref shows.
+           (let ((said (when-let* ((packages (dbt-project-ambiguous (dbt-project-root) target definitions
+                                                                    (dbt-mode-caller (dbt-project-root)))))
+                         (format "%s, which dbt rejects as ambiguous: %s and %s define it" identifier
+                                 (string-join (butlast packages) ", ") (car (last packages))))))
+             (mapcar (lambda (entity) (dbt-mode--xref entity said)) definitions))))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
@@ -944,8 +951,11 @@ override of a package's model calls it.  A resource of the file's
 package or of the project comes by name alone, any other with its
 package.  Within a macro, a generic test or a materialization, which dbt
 resolves from whichever node calls it, any resource but the project's
-comes with its package.  To call another namesake, write the call with
-its package: completion at point offers that package's models."
+comes with its package.  A name that dbt would find ambiguous from the
+file, as `dbt-project-ambiguous' tells once the file's own resource is
+left out, asks whose resource to call, the first package's by default.
+To call another namesake, write the call with its package: completion
+at point offers that package's models."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
          (caller (dbt-mode-caller root))
@@ -953,8 +963,15 @@ its package: completion at point offers that package's models."
          ;; Not `dbt-mode-current-resource', which is the call at point
          ;; in a file that defines no resource, nor every resource of the
          ;; file, which may define several snapshots.
-         (entity (or (car (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
-                                  (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+         (candidates (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
+                             (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+         (packages (dbt-project-ambiguous root (list :kind 'ref) candidates caller))
+         (entity (or (if packages
+                         (let ((package (completing-read (format-prompt "dbt finds ref:%s ambiguous; call whose"
+                                                                        (car packages) (car wanted))
+                                                         packages nil t nil nil (car packages))))
+                           (seq-find (lambda (entity) (equal (plist-get entity :package) package)) candidates))
+                       (car candidates))
                      (user-error "No model, seed or snapshot `%s' but this one" selector)))
          ;; Probed on both builds: ref('util') in a package's macro is
          ;; ambiguous when a project's model calling the macro resolves

@@ -699,6 +699,26 @@ CALLER, though dbt 2.0.9 takes that of the node calling the macro."
                   (list caller (car project)))))
     (lambda (entity) (or (seq-position order (plist-get entity :package)) 2))))
 
+(defun dbt-project-ambiguous (root target candidates caller)
+  "Return the packages among which dbt finds TARGET ambiguous from CALLER.
+TARGET is a plist as `dbt-project-resolve' takes it, CANDIDATES its
+entities in ROOT, best first, for a call from CALLER, the package of the
+calling file.  dbt 2 rejects a `ref' with no package, or the table of a
+`source', that neither CALLER nor the project resolves and that two
+packages or more do: \"Found ambiguous ref\" (dbt1005, probed on
+dbt-oss 2.0.11 and the proprietary 2.0.9, from the project as from a
+package).  Nil otherwise: a `ref' with its package has one candidate at
+most, and a `doc', which dbt takes from the packages by the order of
+their names, a macro, or a source itself, is never ambiguous.  The
+index reads no `+enabled', so a package's model that the project
+disables, which dbt skips, still counts."
+  (and (pcase (plist-get target :kind)
+         ('ref t)
+         ('source (plist-get target :qualifier)))
+       (cdr candidates)
+       (= 2 (funcall (dbt-project-lookup-rank root caller) (car candidates)))
+       (mapcar (lambda (entity) (plist-get entity :package)) candidates)))
+
 (defun dbt-project-resolve-ref (root package name &optional caller version)
   "Return what `ref' with PACKAGE, NAME and VERSION means in ROOT, best first.
 PACKAGE is nil for a call with one argument.  The candidates are models,
