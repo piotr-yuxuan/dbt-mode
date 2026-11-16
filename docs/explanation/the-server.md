@@ -24,8 +24,23 @@ is installed ([Install](../how-to/install.md#with-dbt-lsp-plus)), and otherwise 
 Column-level features (column lineage, column definitions and renames)
 need a dbt account: without one, the server says nothing about columns.
 
-With dbt-lsp-plus (`dbt-lsp-proxy`), the results of the last run, whoever
-ran it, are diagnostics too: once `b` in `dbt-dispatch` has built, each
+With dbt-lsp-plus (`dbt-lsp-proxy`), `M-.` and `M-?` go to it on the
+targets that it says it answers, by kind and by type of file, in version
+2 of its flag `experimental.dbtLspPlus`; dbt-mode answers the rest. In
+front of `dbt lsp`, that is `M-.` on a source, and in YAML on a `ref`, a
+`doc` and the `name` of an entry, and `M-?` on a source; alone, also
+`M-.` and `M-?` on a `ref` and a macro call, in SQL and in YAML. dbt-mode
+asks it from YAML files too, which lsp-mode does not serve: the proxy
+then reads the saved file, so a YAML buffer with unsaved changes stays
+dbt-mode's, as do an identifier typed at the prompt and `C-c C-f`, which
+lists every definition. Until the proxy's first `dbt parse`, a versioned
+`ref`, and the `ref` or entry of a Python model, of a snapshot defined in
+YAML or of a model whose versions live in files of their own, find
+nothing. A dbt-lsp-plus whose flag is at version 1, built before its
+plan 017, is asked nothing.
+
+With dbt-lsp-plus, the results of the last run, whoever ran it, are
+diagnostics too: once `b` in `dbt-dispatch` has built, each
 model that errored and each test that failed or warned shows where it is
 written, a generic test at its YAML entry, through flymake or flycheck,
 as `lsp-diagnostics-provider` says.
@@ -49,7 +64,8 @@ the project is still watched.
 
 With `dbt-oss` and `dbt-lsp-proxy` on, dbt-lsp-plus runs alone, without
 `dbt lsp`, from the files and from its own `dbt parse`, run offline. It
-answers `M-.` and `M-?` on sources, the lineage of `C-c C-g` from its
+answers `M-.` and `M-?` on sources, refs and macro calls, as above, the
+lineage of `C-c C-g` from its
 call hierarchy, `C-c C-o`, the document symbols of the breadcrumbs, and,
 once it has parsed, hover, inlay hints, the parse's problems and the
 last run's results as diagnostics. The rest stays dbt-mode's, as
