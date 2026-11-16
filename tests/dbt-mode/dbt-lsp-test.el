@@ -1454,6 +1454,22 @@ for dbt lsp's hover."
         (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
         (should-not said)))))
 
+(ert-deftest dbt-lsp-says-that-the-manifest-is-missing-after-nodeinfo ()
+  "When nodeInfo fails and the project has no manifest, C-c C-o says both, as messages, and signals nothing."
+  (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                   ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                                  . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+    (switch-to-buffer (current-buffer))
+    (dbt-test-goto "stg_orders')")
+    (let ((debug-on-error t))
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
+      (should (dbt-lsp-test-message "No readable target/manifest.json: run dbt parse first")))
+    (should-not (with-current-buffer (messages-buffer)
+                  (save-excursion
+                    (goto-char dbt-lsp-test-messages-start)
+                    (search-forward "Error processing message" nil t))))))
+
 (ert-deftest dbt-lsp-breadcrumb-adds-its-symbols-to-lsp-mode-line ()
   "With dbt lsp alone, which announces no document symbols, dbt-breadcrumb-mode adds its own after lsp-mode's line.
 lsp-mode turns its breadcrumbs on in each buffer it manages, and draws
