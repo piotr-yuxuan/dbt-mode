@@ -938,14 +938,14 @@ SELECTOR is a name, or NAME.vVERSION, which calls that version; the
 completion offers each name once.  Outside a Jinja tag, the call comes
 within `{{ }}'.  It calls the resource that dbt resolves SELECTOR to
 from the current file, the first that `xref-find-definitions' lists,
-but for the resource of the current file, which a call would make a
-cycle: a model's namesake in another package comes instead, as an override of a
-package's model calls it.  A resource of the file's package or of the
-project comes by name alone, any other with its package.  Within a
-macro or a generic test, which dbt resolves from whichever node calls
-it, any resource but the project's comes with its package.  To call
-another namesake, write the call with its package: completion at point
-offers that package's models."
+but for the resource that the file defines, which a call would make a
+cycle: a model's namesake in another package comes instead, as an
+override of a package's model calls it.  A resource of the file's
+package or of the project comes by name alone, any other with its
+package.  Within a macro, a generic test or a materialization, which dbt
+resolves from whichever node calls it, any resource but the project's
+comes with its package.  To call another namesake, write the call with
+its package: completion at point offers that package's models."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
          (caller (dbt-mode-caller root))
