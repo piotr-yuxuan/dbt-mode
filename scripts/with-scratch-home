@@ -10,9 +10,9 @@
 # tests/run-ert.el that it runs here.  DIRECTORY, a cache of dbt's
 # database drivers such as ~/.cache/com.getdbt, is copied as the scratch
 # cache's com.getdbt, where dbt looks for its driver before it downloads
-# one; the original stays as it is.  The scratch directory, under TMPDIR
-# or else /tmp, is deleted when COMMAND succeeds, and kept and printed
-# when it fails, but for that copy, which is most of its size.
+# one; the original stays as it is.  The scratch directory, under /tmp,
+# is deleted when COMMAND succeeds, and kept and printed when it fails,
+# but for that copy, which is most of its size.
 
 set -uo pipefail
 
@@ -36,8 +36,11 @@ fi
 # and would die of that write, so a test would see what no user can.
 trap '' PIPE
 
-tmp=${TMPDIR:-/tmp}
-scratch=$(mktemp -d "${tmp%/}/dbt-mode-scratch.XXXXXX") || exit 2
+# Under /tmp whatever TMPDIR says: nix develop gives each run a TMPDIR
+# of its own, /tmp/nix-shell.XXXXXX, which it never removes, so kept
+# directories would scatter there; and a relative TMPDIR would make HOME
+# relative.
+scratch=$(TMPDIR=/tmp mktemp -d -t dbt-mode-scratch.XXXXXX) || exit 2
 mkdir -p "$scratch"/{home,config,cache,data,state,tmp}
 touch "$scratch/home/.dbt-mode-scratch"
 if [[ -n "$cache" ]] && ! cp -R -- "$cache/." "$scratch/cache/com.getdbt/"; then
