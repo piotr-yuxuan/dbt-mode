@@ -1367,5 +1367,30 @@ target elsewhere are watched as before."
       (dolist (directory (list "/elsewhere/logs" (expand-file-name "models/logs" (file-truename root))))
         (should-not (seq-find (lambda (regexp) (string-match-p regexp directory)) lsp-file-watch-ignored-directories))))))
 
+(ert-deftest dbt-lsp-keeps-the-watchers-out-by-true-names ()
+  "A project opened through a symbolic link has its logs and target kept out by their true names.
+lsp-mode watches, and matches, the true names of directories, as on
+macOS, where /var is /private/var."
+  (dbt-test-with-project root
+    (let* ((link (make-temp-name (expand-file-name "dbt-link" temporary-file-directory)))
+           (dbt-executable dbt-lsp-test-dbt)
+           (lsp--session nil)
+           (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
+           (lsp-file-watch-ignored-directories nil)
+           (buffer nil))
+      (make-symbolic-link (directory-file-name root) link)
+      (unwind-protect
+          (progn
+            (setq buffer (find-file-noselect (expand-file-name "models/marts/orders.sql" link)))
+            (with-current-buffer buffer
+              (should (string-prefix-p link buffer-file-name))
+              (dbt-lsp-deferred))
+            (dolist (directory '("logs" "target"))
+              (should (seq-find (lambda (regexp) (string-match-p regexp (expand-file-name directory (file-truename root))))
+                                lsp-file-watch-ignored-directories))))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))
+        (delete-file link)))))
+
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
