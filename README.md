@@ -214,6 +214,20 @@ it starts nothing, and `M-x dbt-lsp` says why:
 Column-level features (column lineage, column definitions and renames)
 need a dbt account: without one, the server says nothing about columns.
 
+With dbt-lsp-plus (`dbt-lsp-proxy`), the results of the last run, whoever
+ran it, are diagnostics too: once `b` in `dbt-dispatch` has built, each
+model that errored and each test that failed or warned shows where it is
+written, a generic test at its YAML entry, through flymake or flycheck,
+as `lsp-diagnostics-provider` says. dbt writes `logs` and `target` in the
+project at each run, and dbt lsp at each compilation, while dbt lsp asks
+lsp-mode to watch every file: dbt-mode keeps lsp-mode's file watchers out
+of the project's `logs` and `target`, which would otherwise have the
+proxy read the project again at each event, by a regexp anchored at the
+project's root that it adds to `lsp-file-watch-ignored-directories` for
+the session. A value that the project's `.dir-locals.el` gives that
+option takes precedence, and a `DBT_TARGET_PATH` or `DBT_LOG_PATH`
+elsewhere in the project is still watched.
+
 ## Keys
 
 | Key           | Command                | What it does                                                     |
