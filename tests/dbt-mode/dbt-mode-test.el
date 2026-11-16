@@ -911,8 +911,9 @@ shop_utils defines util and stg_orders, the project's namesake; a_utils,
 listed before it, defines util and only_in_a.  Namesakes have relations
 of their own, as dbt requires.  shop_utils's model pkg_calls and the
 project's model calls are empty; shop_utils's macro pkg_macro and the
-project's macro project_macro are too, and so is shop_utils's singular
-test pkg_test."
+project's macro project_macro are too, and so are shop_utils's singular
+test pkg_test, its generic test pkg_check and its materialization
+pkg_view."
   (dolist (directory '("dbt_packages/shop_utils/models" "dbt_packages/shop_utils/tests" "dbt_packages/a_utils/models"))
     (make-directory (expand-file-name directory root) t))
   (pcase-dolist (`(,file . ,text)
@@ -927,15 +928,18 @@ test pkg_test."
                    ("models/marts/calls.sql" . "")
                    ("dbt_packages/shop_utils/macros/pkg_macro.sql" . "{% macro pkg_macro() %}\n{% endmacro %}\n")
                    ("macros/project_macro.sql" . "{% macro project_macro() %}\n{% endmacro %}\n")
-                   ("dbt_packages/shop_utils/tests/pkg_test.sql" . "")))
+                   ("dbt_packages/shop_utils/tests/pkg_test.sql" . "")
+                   ("dbt_packages/shop_utils/macros/pkg_generic.sql" . "{% test pkg_check(model) %}\n{% endtest %}\n")
+                   ("dbt_packages/shop_utils/macros/pkg_materialization.sql"
+                    . "{% materialization pkg_view, default %}\n{% endmaterialization %}\n")))
     (write-region text nil (expand-file-name file root))))
 
 (ert-deftest dbt-mode-inserts-the-ref-that-dbt-takes-from-a-package ()
   "C-c C-e in a package's model calls what dbt takes from there: its package's own resource, else the project's, by name.
 Another package's resource comes with its package, from a package's
-model as from the project's.  In a macro, which dbt resolves from the
-node that calls it, any resource but the project's comes with its
-package.  A buffer that visits no file calls as the project does.  A
+model as from the project's.  In a macro, a generic test or a
+materialization, which dbt resolves from the node that calls it, any
+resource but the project's comes with its package.  A buffer that visits no file calls as the project does.  A
 model's own name calls its namesake in another package, as an override
 does, not the model itself."
   (dbt-test-with-project root
@@ -950,6 +954,9 @@ does, not the model itself."
                        ("models/marts/calls.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
                        ("dbt_packages/shop_utils/macros/pkg_macro.sql" "util" "{{ ref('shop_utils', 'util') }}")
                        ("dbt_packages/shop_utils/macros/pkg_macro.sql" "customers" "{{ ref('customers') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_generic.sql" "util" "{{ ref('shop_utils', 'util') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_materialization.sql" "util"
+                        "{{ ref('shop_utils', 'util') }}")
                        ("macros/project_macro.sql" "stg_orders" "{{ ref('stg_orders') }}")
                        ("macros/project_macro.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
                        ("dbt_packages/shop_utils/tests/pkg_test.sql" "util" "{{ ref('util') }}")
