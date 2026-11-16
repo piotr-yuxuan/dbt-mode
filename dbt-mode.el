@@ -357,8 +357,10 @@ call gives one.")
 (defun dbt-mode-call-at-point ()
   "Return the call that point is on, as a target plist, or nil.
 The plist is (:kind KIND :qualifier QUALIFIER :name NAME :version
-VERSION), as `dbt-project-resolve' reads it: a call of `ref', `source'
-or `doc', or, within a Jinja tag, of a macro."
+VERSION :position POSITION), as `dbt-project-resolve' reads it: a call
+of `ref', `source' or `doc', or, within a Jinja tag, of a macro.  Point
+is on it from the start of its function's name to its closing quote;
+POSITION is where NAME starts."
   (let ((position (point))
         (limit dbt-mode-jinja-max-tag-length))
     (save-excursion
@@ -370,7 +372,8 @@ or `doc', or, within a Jinja tag, of a macro."
            (while (and (setq matched (re-search-forward regexp bound t)) (< (match-end 0) position)))
            (and matched (<= (match-beginning 0) position)
                 (list :kind kind :qualifier (match-string-no-properties 2)
-                      :name (match-string-no-properties 1) :version (match-string-no-properties 3)))))
+                      :name (match-string-no-properties 1) :version (match-string-no-properties 3)
+                      :position (match-beginning 1)))))
        (append dbt-project-call-regexps
                (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp))))))))
 
@@ -427,7 +430,7 @@ item of a model's versions names that version of the model; an entry of
 another section, such as semantic_models, names nothing, and neither
 does an exposure, which no call names.  Another resource of a package
 other than PROJECT is qualified by its package, and a version of a
-model by its version."
+model by its version.  The target's :entity is ENTITY's kind."
   (let* ((entry (eq (plist-get entity :kind) 'properties))
          (kind (if entry
                    (alist-get (plist-get entity :section) (cons '("versions" . model) dbt-project-section-kinds)
@@ -443,7 +446,8 @@ model by its version."
                          ('source nil)
                          (_ package))
             :name (plist-get entity :name)
-            :version (plist-get entity :version)))))
+            :version (plist-get entity :version)
+            :entity (plist-get entity :kind)))))
 
 (defun dbt-mode-xref-backend ()
   "Return the xref backend of dbt-mode in a dbt project.
