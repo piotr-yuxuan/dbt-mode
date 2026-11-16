@@ -709,7 +709,9 @@ packages or more do: \"Found ambiguous ref\" (dbt1005, probed on
 dbt-oss 2.0.11 and the proprietary 2.0.9, from the project as from a
 package).  Nil otherwise: a `ref' with its package has one candidate at
 most, and a `doc', which dbt takes from the packages by the order of
-their names, a macro, or a source itself, is never ambiguous."
+their names, a macro, or a source itself, is never ambiguous.  The
+index reads no `+enabled', so a package's model that the project
+disables, which dbt skips, still counts."
   (and (pcase (plist-get target :kind)
          ('ref t)
          ('source (plist-get target :qualifier)))

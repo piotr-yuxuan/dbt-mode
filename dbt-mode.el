@@ -534,7 +534,7 @@ disables to override it, which the index does not read, and resolves a
 call in a package's macro from the node that calls the macro.  With
 `dbt-mode--every-definition', every definition is listed.  A call that
 dbt rejects as ambiguous, as `dbt-project-ambiguous' tells, lists its
-definitions, and the echo area says that dbt rejects it.
+definitions, each of which says so.
 
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
@@ -555,17 +555,17 @@ resolve."
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
-    (mapcar #'dbt-mode--xref
-            (cond (dbt-mode--every-definition definitions)
-                  ((and (memq (plist-get target :kind) '(ref source doc))
-                        (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root))))
-                   (list (car definitions)))
-                  (t
-                   (when-let* ((packages (dbt-project-ambiguous (dbt-project-root) target definitions
-                                                                (dbt-mode-caller (dbt-project-root)))))
-                     (message "dbt rejects this call as ambiguous: %s define %s"
-                              (string-join packages " and ") (plist-get target :name)))
-                   definitions)))))
+    (cond (dbt-mode--every-definition (mapcar #'dbt-mode--xref definitions))
+          ((and (memq (plist-get target :kind) '(ref source doc))
+                (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root))))
+           (list (dbt-mode--xref (car definitions))))
+          (t
+           ;; Said by each item, which every display of xref shows.
+           (let ((said (when-let* ((packages (dbt-project-ambiguous (dbt-project-root) target definitions
+                                                                    (dbt-mode-caller (dbt-project-root)))))
+                         (format "%s, which dbt rejects as ambiguous: %s and %s define it" identifier
+                                 (string-join (butlast packages) ", ") (car (last packages))))))
+             (mapcar (lambda (entity) (dbt-mode--xref entity said)) definitions))))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
