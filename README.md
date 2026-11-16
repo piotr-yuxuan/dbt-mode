@@ -100,8 +100,9 @@ Writing and moving:
   them). When lsp-mode's breadcrumbs show the document symbols that the
   server announces, as the proxy does, they replace the mode's line; with
   dbt lsp alone, which announces none, lsp-mode's breadcrumbs name the
-  file and the mode adds the CTEs and blocks after it. `(add-hook 'dbt-mode-hook
-  #'dbt-breadcrumb-mode)` turns it on in every model;
+  file and the mode adds the CTEs and blocks after it.
+  `(add-hook 'dbt-mode-hook #'dbt-breadcrumb-mode)` turns it on in every
+  model;
 - `C-c C-a` writes a new staging model from a source table, as dbt Labs'
   style guide lays it out with its YAML entry, a model, an incremental
   model, a macro, a snapshot defined in YAML, the YAML entry of the current
