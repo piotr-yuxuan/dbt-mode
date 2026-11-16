@@ -55,6 +55,9 @@ any dbt runs."
 (defconst dbt-embark-nodes '(model seed snapshot)
   "The kinds of resources that are nodes of dbt's graph, with a file of their own.")
 
+(defconst dbt-embark-relations (cons 'table dbt-embark-nodes)
+  "The kinds of resources that dbt selects and that have a relation.")
+
 (defun dbt-embark-visit (identifier)
   "Go where `xref-find-definitions' goes on a call of IDENTIFIER, from here.
 That is the definition that dbt takes, or the list of namesakes."
@@ -71,7 +74,7 @@ That is the definition that dbt takes, or the list of namesakes."
   "Build the resource that IDENTIFIER names: dbt build --select it."
   (interactive (list (dbt-embark-read)))
   (dbt-cli-run "build" (list "--select" (dbt-mode-entity-selection
-                                         (dbt-embark-entity identifier (cons 'table dbt-embark-nodes))))))
+                                         (dbt-embark-entity identifier dbt-embark-relations)))))
 
 (defun dbt-embark-run (identifier)
   "Run the model that IDENTIFIER names: dbt run --select it."
@@ -82,7 +85,7 @@ That is the definition that dbt takes, or the list of namesakes."
   "Test the resource that IDENTIFIER names: dbt test --select it."
   (interactive (list (dbt-embark-read)))
   (dbt-cli-run "test" (list "--select" (dbt-mode-entity-selection
-                                        (dbt-embark-entity identifier (cons 'table dbt-embark-nodes))))))
+                                        (dbt-embark-entity identifier dbt-embark-relations)))))
 
 (defun dbt-embark-lineage (identifier)
   "Show the lineage of the model, seed or snapshot that IDENTIFIER names."
@@ -93,7 +96,7 @@ That is the definition that dbt takes, or the list of namesakes."
 (defun dbt-embark-copy-relation (identifier)
   "Copy the relation, database.schema.alias, of the resource that IDENTIFIER names."
   (interactive (list (dbt-embark-read)))
-  (dbt-copy-relation (dbt-embark-entity identifier (cons 'table dbt-embark-nodes))))
+  (dbt-copy-relation (dbt-embark-entity identifier dbt-embark-relations)))
 
 (defvar-keymap dbt-embark-identifier-map
   :doc "The actions of embark on a dbt resource, a `dbt-identifier'.
