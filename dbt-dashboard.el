@@ -43,7 +43,8 @@
   "Return the results of the artifact FILE and the command that wrote it.
 The value is (RESULTS . COMMAND): RESULTS its objects of results, as
 hash tables, COMMAND its args.which, or nil.  Nil when FILE cannot be
-read or holds no results.  The artifacts are dbt's, read as they are."
+read or holds no array of results; an empty array gives (nil . COMMAND).
+The artifacts are dbt's, read as they are."
   (let ((json (ignore-errors (with-temp-buffer
                                (insert-file-contents file)
                                (json-parse-buffer :null-object nil)))))
@@ -57,7 +58,8 @@ read or holds no results.  The artifacts are dbt's, read as they are."
 ARTIFACT is FILE as `dbt-dashboard--read' read it.  Each of LINES is a
 pair (TEXT . ID): ID, a unique id, is what RET visits, or nil for a line
 that names no node.  The heading says how many results FILE holds and
-how long ago dbt wrote it, or that it holds no results."
+how long ago dbt wrote it, none included, or else, without ARTIFACT,
+that it holds no results that can be read."
   (insert (propertize title 'face 'bold)
           (if artifact
               (format ", from %s, %d result%s, written %s ago\n" (file-name-nondirectory file)
