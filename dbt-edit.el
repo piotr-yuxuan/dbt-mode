@@ -204,8 +204,12 @@ The lists are those of the states: never modify them."
           "\\|\\_<\\(?:rows\\|range\\|groups\\)[ \t]+\\(?:between\\|unbounded\\|current\\|[0-9]\\)\\)")
   "The keywords that start a clause of SQL, on a line of their own level.")
 
+(defconst dbt-edit--sql-comment-regexp "\\(?:\\(?:--\\|/\\*\\)[ \t]*\\)?"
+  "The opener of a SQL comment, if any, before a tag that starts a line.
+Jinja reads the tag all the same, so the line sits as the tag would.")
+
 (defconst dbt-edit--closer-regexp
-  "\\(?:[])}]\\|{%[-+]?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
+  (concat "\\(?:[])}]\\|" dbt-edit--sql-comment-regexp "{%[-+]?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)")
   "What a line starts with when it closes the construct that holds it.")
 
 (defconst dbt-edit--base-regexp
@@ -217,7 +221,7 @@ The lists are those of the states: never modify them."
             ;; A tag, past tags, comments and blank lines, 50 at most,
             ;; before one, a closer or the end: {% if is_incremental() %}
             ;; then where.
-            "\\|" tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
+            "\\|" dbt-edit--sql-comment-regexp tag ".*\\(?:\n[ \t]*\\(?:\\(?:" tag "\\|{#\\|--\\).*\\)?\\)\\{0,50\\}"
             "\\(?:\\'\\|\n[ \t]*\\(?:" leads "\\|" dbt-edit--closer-regexp "\\)\\)\\)"))
   "What a line starts with when it stays at the base of its construct.
 A clause, a CTE, NAME as (, or a Jinja tag that leads to one of them.")
@@ -238,7 +242,9 @@ for a position after the line's start.
 The nearest construct open at the line's start, a parenthesis or a Jinja
 block, indents it by `dbt-indent-offset' from the line that opened it.
 A line that starts by closing it, with `)', `]', `}' or a tag such as
-`{% endif %}' or `{% else %}', is at that line's column.  At that base,
+`{% endif %}' or `{% else %}', is at that line's column.  A tag after
+the opener of a SQL comment, `-- {% endif %}', counts as one that starts
+the line, as Jinja reads it all the same.  At that base,
 a line that starts with a clause keyword, such as select or from, or
 with a CTE, NAME as (, stays at the base, and so does a Jinja statement
 tag that leads to one of them, to a closer or to the end of the buffer,
@@ -264,13 +270,15 @@ one step in from its block."
              (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
                (beginning-of-line)
                (while (and (not found)
-                           (re-search-backward (concat "^[ \t]*\\(?:{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
+                           (re-search-backward (concat "^[ \t]*\\(?:" dbt-edit--sql-comment-regexp
+                                                       "{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
                                                        dbt-edit-clause-regexp "\\)")
                                                bound t))
                  (let ((other (dbt-edit--opener (point) blocks)))
                    (cond ((> other opener) (goto-char other))
                          ((nth 8 (syntax-ppss (point))))
-                         ((looking-at-p "[ \t]*{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
+                         ((looking-at-p (concat "[ \t]*" dbt-edit--sql-comment-regexp "{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>"))
+                          (setq found column))
                          (t (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
@@ -278,7 +286,9 @@ one step in from its block."
   "Indent the current line as `dbt-edit-indentation' says, given BLOCKS.
 A line that starts in a string or a comment keeps its indentation.  A
 line that starts a comment, with `--', `/*' or `{#', indents as the line
-of code after it, unless that code is on its own line or closes."
+of code after it, unless that code is on its own line or closes, or the
+comment, a SQL one, holds a Jinja tag on that line, which Jinja reads:
+the line is one of Jinja then, whose block may hold that code."
   (unless (nth 8 (save-excursion (syntax-ppss (line-beginning-position))))
     (indent-line-to
      (save-excursion
@@ -287,7 +297,8 @@ of code after it, unless that code is on its own line or closes."
          (let ((start (point))
                (end (line-end-position)))
            (forward-comment (buffer-size))
-           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp))
+           (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp)
+                     (save-excursion (goto-char start) (looking-at-p "\\(?:--\\|/\\*\\).*{%")))
              (goto-char start))))
        (dbt-edit-indentation blocks)))))
 

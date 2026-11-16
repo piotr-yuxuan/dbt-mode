@@ -573,6 +573,22 @@ first `#}', and a `{%' in the string of a tag is text."
     (insert "\n")
     (should-error (dbt-test-keys "C-c /") :type 'user-error)))
 
+(ert-deftest dbt-edit-indents-a-tag-in-a-sql-comment-as-the-tag ()
+  "A line whose SQL comment holds a tag sits as the tag would: its block, else and end as uncommented.
+C-x h C-M-\\ leaves what it indented as it is, as TAB on each line does."
+  (dolist (case '(("select *\nfrom t\n-- {% if is_incremental() %}\nwhere a > 1\n-- {% endif %}\norder by 1\n"
+                   . "select *\nfrom t\n-- {% if is_incremental() %}\n    where a > 1\n-- {% endif %}\norder by 1\n")
+                  ("select\nid\n-- {% if a %}\n, b\n/* {% else %} */\n, c\n-- {% endif %}\nfrom t\n"
+                   . "select\n    id\n    -- {% if a %}\n        , b\n    /* {% else %} */\n        , c\n    -- {% endif %}\nfrom t\n")))
+    (should (equal (dbt-test-indented (car case)) (cdr case)))
+    (should (equal (dbt-test-indented (cdr case)) (cdr case)))
+    (dbt-test-with-window (car case)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (dbt-test-keys "TAB")
+        (forward-line 1))
+      (should (equal (buffer-string) (cdr case))))))
+
 (ert-deftest dbt-edit-keeps-its-states-across-comments-and-raw ()
   "The blocks read from the states kept after a comment that runs past the limit are those of a scan from the start."
   (let ((fresh (lambda (limit) (let ((dbt-edit--scans (list (list 0)))) (dbt-edit-blocks limit)))))
