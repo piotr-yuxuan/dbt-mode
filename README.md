@@ -178,7 +178,7 @@ need a dbt account: without one, the server says nothing about columns.
 | `C-c C-g`     | `dbt-lineage`          | The upstream and downstream of a model                           |
 | `C-c C-y`     | `dbt-visit-properties` | The YAML entry of the model                                      |
 | `C-c C-f`     | `dbt-find-resource`    | Go to any model, seed, snapshot, analysis, macro, docs block or source |
-| `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion                             |
+| `C-c C-e`     | `dbt-insert-ref`       | Insert a `ref`, read with completion, as dbt resolves it here    |
 | `C-c C-t`     | `dbt-visit-tests`      | The tests of the model: its YAML entries, the data tests that name it, its singular tests; not its unit tests |
 | `C-c C-w`     | `dbt-copy-relation`    | Copy the relation of the model, or of the `ref` or `source` at point, from `target/manifest.json` |
 | `C-c M-w`     | `dbt-copy-build-command` | Copy `dbt build -s` of what point is on, a `ref` or a `source`, else the model; with `C-u`, `+…+` |

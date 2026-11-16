@@ -494,13 +494,20 @@ dbt-mode's."
      (mapcar (lambda (entity) (dbt-mode-identifier (dbt-mode-entity-target entity (dbt-project-name root))))
              (dbt-project-entities root '(model seed snapshot analysis macro test doc source table))))))
 
+(defun dbt-mode-caller (root)
+  "Return the name of the package of ROOT whose calls the current file makes.
+dbt resolves the calls of a model, of YAML properties or of a singular
+test from the package of their file, and those of a macro from the
+package of the node that calls it, which no file tells.  Nil for a
+buffer that visits no file."
+  (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))
+
 (defun dbt-mode-definitions (target)
   "Return the entities that define TARGET, from the current buffer.
-The calls of a file resolve from its package, whatever the file holds:
-a model, YAML properties, a singular test."
+They are best first, as `dbt-project-resolve' orders them for a call
+from `dbt-mode-caller'."
   (let ((root (dbt-project-root)))
-    (dbt-project-resolve root target
-                         (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))))
+    (dbt-project-resolve root target (dbt-mode-caller root))))
 
 (defun dbt-mode--xref (entity &optional summary)
   "Return the xref item of ENTITY, whose summary is SUMMARY or its description."
@@ -927,17 +934,37 @@ again."
 
 (defun dbt-insert-ref (selector)
   "Insert a call of `ref' to SELECTOR, read with completion.
-SELECTOR is a name, or NAME.vVERSION, which calls that version.  Outside
-a Jinja tag, the call comes within `{{ }}'.  A resource of an installed
-package is called with its package.  The current resource is not the
-default: a model that refers to itself is a cycle."
+SELECTOR is a name, or NAME.vVERSION, which calls that version; the
+completion offers each name once.  Outside a Jinja tag, the call comes
+within `{{ }}'.  It calls the resource that dbt resolves SELECTOR to
+from the current file, the first that `xref-find-definitions' lists,
+but for the resource that the file defines, which a call would make a
+cycle: a model's namesake in another package comes instead, as an
+override of a package's model calls it.  A resource of the file's
+package or of the project comes by name alone, any other with its
+package.  Within a macro, a generic test or a materialization, which dbt
+resolves from whichever node calls it, any resource but the project's
+comes with its package.  To call another namesake, write the call with
+its package: completion at point offers that package's models."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
+         (caller (dbt-mode-caller root))
          (wanted (dbt-mode-parse-selector selector))
-         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
-                     (user-error "No model, seed or snapshot `%s'" selector)))
+         ;; Not `dbt-mode-current-resource', which is the call at point
+         ;; in a file that defines no resource, nor every resource of the
+         ;; file, which may define several snapshots.
+         (entity (or (car (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
+                                  (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+                     (user-error "No model, seed or snapshot `%s' but this one" selector)))
+         ;; Probed on both builds: ref('util') in a package's macro is
+         ;; ambiguous when a project's model calling the macro resolves
+         ;; it; the package's own model calling it gets the package's.
+         (from (if (seq-some (lambda (block) (member (car block) '("macro" "test" "materialization")))
+                             (cdr (dbt-edit-blocks (point))))
+                   (dbt-project-name root)
+                 caller))
          (call (format "ref(%s'%s'%s)"
-                       (if (equal (plist-get entity :package) (dbt-project-name root))
+                       (if (< (funcall (dbt-project-lookup-rank root from) entity) 2)
                            ""
                          (format "'%s', " (plist-get entity :package)))
                        (car wanted)

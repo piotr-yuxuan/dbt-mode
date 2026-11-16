@@ -905,6 +905,144 @@ dbt compiles a local package in the copy it installs."
     (dbt-insert-ref "raw_orders")
     (should (string-suffix-p "{{ ref('raw_orders')" (buffer-string)))))
 
+(defun dbt-test-write-namesakes (root)
+  "Write in ROOT two packages whose models share names with each other and the project.
+shop_utils defines util and stg_orders, the project's namesake; a_utils,
+listed before it, defines util and only_in_a.  Namesakes have relations
+of their own, as dbt requires.  shop_utils's model pkg_calls and the
+project's model calls are empty; shop_utils's macro pkg_macro and the
+project's macro project_macro are too, and so are shop_utils's singular
+test pkg_test, its generic test pkg_check and its materialization
+pkg_view."
+  (dolist (directory '("dbt_packages/shop_utils/models" "dbt_packages/shop_utils/tests" "dbt_packages/a_utils/models"))
+    (make-directory (expand-file-name directory root) t))
+  (pcase-dolist (`(,file . ,text)
+                 '(("packages.yml" . "packages:\n  - local: dbt_packages/a_utils\n  - local: dbt_packages/shop_utils\n")
+                   ("dbt_packages/a_utils/dbt_project.yml" . "name: 'a_utils'\nversion: '1.0.0'\nconfig-version: 2\n")
+                   ("dbt_packages/shop_utils/models/util.sql" . "select 1 as id\n")
+                   ("dbt_packages/shop_utils/models/stg_orders.sql"
+                    . "{{ config(alias='shop_utils_stg_orders') }}\nselect 1 as id\n")
+                   ("dbt_packages/a_utils/models/util.sql" . "{{ config(alias='a_utils_util') }}\nselect 1 as id\n")
+                   ("dbt_packages/a_utils/models/only_in_a.sql" . "select 1 as id\n")
+                   ("dbt_packages/shop_utils/models/pkg_calls.sql" . "")
+                   ("models/marts/calls.sql" . "")
+                   ("dbt_packages/shop_utils/macros/pkg_macro.sql" . "{% macro pkg_macro() %}\n{% endmacro %}\n")
+                   ("macros/project_macro.sql" . "{% macro project_macro() %}\n{% endmacro %}\n")
+                   ("dbt_packages/shop_utils/tests/pkg_test.sql" . "")
+                   ("dbt_packages/shop_utils/macros/pkg_generic.sql" . "{% test pkg_check(model) %}\n{% endtest %}\n")
+                   ("dbt_packages/shop_utils/macros/pkg_materialization.sql"
+                    . "{% materialization pkg_view, default %}\n{% endmaterialization %}\n")))
+    (write-region text nil (expand-file-name file root))))
+
+(ert-deftest dbt-mode-inserts-the-ref-that-dbt-takes-from-a-package ()
+  "C-c C-e in a package's model calls what dbt takes from there: its package's own resource, else the project's, by name.
+Another package's resource comes with its package, from a package's
+model as from the project's.  In a macro, a generic test or a
+materialization, which dbt resolves from the node that calls it, any
+resource but the project's comes with its package.  A buffer that visits no file calls as the project does.  A
+model's own name calls its namesake in another package, as an override
+does, not the model itself; nor are snapshots that its file defines
+besides it, nor those of a YAML file."
+  (dbt-test-with-project root
+    (dbt-test-write-namesakes root)
+    ;; Not dbt's: a snapshot needs a configuration that no test here reads.
+    (write-region (concat "{% snapshot snap_a %}\nselect 1 as id\n{% endsnapshot %}\n"
+                          "{% snapshot snap_b %}\nselect 1 as id\n{% endsnapshot %}\n")
+                  nil (expand-file-name "snapshots/two.sql" root))
+    (write-region (concat "snapshots:\n  - name: snap_c\n    relation: ref('stg_orders')\n"
+                          "  - name: snap_d\n    relation: ref('stg_orders')\n")
+                  nil (expand-file-name "snapshots/_snapshots.yml" root))
+    (save-window-excursion
+      (pcase-dolist (`(,file ,name ,call)
+                     '(("dbt_packages/shop_utils/models/pkg_calls.sql" "util" "{{ ref('util') }}")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "stg_orders" "{{ ref('stg_orders') }}")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "customers" "{{ ref('customers') }}")
+                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
+                       ("models/marts/calls.sql" "stg_orders" "{{ ref('stg_orders') }}")
+                       ("models/marts/calls.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_macro.sql" "util" "{{ ref('shop_utils', 'util') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_macro.sql" "customers" "{{ ref('customers') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_generic.sql" "util" "{{ ref('shop_utils', 'util') }}")
+                       ("dbt_packages/shop_utils/macros/pkg_materialization.sql" "util"
+                        "{{ ref('shop_utils', 'util') }}")
+                       ("macros/project_macro.sql" "stg_orders" "{{ ref('stg_orders') }}")
+                       ("macros/project_macro.sql" "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")
+                       ("dbt_packages/shop_utils/tests/pkg_test.sql" "util" "{{ ref('util') }}")
+                       ("dbt_packages/shop_utils/models/util.sql" "util" "{{ ref('a_utils', 'util') }}")
+                       ("models/staging/stg_orders.sql" "stg_orders" "{{ ref('shop_utils', 'stg_orders') }}")
+                       ("snapshots/two.sql" "snap_b" "{{ ref('snap_b') }}")
+                       (nil "stg_orders" "{{ ref('stg_orders') }}")
+                       (nil "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")))
+        (if file
+            (switch-to-buffer (dbt-test-visit root file))
+          (switch-to-buffer "*dbt no file*")
+          (setq default-directory root)
+          (dbt-mode))
+        ;; Within the macro's block, else at the end.
+        (if (string-search "macros/" (or file ""))
+            (progn (goto-char (point-min)) (end-of-line))
+          (goto-char (point-max)))
+        (insert "\n")
+        (execute-kbd-macro (kbd (format "C-c C-e %s RET" name)))
+        (should (equal (buffer-substring-no-properties (line-beginning-position) (point)) call)))
+      ;; The snapshots that a YAML file defines are none of its own.
+      (switch-to-buffer (dbt-test-visit root "snapshots/_snapshots.yml"))
+      (goto-char (point-max))
+      (execute-kbd-macro (kbd "M-x dbt-insert-ref RET snap_d RET"))
+      (should (looking-back "^{{ ref('snap_d') }}" (line-beginning-position)))
+      ;; A call at point is no resource of the buffer's own: nothing to leave out.
+      (switch-to-buffer "*dbt no file*")
+      (erase-buffer)
+      (insert "{{ ref('stg_orders') }}")
+      (goto-char 4)
+      (execute-kbd-macro (kbd "C-c C-e stg_orders RET"))
+      (should (equal (buffer-string) "{{ ref('stg_orders')ref('stg_orders') }}"))
+      (kill-buffer "*dbt no file*"))))
+
+(ert-deftest dbt-mode-live-inserts-the-refs-that-dbt-takes-from-a-package ()
+  "With the real dbt, the refs that C-c C-e inserts in a package's model and macro depend on what was read.
+dbt parses the model and lists what it depends on: shop_utils's util
+and stg_orders, the project's customers, a_utils's only_in_a.  The ref
+inserted in the package's macro takes shop_utils's util whether a model
+of the package or one of the project calls the macro."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (dbt-test-write-namesakes root)
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/models/pkg_calls.sql"))
+      (insert "select * from ")
+      (execute-kbd-macro (kbd "C-c C-e util RET"))
+      (insert ", ")
+      (execute-kbd-macro (kbd "C-c C-e stg_orders RET"))
+      (insert ", ")
+      (execute-kbd-macro (kbd "C-c C-e customers RET"))
+      (insert ", ")
+      (execute-kbd-macro (kbd "C-c C-e only_in_a RET"))
+      (insert "\n")
+      (save-buffer)
+      (switch-to-buffer (dbt-test-visit root "dbt_packages/shop_utils/macros/pkg_macro.sql"))
+      (goto-char (point-min))
+      (end-of-line)
+      (execute-kbd-macro (kbd "C-c C-e util RET"))
+      (save-buffer))
+    (write-region "select * from {{ pkg_macro() }}\n" nil
+                  (expand-file-name "dbt_packages/shop_utils/models/pkg_uses.sql" root))
+    (write-region "select * from {{ shop_utils.pkg_macro() }}\n" nil
+                  (expand-file-name "models/marts/uses_macro.sql" root))
+    (let ((default-directory root))
+      (should (eq 0 (call-process (getenv "DBT_MODE_TEST_DBT") nil nil nil "parse" "--profiles-dir" root))))
+    (let ((depends-on (lambda (id)
+                        (sort (append (gethash "nodes" (gethash "depends_on" (dbt-project-manifest-node
+                                                                               (expand-file-name "target/manifest.json" root)
+                                                                               id)))
+                                      nil)
+                              #'string<))))
+      (should (equal (funcall depends-on "model.shop_utils.pkg_calls")
+                     '("model.a_utils.only_in_a" "model.shop.customers" "model.shop_utils.stg_orders"
+                       "model.shop_utils.util")))
+      (should (equal (funcall depends-on "model.shop_utils.pkg_uses") '("model.shop_utils.util")))
+      (should (equal (funcall depends-on "model.shop.uses_macro") '("model.shop_utils.util"))))))
+
 (ert-deftest dbt-mode-inserts-no-ref-to-nothing ()
   "RET on an empty answer inserts no ref: not to the buffer's own model, nor to nothing."
   (dbt-test-with-project root
@@ -973,7 +1111,11 @@ A name alone is the latest version, as for `ref'."
     (insert "\n")
     (dbt-insert-ref "dim.v1")
     (should (looking-back "{{ ref('dim', v=1) }}" (line-beginning-position)))
-    ;; The model itself, unpinned, floats to its latest version.
+    ;; From its latest version, the model unpinned is the version itself,
+    ;; a cycle; from another model, it floats to its latest version.
+    (should-error (dbt-insert-ref "dim") :type 'user-error)
+    (dbt-test-visit root "models/marts/uses_v1.sql")
+    (goto-char (point-max))
     (insert "\n")
     (dbt-insert-ref "dim")
     (should (looking-back "^{{ ref('dim') }}" (line-beginning-position)))))
