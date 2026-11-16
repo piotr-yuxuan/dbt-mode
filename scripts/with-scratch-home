@@ -12,7 +12,8 @@
 # cache's com.getdbt, where dbt looks for its driver before it downloads
 # one; the original stays as it is.  The scratch directory, under /tmp,
 # is deleted when COMMAND succeeds, and kept and printed when it fails,
-# but for that copy, which is most of its size.
+# but for that copy, which is most of its size; so is a run stopped by
+# TERM or HUP.
 
 set -uo pipefail
 
@@ -43,6 +44,16 @@ trap '' PIPE
 scratch=$(TMPDIR=/tmp mktemp -d -t dbt-mode-scratch.XXXXXX) || exit 2
 mkdir -p "$scratch"/{home,config,cache,data,state,tmp}
 touch "$scratch/home/.dbt-mode-scratch"
+
+keep() {
+  rm -rf -- "$scratch/cache/com.getdbt"
+  echo "with-scratch-home: kept $scratch" >&2
+}
+# A run stopped by a signal, as by a deadline, failed too.  Bash runs
+# the trap once COMMAND has returned.
+trap 'keep; exit 143' TERM
+trap 'keep; exit 129' HUP
+
 if [[ -n "$cache" ]] && ! cp -R -- "$cache/." "$scratch/cache/com.getdbt/"; then
   rm -rf -- "$scratch"
   exit 2
@@ -66,7 +77,6 @@ status=$?
 if (( status == 0 )); then
   rm -rf -- "$scratch"
 else
-  rm -rf -- "$scratch/cache/com.getdbt"
-  echo "with-scratch-home: kept $scratch" >&2
+  keep
 fi
 exit "$status"
