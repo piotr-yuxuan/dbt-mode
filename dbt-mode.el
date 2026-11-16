@@ -1038,7 +1038,7 @@ A dbt that did not answer in time whether it formats is asked again."
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
       (save-buffer)
-      (dbt-project-ask-again)
+      (dbt-project-ask-again "format")
       (pcase (dbt-project-command-answer "format")
         ('yes (dbt-cli-format (current-buffer)))
         ('timeout (user-error "dbt did not answer dbt format --help in time: C-c C-q asks again"))

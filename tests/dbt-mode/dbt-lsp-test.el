@@ -267,14 +267,16 @@ The question's message says so too, and what asks again."
               (start (with-current-buffer (messages-buffer) (point-max))))
           (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
                          "dbt did not answer dbt format --help in time: C-c C-q asks again"))
-          (should (string-search "dbt did not answer dbt format --help within 1 s: C-c C-q or M-x dbt-lsp asks again"
+          (should (string-search "dbt did not answer dbt format --help within 1 s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
                                  (with-current-buffer (messages-buffer) (buffer-substring start (point-max)))))
           (execute-kbd-macro (kbd "C-c C-q"))
           (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n" (buffer-string)))))))))
 
 (ert-deftest dbt-lsp-keeps-the-timeout-of-a-dbt-that-hangs ()
   "A dbt that hangs when asked whether it formats costs its wait once: neither format on save, nor its saves, nor dispatch asks again.
-None says that it cannot format; dispatch says that it did not answer."
+None says that it cannot format; dispatch says that it did not answer.
+C-c C-q asks again whether it formats, but not whether it runs a
+server, which the next file opened would wait for again."
   (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exec sleep 20"
     (dbt-test-with-project root
       (save-window-excursion
@@ -297,8 +299,12 @@ None says that it cannot format; dispatch says that it did not answer."
             (should (string-search "L lint (dbt did not answer)" menu)))
           (should-not (string-search "cannot format" (with-current-buffer (messages-buffer)
                                                        (buffer-substring start (point-max)))))
-          (should-not dbt-mode--told-cannot-format))))
-    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "format --help\n"))))
+          (should-not dbt-mode--told-cannot-format)
+          (should-not (dbt-lsp-server-p))
+          (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
+          (should-not (dbt-lsp-server-p)))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls")
+                   "format --help\nlsp --help\nformat --help\n"))))
 
 (ert-deftest dbt-lsp-asks-again-from-its-command ()
   "M-x dbt-lsp asks again a dbt that did not answer in time whether it runs a server, and says that it did not answer."

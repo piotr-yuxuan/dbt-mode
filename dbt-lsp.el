@@ -137,7 +137,7 @@ the buffer, as lsp-mode would guess before it looks at the folders."
 A dbt that runs no server, such as dbt-oss, is an error.  A dbt that
 did not answer in time whether it runs one is asked again."
   (interactive)
-  (dbt-project-ask-again)
+  (dbt-project-ask-again "lsp")
   (pcase (dbt-project-command-answer "lsp")
     ('yes nil)
     ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))

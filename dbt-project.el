@@ -106,7 +106,7 @@ runs."
               (while (and (process-live-p process) (< (float-time) deadline))
                 (accept-process-output process 0.1))
               (cond ((process-live-p process)
-                     (message "dbt did not answer dbt %s --help within %s s: C-c C-q or M-x dbt-lsp asks again"
+                     (message "dbt did not answer dbt %s --help within %s s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
                               command dbt-project--probe-seconds)
                      'timeout)
                     ((and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
@@ -121,12 +121,14 @@ As `dbt-project-command-answer' says: a dbt that did not answer in time
 runs none."
   (eq 'yes (dbt-project-command-answer command)))
 
-(defun dbt-project-ask-again ()
-  "Forget the answers of a dbt that did not answer in time, to ask it again.
-For the commands that a user runs, which may wait, as
-`dbt-format-buffer' and `dbt-lsp' do; hooks and menus do not."
+(defun dbt-project-ask-again (command)
+  "Forget that a dbt did not answer in time whether it runs COMMAND.
+So it is asked again.  For the commands that a user runs, which may
+wait, as `dbt-format-buffer' and `dbt-lsp' do; hooks and menus do not,
+and an answer about another command stays, so that they do not wait
+for it."
   (maphash (lambda (key answer)
-             (when (eq answer 'timeout)
+             (when (and (eq answer 'timeout) (equal (nth 2 key) command))
                (remhash key dbt-project--commands)))
            dbt-project--commands))
 
