@@ -11,15 +11,18 @@
   pair.
   `dbt-edit-pair-jinja` turns all of it off;
 - `C-c /` closes the innermost open Jinja block, `{% endif %}` and the like,
-  and `C-c %` moves between a block's opening and closing tags;
+  and `C-c %` moves between a block's opening and closing tags; both read
+  the blocks as dbt does: a tag in a SQL comment counts, none in a `{# #}`
+  comment or a `{% raw %}` block does;
 - `TAB` and `C-M-\` indent by what holds a line: a parenthesis or a Jinja
   block puts its contents one step, `dbt-indent-offset`, in from its line,
   and `)`, `{% endif %}` or `{% else %}` back at that line, as soon as they
   are typed; clauses sit at the level, the lines of a clause one step in,
   as in dbt Labs' style guide; a Jinja tag sits at the level of what it
   leads to, a clause or a column; a comment line sits as the code after
-  it; a line that starts in a string or a comment stays put, and dbt-mode
-  indents with spaces;
+  it, unless it holds a Jinja tag in a SQL comment, `-- {% endif %}`,
+  which sits as the tag would; a line that starts in a string or a comment
+  stays put, and dbt-mode indents with spaces;
 - CTEs are the defuns of a model: `C-M-a`, `C-M-e`, `C-M-h` and `C-x n d`
   work on them; with [expreg](https://elpa.gnu.org/packages/expreg.html),
   `expreg-expand` also selects the Jinja tag and its contents, the block and
