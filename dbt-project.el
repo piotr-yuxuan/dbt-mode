@@ -481,11 +481,13 @@ FILE is its true name, TIME and SIZE those of the file it names.")
   "Return the node ID of the manifest FILE, as a hash table, or nil.
 Nil when FILE cannot be read or holds no such node.  Only the node is
 parsed, as a manifest grows to tens of MB: its id is the key of an
-object in \"nodes\" or \"sources\" only, as elsewhere, such as in
-\"child_map\", its value is an array.  The text of the last manifest
-read is kept, in one buffer, and read again once the file that FILE
-names, through its links, changes its modification time or its size, as
-the mode line of each model asks.  The manifest is dbt's, read as it is."
+object in \"nodes\" or \"sources\", and of an array elsewhere, whose
+first element is the node under \"disabled\", as dbt 2 writes a
+disabled node, and an id in \"child_map\" or \"parent_map\".  The
+text of the last manifest read is kept, in one buffer, and read again
+once the file that FILE names, through its links, changes its
+modification time or its size, as the mode line of each model asks.
+The manifest is dbt's, read as it is."
   (with-current-buffer (get-buffer-create " *dbt manifest*")
     (let* ((true (file-truename file))
            (attributes (file-attributes true))
@@ -495,9 +497,16 @@ the mode line of each model asks.  The manifest is dbt's, read as it is."
         (ignore-errors (insert-file-contents true))
         (setq dbt-project--manifest-stamp stamp)))
     (goto-char (point-min))
-    (and (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
-         (progn (backward-char)
-                (ignore-errors (json-parse-buffer :null-object nil))))))
+    (if (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*{") nil t)
+        (progn (backward-char)
+               (ignore-errors (json-parse-buffer :null-object nil)))
+      (let (node)
+        (while (and (not node)
+                    (re-search-forward (concat "\"" (regexp-quote id) "\"[ \t\n\r]*:[ \t\n\r]*\\[") nil t))
+          (backward-char)
+          (let ((first (car (append (ignore-errors (json-parse-buffer :null-object nil)) nil))))
+            (setq node (and (hash-table-p first) first))))
+        node))))
 
 (defun dbt-project-default-target (root)
   "Return the target that dbt runs on in ROOT when none is given, or nil.

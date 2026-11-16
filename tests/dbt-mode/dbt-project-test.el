@@ -618,5 +618,24 @@ as long, not sixty-four."
       (delete-file manifest)
       (should-not (dbt-project-manifest-node manifest "model.shop.orders")))))
 
+(ert-deftest dbt-project-reads-a-disabled-node-of-the-manifest ()
+  "A disabled node, the first of an array under \"disabled\" as dbt 2 writes it, is read.
+The arrays of ids that child_map and parent_map hold under the same id,
+before it or after, are no node (probed on dbt-oss 2.0.11 and the
+proprietary 2.0.9)."
+  (dbt-test-with-project root
+    (let ((manifest (expand-file-name "target/manifest.json" root)))
+      (make-directory (file-name-directory manifest))
+      (write-region (concat "{\"nodes\": {}, \"child_map\": {\"model.shop.off\": [\"test.shop.t\"]},"
+                            " \"disabled\": {\"model.shop.off\": [{\"unique_id\": \"model.shop.off\","
+                            " \"config\": {\"enabled\": false}}]},"
+                            " \"parent_map\": {\"model.shop.off\": []}}")
+                    nil manifest)
+      (should (equal (gethash "unique_id" (dbt-project-manifest-node manifest "model.shop.off")) "model.shop.off"))
+      (should-not (dbt-project-manifest-node manifest "test.shop.t"))
+      (write-region "{\"nodes\": {}, \"child_map\": {\"model.shop.gone\": []}}" nil manifest)
+      (set-file-times manifest (time-add (current-time) 10))
+      (should-not (dbt-project-manifest-node manifest "model.shop.gone")))))
+
 (provide 'dbt-project-test)
 ;;; dbt-project-test.el ends here
