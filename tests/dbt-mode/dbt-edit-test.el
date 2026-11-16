@@ -587,7 +587,10 @@ C-x h C-M-\\ leaves what it indented as it is, as TAB on each line does."
       (while (not (eobp))
         (dbt-test-keys "TAB")
         (forward-line 1))
-      (should (equal (buffer-string) (cdr case))))))
+      (should (equal (buffer-string) (cdr case)))))
+  ;; A `{%' that closes no tag on the line leaves a comment line as one.
+  (should (equal (dbt-test-indented "select\n    id\nfrom t\n-- a stray {% here\nwhere a\n")
+                 "select\n    id\nfrom t\n-- a stray {% here\nwhere a\n")))
 
 (ert-deftest dbt-edit-keeps-its-states-across-comments-and-raw ()
   "The blocks read from the states kept after a comment that runs past the limit are those of a scan from the start."

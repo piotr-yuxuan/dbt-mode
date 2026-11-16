@@ -309,7 +309,7 @@ the line is one of Jinja then, whose block may hold that code."
                (end (line-end-position)))
            (forward-comment (buffer-size))
            (when (or (<= (point) end) (looking-at-p dbt-edit--closer-regexp)
-                     (save-excursion (goto-char start) (looking-at-p "\\(?:--\\|/\\*\\).*{%")))
+                     (save-excursion (goto-char start) (looking-at-p "\\(?:--\\|/\\*\\).*{%.*%}")))
              (goto-char start))))
        (dbt-edit-indentation blocks)))))
 
