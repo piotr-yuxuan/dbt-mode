@@ -26,6 +26,7 @@ configuration, columns, what it depends on and a description; off under
                     (original_file_path . "models/staging/stg_orders.sql")
                     (patch_path . "shop://models/staging/_staging.yml")
                     (config . ((materialized . "view") (tags . ["daily" "finance"]) (enabled . t)
+                               (meta . ((owner . "data team"))) (unique_key . "order_id")
                                (access . "protected") (contract . ((enforced . :json-false)))))
                     (columns . ((order_id . ((name . "order_id") (data_type . "integer")
                                              (description . "One per order.")))
@@ -72,7 +73,9 @@ depends on and what uses it."
                            "  properties    models/staging/_staging.yml"
                            "Configuration"
                            "  relation      \"shop\".\"main\".\"stg_orders\""
+                           "  owner         data team"
                            "  materialized  view"
+                           "  unique key    order_id"
                            "  tags          daily, finance"
                            "  access        protected"
                            "Columns"
