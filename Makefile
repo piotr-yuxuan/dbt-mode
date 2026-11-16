@@ -28,9 +28,13 @@ quote = '$(subst ','\'',$(1))'
 # server's tests.
 SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c 't=; command -v timeout >/dev/null 2>&1 && t="timeout -k 1 10"; $$t "$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
-.PHONY: check lint compile checkdoc package-lint relint complexity test test-python public commits
+.PHONY: check check-static lint compile checkdoc package-lint relint complexity test test-python public \
+	workflows commits
 
-check: lint test
+check: check-static test
+
+# All that needs no Emacs test, which CI runs apart from the tests.
+check-static: lint test-python public workflows
 
 lint: compile checkdoc package-lint relint complexity
 
@@ -76,6 +80,9 @@ test-python:
 
 public:
 	@scripts/check-public
+
+workflows:
+	@actionlint
 
 commits:
 	@scripts/check-commits $(BASE)

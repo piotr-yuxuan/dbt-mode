@@ -11,6 +11,7 @@ import base64
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -146,6 +147,76 @@ class WithVersion(unittest.TestCase):
         for text in (b"", b";; Version 0.0.0\n", b" ;; Version: 0.0.0\n", b";; Version: 0\n;; Version: 0\n"):
             with self.subTest(text=text), self.assertRaises(release.ReleaseError):
                 release.with_version("a.el", text, "1.2.3")
+
+
+class Workflows(unittest.TestCase):
+    """What ties the workflows to the script, as no local run can trigger them."""
+
+    def setUp(self):
+        self.cd = (ROOT / ".github/workflows/cd.yml").read_text()
+        self.ci = (ROOT / ".github/workflows/ci.yml").read_text()
+
+    def test_ci_lets_only_macos_fail(self) -> None:
+        self.assertIn("continue-on-error: ${{ matrix.part == 'macos' }}", self.ci)
+        self.assertEqual(self.ci.count("continue-on-error"), 1)
+
+    def test_ci_runs_the_static_checks_and_the_tests(self) -> None:
+        self.assertIn("make check-static", self.ci)
+        self.assertIn("make test", self.ci)
+
+    def test_ci_fetches_no_dbt(self) -> None:
+        self.assertNotIn("DBT_MODE_TEST_DBT", self.ci)
+
+    def test_cd_gives_the_script_what_the_runner_does_not(self):
+        for name in ("GH_TOKEN", *(name for name in release.SETTINGS if not name.startswith("GITHUB_"))):
+            with self.subTest(name):
+                self.assertRegex(self.cd, rf"(?m)^ +{name}: ")
+
+    def test_cd_goes_on_only_after_a_success_of_a_push_here_or_by_hand_on_main(self):
+        for clause in (
+            "!github.event.repository.fork",
+            "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+            "github.event.workflow_run.conclusion == 'success'",
+            "github.event.workflow_run.event == 'push'",
+            "github.event.workflow_run.head_repository.full_name == github.repository",
+        ):
+            with self.subTest(clause):
+                self.assertIn(clause, self.cd)
+
+    def test_cd_may_read_the_runs_of_ci_and_write_a_release(self):
+        self.assertRegex(self.cd, r"(?m)^  actions: read$")
+        self.assertRegex(self.cd, r"(?m)^  contents: write$")
+
+    def test_cd_checks_out_what_ci_checked_and_follows_the_workflow_named_ci(self):
+        self.assertRegex(self.cd, r"ref: \$\{\{ github\.event\.workflow_run\.head_sha \|\| github\.sha \}\}")
+        self.assertRegex(self.cd, r"workflows: \[CI\]")
+        self.assertRegex(self.ci, r"(?m)^name: CI$")
+
+    def test_every_action_is_pinned_by_a_full_commit(self):
+        for text in (self.ci, self.cd):
+            uses = re.findall(r"uses: (\S+)( # v\S+)?", text)
+            self.assertTrue(uses)
+            for action, version in uses:
+                with self.subTest(action):
+                    self.assertRegex(action, r"@[0-9a-f]{40}$")
+                    self.assertTrue(version)
+
+    def test_ci_trusts_no_other_cache(self) -> None:
+        for word in ("substituters", "accept-flake-config"):
+            with self.subTest(word):
+                self.assertNotIn(word, self.ci)
+
+    def test_ci_restores_the_store_between_the_installer_and_the_first_shell(self) -> None:
+        installer = self.ci.index("uses: cachix/install-nix-action@")
+        cache = self.ci.index("uses: nix-community/cache-nix-action@")
+        self.assertLess(installer, cache)
+        self.assertLess(cache, self.ci.index("run: nix develop"))
+
+    def test_ci_keys_the_cache_on_the_flake_and_on_a_prefix_of_that_key(self) -> None:
+        key = re.search(r"primary-key: (.+)", self.ci).group(1)
+        prefix = re.search(r"restore-prefixes-first-match: (.+)", self.ci).group(1)
+        self.assertIn("hashFiles('flake.nix', 'flake.lock')", key)
+        self.assertTrue(key.startswith(prefix))
 
 
 class Bounds(unittest.TestCase):
