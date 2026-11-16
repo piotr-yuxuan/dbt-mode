@@ -121,7 +121,7 @@ of no argument, shows the node again, on \\[revert-buffer]."
                                        (map-elt node "tests"))
                              (list "known to dbt-lsp-plus only: C-c C-t visits the YAML that holds them")))
         (dbt-node--section "Depends on" (mapcar link (map-nested-elt node '("depends_on" "nodes"))))
-        (dbt-node--section "Used by"
+        (dbt-node--section "Used by, in the index"
                            (mapcar link (sort (mapcar (lambda (child) (plist-get child :id))
                                                       (seq-filter (lambda (child) (member id (plist-get child :parents)))
                                                                   (dbt-project-graph root)))

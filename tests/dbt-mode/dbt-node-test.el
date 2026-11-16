@@ -54,10 +54,10 @@ The heading names the node, its kind and package, and the manifest it
 comes from, with when dbt wrote it.  A value that dbt leaves empty, null
 or false shows nothing; columns align by name; a description of two
 lines is one value, which TAB folds with its section.  The tests are
-left to dbt-lsp-plus.  What uses it is what dbt's child_map names, but
-for tests: an analysis, a model, a snapshot.  C-c C-o again, and g, show
-the node once.  RET visits its file, its YAML entry, what it depends on
-and what uses it."
+left to dbt-lsp-plus.  What uses it comes from dbt-mode's index, as for
+the lineage, which here agrees with dbt's child_map but for tests.  C-c
+C-o again, and g, show the node once.  RET visits its file, its YAML
+entry, what it depends on and what uses it."
   (dbt-test-with-project root
     (dbt-test-write-manifest root)
     (save-window-excursion
@@ -90,7 +90,7 @@ and what uses it."
                            "  known to dbt-lsp-plus only: C-c C-t visits the YAML that holds them"
                            "Depends on"
                            "  seed      raw_orders"
-                           "Used by"
+                           "Used by, in the index"
                            "  analysis  order_counts"
                            "  model     orders"
                            "  snapshot  orders_snapshot"
