@@ -131,6 +131,21 @@ the buffer, as lsp-mode would guess before it looks at the folders."
         (lsp-workspace-folders-add folder))
       (setq-local lsp-auto-guess-root nil))))
 
+(defun dbt-lsp--ignore-outputs ()
+  "Keep lsp-mode's file watchers out of the current project's logs and target.
+dbt writes there at each run and dbt lsp at each compilation, while dbt
+lsp asks to watch every file: at each event, dbt-lsp-plus would list
+the graph again, and dbt lsp compile.  lsp-mode reads
+`lsp-file-watch-ignored-directories' under the workspace's root when
+the server asks, and matches true names: one regexp per project, at the
+true name of its root, joins the option's value in this session, and
+the user's own entries stay.  A value that the project's .dir-locals.el
+gives the option takes precedence."
+  (when-let* ((root (dbt-project-root)))
+    (add-to-list 'lsp-file-watch-ignored-directories
+                 (format "\\`%s[/\\\\]\\(?:logs\\|target\\)\\'"
+                         (regexp-quote (directory-file-name (file-truename root)))))))
+
 ;;;###autoload
 (defun dbt-lsp ()
   "Start dbt lsp for the current buffer, on the root of its dbt project.
@@ -143,6 +158,7 @@ did not answer in time whether it runs one is asked again."
     ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
     (_ (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does")))
   (dbt-lsp-add-project-folder)
+  (dbt-lsp--ignore-outputs)
   (lsp))
 
 ;;;###autoload
@@ -153,6 +169,7 @@ when dbt runs no server, such as dbt-oss, which lsp-mode would take for
 a server to install."
   (when (dbt-lsp-server-p)
     (dbt-lsp-add-project-folder)
+    (dbt-lsp--ignore-outputs)
     (lsp-deferred)))
 
 ;;;; Commands of the server

@@ -26,6 +26,9 @@
 (defvar dbt-lsp-test-log nil
   "The log of the scripted server of the running test.")
 
+(defvar dbt-lsp-test-watch-files nil
+  "Whether lsp-mode watches files in `dbt-lsp-test-with-server', which it does not by default.")
+
 (defvar dbt-lsp-test-messages-start nil
   "Where the messages of the running test start in the *Messages* buffer.")
 
@@ -47,7 +50,7 @@ writes it.  The buffers of rows and lineage are killed afterwards."
               (dbt-executable dbt-lsp-test-dbt)
               (lsp--session nil)
               (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
-              (lsp-enable-file-watchers nil)
+              (lsp-enable-file-watchers dbt-lsp-test-watch-files)
               (lsp-restart 'ignore)
               (lsp-keep-workspace-alive nil)
               (lsp-auto-guess-root nil)
@@ -1323,6 +1326,46 @@ symbols name it, and nothing follows it."
         (ert-run-idle-timers)
         (should (equal (dbt-test-mode-line header-line-format)
                        " models > marts > orders.sql > final > if is_incremental()"))))))
+
+(defconst dbt-lsp-test-watcher
+  '("$requests" . [((method . "client/registerCapability")
+                    (params (registrations . [((id . "watch") (method . "workspace/didChangeWatchedFiles")
+                                               (registerOptions (watchers . [((globPattern . "**/*"))])))])))])
+  "The answer that has the scripted server ask for a watcher of every file.
+dbt lsp 2.0.9 asks for it right after `initialized'.")
+
+(ert-deftest dbt-lsp-keeps-the-watchers-out-of-dbt-outputs ()
+  "lsp-mode's file watchers, which dbt lsp asks for, report a model's change but nothing under the project's logs or target.
+dbt writes there at each run and dbt lsp at each compilation: at each
+event, dbt-lsp-plus would list the graph again, and dbt lsp compile.
+The user's own entries of the option stay, and the directories logs and
+target elsewhere are watched as before."
+  (let ((dbt-lsp-test-watch-files t)
+        (lsp-file-watch-ignored-directories (list "[/\\\\]\\.git\\'")))
+    (dbt-lsp-test-with-server root (list dbt-lsp-test-watcher)
+      (dbt-test-wait (lambda () (lsp--registered-capability "workspace/didChangeWatchedFiles")))
+      (dolist (file '("logs/dbt.log" "target/run_results.json" "models/marts/new_model.sql"))
+        (make-directory (file-name-directory (expand-file-name file root)) t)
+        (write-region "select 1\n" nil (expand-file-name file root)))
+      (let ((changed (lambda ()
+                       (mapcan (lambda (message)
+                                 (and (equal (plist-get message :method) "workspace/didChangeWatchedFiles")
+                                      (mapcar (lambda (change) (plist-get change :uri))
+                                              (plist-get (plist-get message :params) :changes))))
+                               (dbt-lsp-test-received)))))
+        ;; In batch, Emacs reads file notifications only as events.
+        (dbt-test-wait (lambda () (or (seq-find (lambda (uri) (string-suffix-p "/models/marts/new_model.sql" uri))
+                                                (funcall changed))
+                                      (ignore (read-event nil nil 0.1)))))
+        ;; The events of logs and target come first, if any come.
+        (dotimes (_ 10)
+          (read-event nil nil 0.1))
+        (should-not (seq-find (lambda (uri) (string-match-p "/\\(?:logs\\|target\\)/" uri)) (funcall changed))))
+      (should (member "[/\\\\]\\.git\\'" lsp-file-watch-ignored-directories))
+      ;; Another project's logs, or a directory logs of this one's models,
+      ;; are watched as before.
+      (dolist (directory (list "/elsewhere/logs" (expand-file-name "models/logs" (file-truename root))))
+        (should-not (seq-find (lambda (regexp) (string-match-p regexp directory)) lsp-file-watch-ignored-directories))))))
 
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here
