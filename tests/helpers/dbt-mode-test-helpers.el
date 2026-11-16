@@ -5,7 +5,9 @@
 ;;; Commentary:
 
 ;; A copy of the fixture project for each test, visiting its files, and
-;; waiting for what an asynchronous process does.
+;; waiting for what an asynchronous process does; for the tests of
+;; scripts/, child processes with a deadline and scratch git
+;; repositories.
 
 ;;; Code:
 
@@ -88,6 +90,53 @@ written."
     ((guard (and (symbolp construct) (not (booleanp construct))))
      (dbt-test-mode-line (symbol-value construct)))
     (_ "")))
+
+(defun dbt-test-run (program arguments &optional environment directory)
+  "Run PROGRAM with ARGUMENTS and return (STATUS . OUTPUT).
+OUTPUT holds standard output and standard error.  ENVIRONMENT, a
+list of \"NAME=VALUE\" strings, is added to the environment; the
+working directory is DIRECTORY, or the repository's root.  The
+child is killed after 120 seconds, and STATUS is then the symbol
+`timeout'."
+  (let* ((process-environment (append environment process-environment))
+         (default-directory (file-name-as-directory
+                             (or directory (expand-file-name ".." dbt-test-directory))))
+         (deadline (+ (float-time) 120))
+         (process (make-process :name "dbt-test" :buffer (generate-new-buffer " *dbt-test*")
+                                :command (cons program arguments)
+                                :connection-type 'pipe :noquery t :sentinel #'ignore)))
+    (while (and (process-live-p process) (< (float-time) deadline))
+      (accept-process-output process 0.1))
+    (when (process-live-p process)
+      (delete-process process))
+    (while (accept-process-output process 0 nil t))
+    (prog1 (cons (if (eq (process-status process) 'exit)
+                     (process-exit-status process)
+                   'timeout)
+                 (with-current-buffer (process-buffer process) (buffer-string)))
+      (kill-buffer (process-buffer process)))))
+
+(defun dbt-test-git (directory &rest arguments)
+  "Run git with ARGUMENTS in DIRECTORY; signal an error unless it succeeds.
+The tests run in a scratch home, whose git has no configuration but
+the identity tests@example.invalid."
+  (let ((result (dbt-test-run "git" arguments nil directory)))
+    (unless (equal (car result) 0)
+      (error "Command git %s failed: %s" (mapconcat #'identity arguments " ") (cdr result)))
+    (cdr result)))
+
+(defun dbt-test-git-tree (files)
+  "Make a scratch git repository tracking FILES and return its directory.
+FILES is an alist of relative file names and their contents; they are
+added, not committed."
+  (let ((directory (file-name-as-directory (make-temp-file "repo-test" t))))
+    (pcase-dolist (`(,name . ,contents) files)
+      (let ((file (expand-file-name name directory)))
+        (make-directory (file-name-directory file) t)
+        (with-temp-file file (insert contents))))
+    (dbt-test-git directory "init" "-q" "-b" "main")
+    (dbt-test-git directory "add" "-A")
+    directory))
 
 (defun dbt-test-lineage-rows ()
   "Return the rows of the lineage tree of the current buffer, in its order.

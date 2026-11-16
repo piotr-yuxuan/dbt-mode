@@ -12,6 +12,7 @@
 
 EMACS ?= emacs
 DEPS ?=
+BASE ?= main
 SCRATCH := scripts/with-scratch-home
 PACKAGE_EL := dbt-project.el dbt-edit.el dbt-lineage.el dbt-rows.el dbt-cli.el dbt-mode.el dbt-compiled.el dbt-new.el dbt-babel.el dbt-dashboard.el dbt-lsp.el dbt-consult.el dbt-embark.el dbt-node.el dbt-breadcrumb.el
 TOOL_EL := $(wildcard scripts/*.el tests/helpers/*.el) tests/run-ert.el
@@ -27,7 +28,7 @@ quote = '$(subst ','\'',$(1))'
 # server's tests.
 SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c 't=; command -v timeout >/dev/null 2>&1 && t="timeout -k 1 10"; $$t "$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
-.PHONY: check lint compile checkdoc package-lint relint complexity test
+.PHONY: check lint compile checkdoc package-lint relint complexity test public commits
 
 check: lint test
 
@@ -69,3 +70,9 @@ test:
 	  DBT_MODE_TEST_ALLOW_SKIP="$$skip,$$alone" \
 	  $(SCRATCH) $(if $(DBT_MODE_TEST_DBT_CACHE),--dbt-cache $(call quote,$(DBT_MODE_TEST_DBT_CACHE))) \
 	  $(EMACS) -Q --batch $(LOAD) -L tests/helpers -l tests/run-ert.el tests
+
+public:
+	@scripts/check-public
+
+commits:
+	@scripts/check-commits $(BASE)
