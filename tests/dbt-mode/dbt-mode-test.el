@@ -409,9 +409,9 @@ root model finds that model."
   "M-. on a ref, a source or a doc goes to the project's definition when dbt takes it, though a package defines a namesake.
 A package's own definition, which dbt takes for the package's calls
 unless the project disables it, which the index does not read, is
-listed with the project's, first.  A macro call, whose order dbt-mode
-does not know, and an identifier typed at C-c C-f list every
-definition too."
+listed with the project's, first.  A macro call, which dbt resolves
+from the caller's package first, and an identifier read by C-c C-f,
+which names resources, list every definition too."
   (dbt-test-with-project root
     (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
     (let ((calls (concat "select * from {{ ref('stg_orders') }}\n"
@@ -450,6 +450,9 @@ definition too."
                        ("models/marts/calls.sql" "cents_to_dollars" "M-."
                         "cents_to_dollars.sql" "cents_to_dollars.sql")
                        ("models/marts/calls.sql" nil "C-c C-f ref:stg_orders RET"
+                        "staging/stg_orders.sql" "shop_utils/models/stg_orders.sql")
+                       ;; Though point is on a call of the same identifier.
+                       ("models/marts/calls.sql" "stg_orders" "C-c C-f ref:stg_orders RET"
                         "staging/stg_orders.sql" "shop_utils/models/stg_orders.sql")))
         (switch-to-buffer (dbt-test-visit root file))
         (if point-on (dbt-test-goto point-on) (goto-char (point-max)))

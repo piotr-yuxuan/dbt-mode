@@ -38,8 +38,10 @@ Without any dbt executable, dbt-mode reads the project's files:
   dbt takes a package's, it lists it first, then its namesakes, as dbt
   skips a package's model that the project disables to override it,
   which dbt-mode does not read, and a call in a macro resolves from the
-  node that calls the macro; a macro call, or an identifier typed at a
-  prompt, lists every definition;
+  node that calls the macro; a macro call, and `C-c C-f`, list every
+  definition; a macro of the project that a package's node calls, as
+  through dispatch, which dbt resolves from that package, still goes to
+  the project's;
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;
