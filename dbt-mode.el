@@ -509,8 +509,24 @@ a model, YAML properties, a singular test."
                                  (plist-get entity :name)))
              (xref-make-file-location (plist-get entity :file) (plist-get entity :line) 0)))
 
+(defvar dbt-mode--every-definition nil
+  "Non-nil while a command asks for every definition of an identifier.
+`dbt-find-resource' does: an identifier that it reads names resources,
+not a call that dbt resolves.")
+
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
-  "Return the definitions of IDENTIFIER.
+  "Return the definitions of IDENTIFIER, the one dbt takes first.
+For a `ref', a `source' or a `doc', the project's definition, when dbt
+takes it from the current file, is the only one: dbt takes it then from
+any file of the project, and from a package's file that defines no
+namesake.  It is wrong for a macro of the project that a package's node
+calls, as through dispatch, which dbt resolves from that package, a
+rare case.  A package's own definition, when dbt takes it, is listed
+first, then the others: dbt skips a package's model that the project
+disables to override it, which the index does not read, and resolves a
+call in a package's macro from the node that calls the macro.  With
+`dbt-mode--every-definition', every definition is listed.
+
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
 YAML entry of a package's model, which dbt reads as unused.  xref's
@@ -530,7 +546,12 @@ resolve."
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
-    (mapcar #'dbt-mode--xref definitions)))
+    (mapcar #'dbt-mode--xref
+            (if (and (memq (plist-get target :kind) '(ref source doc))
+                     (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root)))
+                     (not dbt-mode--every-definition))
+                (list (car definitions))
+              definitions))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
@@ -738,12 +759,14 @@ of the current buffer, unless NO-DEFAULT, or unless it is none of these."
   "Visit the definition of IDENTIFIER, read with completion.
 The identifiers name every model, seed, snapshot, analysis, macro, test,
 docs block, source and table of the project and its packages, whether
-or not a language server runs."
+or not a language server runs.  Every definition of IDENTIFIER is
+listed, as it names resources, not a call that dbt resolves."
   (interactive
    (list (completing-read "Find dbt resource: "
                           (xref-backend-identifier-completion-table 'dbt)
                           nil t)))
-  (let ((xref-backend-functions (list (lambda () 'dbt))))
+  (let ((xref-backend-functions (list (lambda () 'dbt)))
+        (dbt-mode--every-definition t))
     (xref-find-definitions identifier)))
 
 (defun dbt-visit-properties ()
@@ -1006,7 +1029,8 @@ With dbt lsp, the server formats it as it answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
 dbt ends, unless it was modified meanwhile.  A dbt with neither, such
-as dbt-oss, cannot format: that is an error, once the buffer is saved."
+as dbt-oss, cannot format: that is an error, once the buffer is saved.
+A dbt that did not answer in time whether it formats is asked again."
   (interactive)
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
@@ -1014,11 +1038,14 @@ as dbt-oss, cannot format: that is an error, once the buffer is saved."
     (if (dbt-mode-server-p)
         (dbt-lsp-format-buffer)
       (save-buffer)
-      (unless (dbt-project-command-p "format")
-        ;; Without any dbt, that is what it says.
-        (dbt-project-executable)
-        (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs (on dbt-oss, dbt system upgrade-distribution installs it)"))
-      (dbt-cli-format (current-buffer)))))
+      (dbt-project-ask-again "format")
+      (pcase (dbt-project-command-answer "format")
+        ('yes (dbt-cli-format (current-buffer)))
+        ('timeout (user-error "dbt did not answer dbt format --help in time: M-x dbt-format-buffer asks again"))
+        (_
+         ;; Without any dbt, that is what it says.
+         (dbt-project-executable)
+         (user-error "This dbt cannot format: it has no dbt format, which the proprietary build of dbt 2 runs (on dbt-oss, dbt system upgrade-distribution installs it)"))))))
 
 (defun dbt-mode--format-after-save ()
   "Format the buffer just saved, and save it again when that changed it.
@@ -1051,7 +1078,9 @@ while you go on, and the buffer shows the result unless you modified it
 meanwhile.  A failure to format is a message, and the save stands.  A
 dbt with neither a server nor `dbt format', such as dbt-oss, leaves
 saves as they are, which the mode says once for each dbt, in the first
-buffer that turns it on."
+buffer that turns it on.  A dbt that did not answer in time leaves
+saves as they are too, as the message of the question says, until
+`dbt-format-buffer' asks it again."
   :lighter " Fmt"
   (if dbt-format-on-save-mode
       (progn
@@ -1060,7 +1089,7 @@ buffer that turns it on."
         ;; proprietary build; dbt-oss has neither.
         (when-let* ((executable (executable-find dbt-executable))
                     ((not (member executable dbt-mode--told-cannot-format)))
-                    ((not (dbt-project-command-p "format"))))
+                    ((eq (dbt-project-command-answer "format") 'no)))
           (push executable dbt-mode--told-cannot-format)
           (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2 (on dbt-oss, dbt system upgrade-distribution installs it)")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))

@@ -335,10 +335,16 @@ as `dbt-cli-changed-selection' does, for a command that selects."
     ;; lint --help' succeeds, though its lint only says that it needs the
     ;; proprietary build, which brings lint with format.
     ("L" (lambda () (interactive) (dbt-cli-dispatch "lint"))
-     :description (lambda () (if (dbt-project-command-p "format") "lint" "lint (proprietary dbt 2 only)"))
+     :description (lambda () (pcase (dbt-project-command-answer "format")
+                               ('yes "lint")
+                               ('timeout "lint (dbt did not answer)")
+                               (_ "lint (proprietary dbt 2 only)")))
      :inapt-if-not (lambda () (dbt-project-command-p "format")))
     ("=" (lambda () (interactive) (dbt-cli-dispatch "format"))
-     :description (lambda () (if (dbt-project-command-p "format") "format" "format (proprietary dbt 2 only)"))
+     :description (lambda () (pcase (dbt-project-command-answer "format")
+                               ('yes "format")
+                               ('timeout "format (dbt did not answer)")
+                               (_ "format (proprietary dbt 2 only)")))
      :inapt-if-not (lambda () (dbt-project-command-p "format")))]
    ["Project"
     ("p" "parse" (lambda () (interactive) (dbt-cli-dispatch "parse")))

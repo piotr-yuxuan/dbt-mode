@@ -32,6 +32,16 @@ Without any dbt executable, dbt-mode reads the project's files:
     its `latest_version` or else its highest;
   - a `doc` in the project, else in the packages by the order of their
     names, whatever package calls it;
+
+  where the project and a package define the same name, `M-.` goes
+  straight to the project's definition when dbt takes that one; when
+  dbt takes a package's, it lists it first, then its namesakes, as dbt
+  skips a package's model that the project disables to override it,
+  which dbt-mode does not read, and a call in a macro resolves from the
+  node that calls the macro; a macro call, and `C-c C-f`, list every
+  definition; a macro of the project that a package's node calls, as
+  through dispatch, which dbt resolves from that package, still goes to
+  the project's;
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;
@@ -221,7 +231,12 @@ come with dbt 2's proprietary build only, and `dbt lint` runs only there,
 which `dbt system upgrade-distribution` turns `dbt-oss` into; dbt Core
 1.x has none of the three. dbt-mode asks dbt once whether it has the
 server and the formatter, asks again once dbt is replaced, and does
-without. It was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
+without. A dbt that does not answer within ten seconds whether it runs
+a command is taken as lacking that one, as a message says, without
+being asked at each save again; the dispatch menu says that it did not
+answer, and `C-c C-q` and `M-x dbt-lsp`, which you run and may wait for,
+ask it again. It was tested with `dbt-oss` 2.0.11 and the proprietary
+2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:
@@ -249,7 +264,8 @@ session before it starts the server, so that the server runs on the
 project, not on an enclosing repository, and each dbt project of a
 repository gets its own server, whatever `lsp-auto-guess-root` says. It
 adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
-it asks once, within ten seconds, and again once dbt is replaced.
+it asks once, within ten seconds, and again once dbt is replaced;
+`M-x dbt-lsp` asks again a dbt that did not answer in time.
 `dbt-properties-mode-maybe` turns on `M-.`, `M-?` and completion in the
 YAML files of a dbt project.
 

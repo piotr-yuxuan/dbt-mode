@@ -72,41 +72,65 @@ Signal a `user-error' when there is none, before anything starts."
       (user-error "No dbt to run: no executable %s" dbt-executable)))
 
 (defvar dbt-project--commands (make-hash-table :test #'equal)
-  "From a dbt executable and a command to whether it runs it.
+  "From a dbt executable and a command to what it answered about it.
 The key is (FILE TIME COMMAND): FILE the true name of the executable,
 TIME its modification time, so that a dbt replaced in place, or a link
 pointed at another, as an upgrade or a new profile does, is asked
-again.  The value is `yes' or `no'.")
+again.  The value is `yes', `no' or `timeout'.")
 
 (defvar dbt-project--probe-seconds 10
   "The seconds that dbt has to say whether it runs a command.")
 
+(defun dbt-project-command-answer (command)
+  "Return what the dbt of `dbt-executable' answers about running COMMAND.
+That is `yes' when `dbt COMMAND --help' succeeds: dbt 2.0's proprietary
+build runs `lsp' and `format', which dbt-oss 2.0 and dbt Core 1.x lack;
+`no' when it fails; `timeout' when dbt does not answer within
+`dbt-project--probe-seconds', which a message says; nil without dbt.
+The answer is kept for each command while the executable's file stays
+the same, as `dbt-project--commands' says, a timeout too, so that a dbt
+that hangs costs its wait once, not at each save or redisplay of a
+menu: `dbt-project-ask-again' forgets it, for a command that the user
+runs."
+  (when-let* ((executable (executable-find dbt-executable)))
+    (with-memoization (gethash (let ((file (file-truename executable)))
+                                 (list file (file-attribute-modification-time (file-attributes file)) command))
+                               dbt-project--commands)
+      (let ((process (ignore-errors
+                       (make-process :name (format "dbt %s --help" command)
+                                     :command (list executable command "--help")
+                                     :connection-type 'pipe :noquery t)))
+            (deadline (+ (float-time) dbt-project--probe-seconds)))
+        (unwind-protect
+            (progn
+              (while (and (process-live-p process) (< (float-time) deadline))
+                (accept-process-output process 0.1))
+              (cond ((process-live-p process)
+                     (message "dbt did not answer dbt %s --help within %s s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
+                              command dbt-project--probe-seconds)
+                     'timeout)
+                    ((and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                     'yes)
+                    (t 'no)))
+          ;; Also on a quit, as C-g in the first dispatch menu.
+          (when process (delete-process process)))))))
+
 (defun dbt-project-command-p (command)
   "Return non-nil when the dbt of `dbt-executable' runs COMMAND.
-It does when `dbt COMMAND --help' succeeds: dbt 2.0's proprietary build
-runs `lsp' and `format', which dbt-oss 2.0 and dbt Core 1.x lack.  The
-answer is kept for each command while the executable's file stays the
-same, as `dbt-project--commands' says.  A dbt that does not answer
-within `dbt-project--probe-seconds' runs none; nil without dbt."
-  (when-let* ((executable (executable-find dbt-executable)))
-    (eq 'yes
-        (with-memoization (gethash (let ((file (file-truename executable)))
-                                     (list file (file-attribute-modification-time (file-attributes file)) command))
-                                   dbt-project--commands)
-          (let ((process (ignore-errors
-                           (make-process :name (format "dbt %s --help" command)
-                                         :command (list executable command "--help")
-                                         :connection-type 'pipe :noquery t)))
-                (deadline (+ (float-time) dbt-project--probe-seconds)))
-            (unwind-protect
-                (progn
-                  (while (and (process-live-p process) (< (float-time) deadline))
-                    (accept-process-output process 0.1))
-                  (if (and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
-                      'yes
-                    'no))
-              ;; Also on a quit, as C-g in the first dispatch menu.
-              (when process (delete-process process))))))))
+As `dbt-project-command-answer' says: a dbt that did not answer in time
+runs none."
+  (eq 'yes (dbt-project-command-answer command)))
+
+(defun dbt-project-ask-again (command)
+  "Forget that a dbt did not answer in time whether it runs COMMAND.
+So it is asked again.  For the commands that a user runs, which may
+wait, as `dbt-format-buffer' and `dbt-lsp' do; hooks and menus do not,
+and an answer about another command stays, so that they do not wait
+for it."
+  (maphash (lambda (key answer)
+             (when (and (eq answer 'timeout) (equal (nth 2 key) command))
+               (remhash key dbt-project--commands)))
+           dbt-project--commands))
 
 (defcustom dbt-project-index-lifetime 30
   "Seconds for which an index of a project is used without reading it again.
@@ -635,10 +659,13 @@ is looked up in a table, built once for each index."
 It is the package whose directory is the nearest above FILE: an
 installed package rather than the project, the project rather than a
 local package that holds it, such as the `../' of a package's
-integration_tests.  Nil when FILE is in none."
-  (let ((file (expand-file-name file)))
-    (car (seq-sort-by (lambda (package) (length (nth 1 package))) #'>
-                      (seq-filter (lambda (package) (string-prefix-p (nth 1 package) file))
+integration_tests.  Nil when FILE is in none.  True names are compared,
+so that a file reached through a link, such as the link to a local
+package that dbt deps makes in dbt_packages, is in the package it is
+in."
+  (let ((file (file-truename file)))
+    (car (seq-sort-by (lambda (package) (length (file-truename (nth 1 package)))) #'>
+                      (seq-filter (lambda (package) (string-prefix-p (file-truename (nth 1 package)) file))
                                   (dbt-project-packages root))))))
 
 (defun dbt-project-file-entity (root file)
