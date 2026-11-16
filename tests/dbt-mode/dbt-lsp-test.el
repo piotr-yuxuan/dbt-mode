@@ -1310,5 +1310,19 @@ symbols name it, and nothing follows it."
         (should (string-match-p "marts.* orders\\.sql .*final\\'" line))
         (should (= 2 (length (split-string line "final"))))))))
 
+(ert-deftest dbt-lsp-breadcrumb-shows-its-own-without-lsp-mode-breadcrumbs ()
+  "With a server that announces document symbols but lsp-mode's breadcrumbs off, dbt-breadcrumb-mode shows its whole line."
+  (let ((lsp-headerline-breadcrumb-enable nil))
+    (dbt-lsp-test-with-server root '(("$capabilities" (documentSymbolProvider . t)))
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (should-not (bound-and-true-p lsp-headerline-breadcrumb-mode))
+        (dbt-test-goto "where orders.order_date")
+        (execute-kbd-macro (kbd "M-x dbt-breadcrumb-mode RET"))
+        (execute-kbd-macro (kbd "C-e"))
+        (ert-run-idle-timers)
+        (should (equal (dbt-test-mode-line header-line-format)
+                       " models > marts > orders.sql > final > if is_incremental()"))))))
+
 (provide 'dbt-lsp-test)
 ;;; dbt-lsp-test.el ends here

@@ -12,9 +12,9 @@
 ;; blocks that hold point, as `models > marts > orders.sql > final > if
 ;; is_incremental()'.  It names them as dbt-lsp-plus's outline does, so
 ;; that a model reads the same with and without the proxy, whose symbols
-;; lsp-mode's breadcrumbs draw: it steps aside when the server announces
-;; document symbols.  With dbt lsp alone, which announces none, lsp-mode
-;; still draws the directories and the file, and this mode adds the rest.
+;; lsp-mode's breadcrumbs draw: it steps aside when they show them.  With
+;; dbt lsp alone, which announces none, lsp-mode still draws the
+;; directories and the file, and this mode adds the rest.
 
 ;;; Code:
 
@@ -33,15 +33,23 @@ that hold point, each after \" > \".")
 (defvar-local dbt-breadcrumb--state nil
   "Point and the buffer's modification count when the line was computed.")
 
-(defconst dbt-breadcrumb--construct
-  '(:eval (cond ((and (dbt-mode-server-p) (dbt-lsp-symbols-p)) nil)
-                ;; lsp-mode's line, before this one, names the place.
-                ((bound-and-true-p lsp-headerline-breadcrumb-mode) (cdr dbt-breadcrumb--line))
-                (t (concat (car dbt-breadcrumb--line) (cdr dbt-breadcrumb--line)))))
-  "The construct of `header-line-format' of `dbt-breadcrumb-mode'.
-It shows nothing when the server announces document symbols, from
-which lsp-mode draws its breadcrumbs, and only the symbols when
-lsp-mode's breadcrumbs are on without them.")
+(defvar lsp-headerline-breadcrumb-segments)
+(declare-function dbt-lsp-symbols-p "dbt-lsp")
+
+(defun dbt-breadcrumb--header-line ()
+  "Return what the header line of `dbt-breadcrumb-mode' shows, at redisplay.
+Nothing when lsp-mode's breadcrumbs show the document symbols that the
+server announces; only the symbols when they show the file; otherwise
+the whole line.  A function rather than code in the construct, which
+nothing compiles."
+  (let ((shown (and (bound-and-true-p lsp-headerline-breadcrumb-mode) lsp-headerline-breadcrumb-segments)))
+    (cond ((and (memq 'symbols shown) (dbt-mode-server-p) (dbt-lsp-symbols-p)) nil)
+          ;; lsp-mode's line, before this one, names the place.
+          ((memq 'file shown) (cdr dbt-breadcrumb--line))
+          (t (concat (car dbt-breadcrumb--line) (cdr dbt-breadcrumb--line))))))
+
+(defconst dbt-breadcrumb--construct '(:eval (dbt-breadcrumb--header-line))
+  "The construct of `header-line-format' of `dbt-breadcrumb-mode'.")
 
 (defun dbt-breadcrumb--update (buffer)
   "Compute `dbt-breadcrumb--line' of BUFFER at its point, unless it was killed.
@@ -99,10 +107,10 @@ For `post-command-hook'.  Half a second, lsp-mode's `lsp-idle-delay'."
 The header line names the directories from the project's root to the
 file, the file, then the CTEs and the Jinja blocks that hold point, as
 dbt-lsp-plus names them in its outline.  It follows point once Emacs is
-idle.  When the server announces document symbols, as dbt-lsp-plus
-does, lsp-mode's breadcrumbs show them instead; when lsp-mode's
-breadcrumbs show the file without them, as with dbt lsp alone, this
-mode adds the CTEs and blocks after them."
+idle.  When lsp-mode's breadcrumbs show the document symbols that the
+server announces, as dbt-lsp-plus does, they replace this line; when
+they show the file without them, as with dbt lsp alone, which
+announces none, this mode adds the CTEs and blocks after them."
   :lighter nil
   (if dbt-breadcrumb-mode
       (progn

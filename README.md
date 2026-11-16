@@ -97,10 +97,10 @@ Writing and moving:
   test, snapshot, materialization, docs or `set` block shows the name it
   defines, an `if`, `for` or `call` block its statement, as dbt-lsp-plus
   names them (the `if`, `for` and `call` blocks once its outline has
-  them). When the server announces document symbols, as the proxy does,
-  lsp-mode's breadcrumbs show them instead; with dbt lsp alone, which
-  announces none, lsp-mode's breadcrumbs name the file and the mode adds
-  the CTEs and blocks after it. `(add-hook 'dbt-mode-hook
+  them). When lsp-mode's breadcrumbs show the document symbols that the
+  server announces, as the proxy does, they replace the mode's line; with
+  dbt lsp alone, which announces none, lsp-mode's breadcrumbs name the
+  file and the mode adds the CTEs and blocks after it. `(add-hook 'dbt-mode-hook
   #'dbt-breadcrumb-mode)` turns it on in every model;
 - `C-c C-a` writes a new staging model from a source table, as dbt Labs'
   style guide lays it out with its YAML entry, a model, an incremental
