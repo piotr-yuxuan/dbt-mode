@@ -943,7 +943,8 @@ orders_snapshot give snapshot_report, at the second level."
     (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
       (should (equal (dbt-test-lineage-rows) '(("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv"))))
       (should (equal header-line-format " Lineage of stg_orders, at every depth")))
-    (should (member "workspace/executeCommand dbt.listNodes" (dbt-lsp-test-methods)))))
+    (should (member "workspace/executeCommand dbt.listNodes" (dbt-lsp-test-methods)))
+    (should-not (dbt-lsp-test-calls))))
 
 (ert-deftest dbt-lsp-rename-model-refuses-what-dbt-would-not-take ()
   "Renaming a model refuses a name that is not one, or that another resource has.
