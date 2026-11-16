@@ -11,6 +11,10 @@
       shell = pkgs: pkgs.mkShell {
         packages = [
           (pkgs.emacs.pkgs.withPackages (epkgs: [
+            # Optional for users: dbt-mode uses them only when they are
+            # loaded. Here so that the tests of that use can run.
+            epkgs.consult
+            epkgs.embark
             epkgs.lsp-mode
             epkgs.package-lint
             epkgs.relint
