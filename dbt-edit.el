@@ -148,7 +148,7 @@ them."
            (open (cddar scans)))
       (goto-char (caar scans))
       ;; After a tag that ends past LIMIT, no search may bound behind point.
-      (while (re-search-forward "{%-?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
+      (while (re-search-forward "{%[-+]?[ \t\n]*\\(end\\)?\\([a-z_]+\\)\\_>" (max limit (point)) t)
         ;; dbt-mode-jinja-bounds searches: read the match before it.
         (let* ((start (match-beginning 0))
                (closing (match-beginning 1))
@@ -191,7 +191,7 @@ them."
   "The keywords that start a clause of SQL, on a line of their own level.")
 
 (defconst dbt-edit--closer-regexp
-  "\\(?:[])}]\\|{%-?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
+  "\\(?:[])}]\\|{%[-+]?[ \t\n]*\\(?:end[a-z_]*\\|else\\|elif\\)\\_>\\)"
   "What a line starts with when it closes the construct that holds it.")
 
 (defconst dbt-edit--base-regexp
@@ -250,13 +250,13 @@ one step in from its block."
              (let ((bound (save-excursion (goto-char opener) (line-beginning-position))))
                (beginning-of-line)
                (while (and (not found)
-                           (re-search-backward (concat "^[ \t]*\\(?:{%-?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
+                           (re-search-backward (concat "^[ \t]*\\(?:{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>\\|"
                                                        dbt-edit-clause-regexp "\\)")
                                                bound t))
                  (let ((other (dbt-edit--opener (point) blocks)))
                    (cond ((> other opener) (goto-char other))
                          ((nth 8 (syntax-ppss (point))))
-                         ((looking-at-p "[ \t]*{%-?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
+                         ((looking-at-p "[ \t]*{%[-+]?[ \t]*\\(?:else\\|elif\\)\\_>") (setq found column))
                          (t (setq found (current-indentation)))))))
              (+ (or found column) dbt-indent-offset))))))
 
@@ -320,7 +320,7 @@ starts it, as `end...', `else' and `elif' move it."
       (back-to-indentation)
       (cond ((memq char '(?\) ?\] ?\})) (= (1+ (point)) end))
             ((or (eq char ?_) (<= ?a char ?z))
-             (and (looking-at "{%-?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
+             (and (looking-at "{%[-+]?[ \t]*[a-z_]+") (= (match-end 0) end)))))))
 
 (defun dbt-close-block ()
   "Insert the closing tag of the innermost Jinja block open at point.

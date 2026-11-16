@@ -514,5 +514,24 @@ narrowing alone."
     (widen)
     (should (equal (buffer-string) "{% macro m() %}\nselect\nid\n    from t\n{% endmacro %}\n"))))
 
+(ert-deftest dbt-edit-reads-the-plus-trim-marker ()
+  "`{%+' opens, closes and splits blocks as `{%' and `{%-' do, as dbt reads it.
+dbt renders `{%+ if false +%} x {%+ endif %}' as nothing; C-c /, C-c %,
+C-x h C-M-\\ and typing a closer take its tags as tags."
+  (dbt-test-with-window "{%+ if a %}\n    select 1\n"
+    (dbt-test-keys "C-c /")
+    (should (string-suffix-p "    select 1\n{% endif %}" (buffer-string))))
+  (dbt-test-with-window "{%+ if a %}\nx\n{%+ endif +%}\n"
+    (goto-char (point-min))
+    (dbt-test-keys "C-c %")
+    (should (looking-at-p "{%\\+ endif")))
+  (should (equal (dbt-test-indented "select\nid,\n{%+ if x %}\nname,\n{%+ else %}\nother,\n{%+ endif %}\nlast\nfrom t\n")
+                 (concat "select\n    id,\n    {%+ if x %}\n        name,\n    {%+ else %}\n        other,\n"
+                         "    {%+ endif %}\n    last\nfrom t\n")))
+  (dbt-test-with-window "select\n    id,\n{%+ if x %}\n    name,\n    "
+    (electric-indent-local-mode 1)
+    (dbt-test-type "{%+ endif")
+    (should (equal (dbt-test-around-point) "select\n    id,\n{%+ if x %}\n    name,\n{%+ endif-!- %}"))))
+
 (provide 'dbt-edit-test)
 ;;; dbt-edit-test.el ends here
