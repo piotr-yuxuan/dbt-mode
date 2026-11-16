@@ -23,8 +23,9 @@
 (defconst dbt-test-alone-dbt (getenv "DBT_MODE_TEST_DBT")
   "The dbt 2 executable of the live tests, or nil.")
 
-(defconst dbt-test-alone-proxy (getenv "DBT_MODE_TEST_PROXY")
-  "The executable of dbt-lsp-plus, or nil.")
+(defconst dbt-test-alone-proxy (let ((proxy (getenv "DBT_MODE_TEST_PROXY")))
+                                 (and proxy (not (string-empty-p proxy)) (expand-file-name proxy)))
+  "The executable of dbt-lsp-plus, or nil; an empty value is none.")
 
 (defmacro dbt-test-with-proxy-alone (root &rest body)
   "Run BODY in models/marts/orders.sql of a fresh project ROOT, with dbt-lsp-plus alone.
@@ -35,8 +36,12 @@ afterwards, and the buffers of rows, lineage and nodes are killed."
   `(progn
      (unless dbt-test-alone-dbt (ert-skip "no dbt 2 executable"))
      (unless dbt-test-alone-proxy (ert-skip "no dbt-lsp-plus"))
-     (unless (eq 'lacks (let ((dbt-executable dbt-test-alone-dbt)) (dbt-project-command-answer "lsp")))
-       (ert-skip "this dbt runs dbt lsp"))
+     ;; The reasons that the Makefile allows: dbt Core or a dbt that does
+     ;; not answer lacks no dbt lsp as dbt-oss does.
+     (pcase (let ((dbt-executable dbt-test-alone-dbt)) (dbt-project-command-answer "lsp"))
+       ('lacks nil)
+       ('yes (ert-skip "this dbt runs dbt lsp"))
+       (_ (ert-skip "no dbt lsp in this dbt")))
      (let ((bin (make-temp-file "dbt-lsp-plus" t)))
        (make-symbolic-link dbt-test-alone-proxy (expand-file-name "dbt-lsp-plus" bin))
        (unwind-protect
