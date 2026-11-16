@@ -53,7 +53,8 @@ nothing compiles."
 
 (defun dbt-breadcrumb--update (buffer)
   "Compute `dbt-breadcrumb--line' of BUFFER at its point, unless it was killed.
-For the idle timer of `dbt-breadcrumb--schedule'.  The symbols are the Jinja blocks open at point, a definition
+For the idle timer of `dbt-breadcrumb--schedule', and when the mode
+starts.  The symbols are the Jinja blocks open at point, a definition
 block named by the first identifier after its keyword and an `if',
 `for' or `call' block by its statement, and the CTEs whose parenthesis
 holds point, outermost first, in the whole buffer, narrowed or not.
@@ -123,14 +124,19 @@ announces none, this mode adds the CTEs and blocks after them."
   :lighter nil
   (if dbt-breadcrumb-mode
       (progn
-        (unless (listp header-line-format)
-          (setq header-line-format (list header-line-format)))
-        ;; After lsp-mode's breadcrumbs, which it puts first.
-        (setq header-line-format (append (remove dbt-breadcrumb--construct header-line-format)
-                                         (list dbt-breadcrumb--construct)))
+        ;; After lsp-mode's breadcrumbs, which it puts first.  A list whose
+        ;; car is a string or a list holds constructs; any other value,
+        ;; such as (:eval FORM), is one.
+        (setq header-line-format
+              (append (if (and (consp header-line-format)
+                               (or (stringp (car header-line-format)) (consp (car header-line-format))))
+                          (remove dbt-breadcrumb--construct header-line-format)
+                        (and header-line-format (list header-line-format)))
+                      (list dbt-breadcrumb--construct)))
         (add-hook 'post-command-hook #'dbt-breadcrumb--schedule nil t)
-        (dbt-breadcrumb--schedule))
-    (setq header-line-format (remove dbt-breadcrumb--construct header-line-format))
+        (dbt-breadcrumb--update (current-buffer)))
+    (when (consp header-line-format)
+      (setq header-line-format (remove dbt-breadcrumb--construct header-line-format)))
     (remove-hook 'post-command-hook #'dbt-breadcrumb--schedule t)
     (when dbt-breadcrumb--timer
       (cancel-timer dbt-breadcrumb--timer))
