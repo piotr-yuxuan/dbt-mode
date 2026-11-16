@@ -218,15 +218,24 @@ With dbt-lsp-plus (`dbt-lsp-proxy`), the results of the last run, whoever
 ran it, are diagnostics too: once `b` in `dbt-dispatch` has built, each
 model that errored and each test that failed or warned shows where it is
 written, a generic test at its YAML entry, through flymake or flycheck,
-as `lsp-diagnostics-provider` says. dbt writes `logs` and `target` in the
-project at each run, and dbt lsp at each compilation, while dbt lsp asks
-lsp-mode to watch every file: dbt-mode keeps lsp-mode's file watchers out
-of the project's `logs` and `target`, which would otherwise have the
-proxy read the project again at each event, by a regexp anchored at the
-project's root that it adds to `lsp-file-watch-ignored-directories` for
-the session. A value that the project's `.dir-locals.el` gives that
-option takes precedence, and a `DBT_TARGET_PATH` or `DBT_LOG_PATH`
-elsewhere in the project is still watched.
+as `lsp-diagnostics-provider` says.
+
+dbt writes `logs` and `target` in the project at each run, and dbt lsp at
+each compilation, while dbt lsp asks lsp-mode to watch every file:
+without more, each run sends the server about a hundred events, and has a
+dbt-lsp-plus older than its plan 025 read the project again at each.
+Once dbt-lsp.el is loaded, dbt-mode keeps lsp-mode's file watchers out
+of `logs`, `target` and the `target-path` of `dbt_project.yml`, for any
+server that lsp-mode then starts on a dbt project, by a regexp of their
+true names that it adds to the global value of
+`lsp-file-watch-ignored-directories` for this Emacs session. Customize
+then shows the option as changed outside it, and saving it there would
+keep the regexps. A watch that another server made on the project's
+folder before dbt-lsp.el was loaded keeps watching them, until every
+server on that folder stops; a `.dir-locals.el` at the workspace's root
+that sets the option for every mode replaces the whole list, these
+regexps included; a `DBT_TARGET_PATH` or `DBT_LOG_PATH` elsewhere in
+the project is still watched.
 
 ## Keys
 
