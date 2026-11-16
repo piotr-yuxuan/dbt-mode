@@ -1067,7 +1067,7 @@ dbt-mode's own steps aside for the server's hover."
       (switch-to-buffer (current-buffer))
       (dbt-test-goto "stg_orders')")
       (execute-kbd-macro (kbd "C-c C-o"))
-      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: stg_orders*")))
+      (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
         (should (equal (seq-take (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n") 9)
                        '("stg_orders, a model of shop"
                          "view \"shop\".\"main\".\"stg_orders\""
@@ -1087,7 +1087,7 @@ dbt-mode's own steps aside for the server's hover."
       (dbt-test-goto "stg_orders')")
       (execute-kbd-macro (kbd "C-c C-o"))
       (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
-      (should-not (get-buffer "*dbt node: stg_orders*")))
+      (should-not (get-buffer "*dbt node: model.shop.stg_orders*")))
     (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"]))
       (switch-to-buffer (current-buffer))
       (dbt-test-goto "stg_orders')")
@@ -1101,7 +1101,7 @@ dbt-mode's own steps aside for the server's hover."
       (switch-to-buffer (current-buffer))
       (dbt-test-goto "stg_orders')")
       (execute-kbd-macro (kbd "C-c C-o"))
-      (with-current-buffer "*dbt node: stg_orders*"
+      (with-current-buffer "*dbt node: model.shop.stg_orders*"
         (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
         (kill-buffer))
       ;; The manifest is held, but the server's hover says more.

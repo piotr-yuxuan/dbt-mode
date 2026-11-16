@@ -38,21 +38,24 @@ visits."
     (dolist (line lines)
       (insert (propertize (concat "  " line) 'dbt-node-id (get-text-property 0 'dbt-node-id line)) "\n"))))
 
-(defun dbt-node--show (root id node from)
+(defun dbt-node--show (root id node from refresh)
   "Show NODE, the node ID of ROOT as dbt gives it, which comes FROM somewhere.
 NODE is a hash table of the manifest's node, which dbt-lsp-plus gives
 with its `summary', its `relation', `disabled' when so, and `tests'.  A
-value that is empty, null or false shows nothing."
+value that is empty, null or false shows nothing.  REFRESH, a function
+of no argument, shows the node again, on \\[revert-buffer]."
   (let ((link (lambda (node-id)
                 (propertize (format "%-9s %s" (car (split-string node-id "\\.")) (dbt-lineage-label node-id))
                             'dbt-node-id node-id)))
         (empty (lambda (value) (member value '(nil :false "" [])))))
-    (with-current-buffer (get-buffer-create (format "*dbt node: %s*" (map-elt node "name")))
+    (with-current-buffer (get-buffer-create (format "*dbt node: %s*" id))
       (let ((inhibit-read-only t))
         (dbt-node-mode)
         (setq dbt-node--root root
               default-directory root)
-        (insert (propertize (format "%s, a %s of %s" (map-elt node "name") (map-elt node "resource_type")
+        (setq-local revert-buffer-function (lambda (&rest _) (funcall refresh)))
+        (erase-buffer)
+        (insert (propertize (format "%s, a %s of %s" (dbt-lineage-label id) (map-elt node "resource_type")
                                     (map-elt node "package_name"))
                             'face 'bold)
                 "\n")
@@ -93,6 +96,31 @@ value that is empty, null or false shows nothing."
         (goto-char (point-min))
         (pop-to-buffer (current-buffer))))))
 
+(defun dbt-node-describe (root id)
+  "Show the node ID of ROOT in its buffer.
+From dbt-lsp-plus when the current buffer's server lists the command
+dbt-lsp-plus.nodeInfo, else from target/manifest.json, saying when dbt
+wrote it.  \\[revert-buffer] in that buffer shows it again the same way."
+  (let* ((file (expand-file-name "manifest.json" (dbt-project-target root)))
+         (source (current-buffer))
+         (refresh (lambda ()
+                    (with-current-buffer (if (buffer-live-p source) source (current-buffer))
+                      (dbt-node-describe root id))))
+         (from-manifest
+          (lambda ()
+            (unless (file-readable-p file)
+              (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
+            (dbt-node--show root id
+                            (or (dbt-project-manifest-node file id)
+                                (user-error "No node %s in %s: run dbt parse again" id (file-relative-name file root)))
+                            (format "from %s, written at %s" (file-relative-name file root)
+                                    (format-time-string "%F %R" (file-attribute-modification-time
+                                                                 (file-attributes file))))
+                            refresh))))
+    (if (dbt-mode-server-p)
+        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus" refresh)) from-manifest)
+      (funcall from-manifest))))
+
 ;;;###autoload
 (defun dbt-describe ()
   "Show what dbt knows of the model, seed, snapshot or source table at point.
@@ -104,22 +132,8 @@ comes from the proxy's parse, with its summary; otherwise from
 target/manifest.json, which `dbt parse', `dbt compile' and every run
 write, saying when dbt wrote it."
   (interactive)
-  (let* ((root (dbt-mode--root))
-         (id (dbt-project-node-id (or (dbt-mode-resource-at-point) (user-error "No model or source here"))))
-         (file (expand-file-name "manifest.json" (dbt-project-target root)))
-         (from-manifest
-          (lambda ()
-            (unless (file-readable-p file)
-              (user-error "No readable %s: run dbt parse first" (file-relative-name file root)))
-            (dbt-node--show root id
-                            (or (dbt-project-manifest-node file id)
-                                (user-error "No node %s in %s: run dbt parse again" id (file-relative-name file root)))
-                            (format "from %s, written at %s" (file-relative-name file root)
-                                    (format-time-string "%F %R" (file-attribute-modification-time
-                                                                 (file-attributes file))))))))
-    (if (dbt-mode-server-p)
-        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus")) from-manifest)
-      (funcall from-manifest))))
+  (dbt-node-describe (dbt-mode--root)
+                     (dbt-project-node-id (or (dbt-mode-resource-at-point) (user-error "No model or source here")))))
 
 (defun dbt-node-eldoc (callback &rest _)
   "Give CALLBACK the materialization and relation of the ref or source at point.
