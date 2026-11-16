@@ -134,10 +134,14 @@ the buffer, as lsp-mode would guess before it looks at the folders."
 ;;;###autoload
 (defun dbt-lsp ()
   "Start dbt lsp for the current buffer, on the root of its dbt project.
-A dbt that runs no server, such as dbt-oss, is an error."
+A dbt that runs no server, such as dbt-oss, is an error.  A dbt that
+did not answer in time whether it runs one is asked again."
   (interactive)
-  (unless (dbt-lsp-server-p)
-    (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
+  (dbt-project-ask-again)
+  (pcase (dbt-project-command-answer "lsp")
+    ('yes nil)
+    ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
+    (_ (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does")))
   (dbt-lsp-add-project-folder)
   (lsp))
 

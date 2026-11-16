@@ -221,9 +221,11 @@ come with dbt 2's proprietary build only, and `dbt lint` runs only there,
 which `dbt system upgrade-distribution` turns `dbt-oss` into; dbt Core
 1.x has none of the three. dbt-mode asks dbt once whether it has the
 server and the formatter, asks again once dbt is replaced, and does
-without. A dbt that does not answer within ten seconds is taken as
-having neither for a minute, as a message says, then asked again. It
-was tested with `dbt-oss` 2.0.11 and the proprietary 2.0.9.
+without. A dbt that does not answer within ten seconds whether it runs
+a command is taken as lacking that one, as a message says, without
+being asked at each save again; `C-c C-q` and `M-x dbt-lsp`, which you
+run and may wait for, ask it again. It was tested with `dbt-oss` 2.0.11
+and the proprietary 2.0.9.
 
 With [straight.el](https://github.com/radian-software/straight.el) and
 `use-package`:
@@ -251,8 +253,8 @@ session before it starts the server, so that the server runs on the
 project, not on an enclosing repository, and each dbt project of a
 repository gets its own server, whatever `lsp-auto-guess-root` says. It
 adds the folder only once `dbt-executable` is known to run `dbt lsp`, which
-it asks once, within ten seconds, and again once dbt is replaced or a
-minute after it did not answer.
+it asks once, within ten seconds, and again once dbt is replaced;
+`M-x dbt-lsp` asks again a dbt that did not answer in time.
 `dbt-properties-mode-maybe` turns on `M-.`, `M-?` and completion in the
 YAML files of a dbt project.
 

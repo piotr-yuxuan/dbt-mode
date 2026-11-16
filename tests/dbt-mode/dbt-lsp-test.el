@@ -250,9 +250,8 @@ files of the Nix store do: only their true names tell them apart."
       (should (< (- (float-time) start) 5)))))
 
 (ert-deftest dbt-lsp-asks-again-a-dbt-that-did-not-answer ()
-  "A dbt that did not say in time whether it formats is asked again after a while, and C-c C-q then formats.
-The timeout says so, and within the while dbt is not asked again, so
-that a dbt that hangs costs its wait once."
+  "C-c C-q says that dbt did not answer in time whether it formats, and asks again at the next press, which then formats.
+The question's message says so too, and what asks again."
   (dbt-lsp-test-with-dbt dbt (concat "case \"$1 $2\" in\n"
                                      "  \"format --help\") [ -e \"$LOG\" ] && exit 0; echo asked > \"$LOG\"; exec sleep 20 ;;\n"
                                      "  \"lsp --help\") exit 2 ;;\n"
@@ -264,18 +263,27 @@ that a dbt that hangs costs its wait once."
         (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
         (let ((dbt-executable dbt)
               (dbt-project--probe-seconds 1)
-              (dbt-project--probe-retry-seconds 2)
               (process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment))
               (start (with-current-buffer (messages-buffer) (point-max))))
-          (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
-          (should (string-search "dbt did not answer dbt format --help within 1 s"
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))
+                         "dbt did not answer dbt format --help in time: C-c C-q asks again"))
+          (should (string-search "dbt did not answer dbt format --help within 1 s: C-c C-q or M-x dbt-lsp asks again"
                                  (with-current-buffer (messages-buffer) (buffer-substring start (point-max)))))
-          ;; dbt would answer now, but is not asked yet, timers having run.
-          (accept-process-output nil 0.5)
-          (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error)
-          (accept-process-output nil 2)
           (execute-kbd-macro (kbd "C-c C-q"))
           (dbt-test-wait (lambda () (string-prefix-p "-- formatted\n" (buffer-string)))))))))
+
+(ert-deftest dbt-lsp-asks-again-from-its-command ()
+  "M-x dbt-lsp asks again a dbt that did not answer in time whether it runs a server, and says that it did not answer."
+  (dbt-lsp-test-with-dbt dbt "echo \"$*\" >> \"$LOG\"; exec sleep 20"
+    (dbt-test-with-project root
+      (save-window-excursion
+        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+        (let ((dbt-executable dbt)
+              (dbt-project--probe-seconds 1))
+          (should-not (dbt-lsp-server-p))
+          (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
+                         "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again")))))
+    (should (equal (dbt-test-file-text (file-name-directory dbt) "calls") "lsp --help\nlsp --help\n"))))
 
 (ert-deftest dbt-lsp-stops-asking-a-dbt-on-a-quit ()
   "A quit while dbt is asked whether it runs a command, as C-g in the first dispatch menu, stops the dbt it started."
