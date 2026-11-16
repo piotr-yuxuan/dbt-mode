@@ -728,6 +728,17 @@ its node in the manifest of the user's runs, read only then.  For
             (string-join (delq nil (list (dbt-project-default-target root) (and (stringp materialization) materialization)))
                          " ")))))
 
+(defun dbt-mode-entity-selection (entity)
+  "Return dbt's selector of ENTITY, an entity of the index.
+A model, seed or snapshot is NAME or NAME.vVERSION; a source table is
+source:SOURCE.TABLE, a source source:SOURCE, an exposure exposure:NAME,
+as a bare NAME selects a model of that name too."
+  (pcase (plist-get entity :kind)
+    ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
+    ('source (format "source:%s" (plist-get entity :name)))
+    ('exposure (format "exposure:%s" (plist-get entity :name)))
+    (_ (dbt-mode-resource-selector entity))))
+
 (defun dbt-mode-selection-at-point ()
   "Return dbt's selector of what point is on, else of the current file.
 On a `ref', it is the model, seed or snapshot that it names, as NAME or
@@ -740,12 +751,9 @@ as dbt selects by path.  Nil outside a file of a project."
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
                      (dbt-mode-current-resource)
                      (dbt-mode-entity-at-point '(exposure)))))
-    (pcase (plist-get entity :kind)
-      ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
-      ('source (format "source:%s" (plist-get entity :name)))
-      ('exposure (format "exposure:%s" (plist-get entity :name)))
-      ((pred identity) (dbt-mode-resource-selector entity))
-      (_ (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root))))))))
+    (if entity
+        (dbt-mode-entity-selection entity)
+      (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root)))))))
 
 (defun dbt-mode-parse-selector (selector)
   "Return the name and the version that SELECTOR names, as (NAME . VERSION).
@@ -777,17 +785,21 @@ or not a language server runs.  Every definition of IDENTIFIER is
 listed, as it names resources, not a call that dbt resolves."
   (interactive
    (list (completing-read "Find dbt resource: "
-                          (xref-backend-identifier-completion-table 'dbt)
+                          ;; The category lets embark act on a candidate.
+                          (completion-table-with-metadata (xref-backend-identifier-completion-table 'dbt)
+                                                          '((category . dbt-identifier)))
                           nil t)))
   (let ((xref-backend-functions (list (lambda () 'dbt)))
         (dbt-mode--every-definition t))
     (xref-find-definitions identifier)))
 
-(defun dbt-visit-properties ()
+(defun dbt-visit-properties (&optional resource)
   "Visit the YAML entry of the current model, seed, snapshot or analysis.
-It is an entry of the resource's own package, as dbt 2.0.9 reads one."
+It is an entry of the resource's own package, as dbt 2.0.9 reads one.
+RESOURCE, an entity of the index, is visited instead of the current
+one."
   (interactive)
-  (let* ((resource (or (dbt-mode-current-resource) (user-error "No model here")))
+  (let* ((resource (or resource (dbt-mode-current-resource) (user-error "No model here")))
          (entries (seq-filter (lambda (entity)
                                 (member (plist-get entity :section) dbt-project-resource-sections))
                               (dbt-project-entities (dbt-mode--root) '(properties) (plist-get resource :name)
@@ -916,18 +928,20 @@ preview's do."
         (dbt-lsp-show sql title)
       (dbt-cli-show title sql))))
 
-(defun dbt-lineage (selector)
+(defun dbt-lineage (selector &optional resource)
   "Show the upstream and downstream of the model, seed or snapshot SELECTOR.
 SELECTOR is its name, or NAME.vVERSION for a version of a model; a name
-alone is that of its latest version, as for `ref'.  With dbt lsp, the
-server gives the lineage; otherwise the `ref' and `source' calls of the
-project's files give it, read again when the lineage is asked for
-again."
+alone is that of its latest version, as for `ref'.  RESOURCE, the
+entity of the index that SELECTOR names, settles which of namesakes it
+is.  With dbt lsp, the server gives the lineage; otherwise the `ref'
+and `source' calls of the project's files give it, read again when the
+lineage is asked for again."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
   (let* ((root (dbt-mode--root))
          (wanted (dbt-mode-parse-selector selector))
-         (entity (or (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
+         (entity (or resource
+                     (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
                      (user-error "No model, seed or snapshot %s" selector)))
          (id (dbt-project-node-id entity))
          refresh)
@@ -988,16 +1002,18 @@ at point offers that package's models."
                        (if (cdr wanted) (format ", v=%s" (cdr wanted)) ""))))
     (insert (if (dbt-mode-jinja-bounds) call (format "{{ %s }}" call)))))
 
-(defun dbt-copy-relation ()
+(defun dbt-copy-relation (&optional resource)
   "Copy the relation, database.schema.alias, of what point is on.
 That is the model, seed, snapshot or source table that the `ref' or
-`source' at point names, or else the current model.  It comes from
+`source' at point names, or else the current model, or RESOURCE, an
+entity of the index, when it is given.  It comes from
 target/manifest.json, which `dbt parse', `dbt compile' and every run
 write; the message says when it was written."
   (interactive)
   (let* ((root (dbt-mode--root))
          (target (dbt-mode-target-at-point))
-         (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
+         (entity (or resource
+                     (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
                      (dbt-mode-current-resource)
                      (user-error "No model or source here")))
          (file (expand-file-name "manifest.json" (dbt-project-target root)))

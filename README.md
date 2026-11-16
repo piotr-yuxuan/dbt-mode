@@ -48,6 +48,18 @@ Without any dbt executable, dbt-mode reads the project's files:
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;
+- with [consult](https://github.com/minad/consult), `M-x
+  dbt-consult-resource` reads a resource of the project or of its
+  packages, as `C-c C-f` names them, grouped by kind, each with its
+  package and file, and previews the current one at its definition;
+  with [embark](https://github.com/oantolin/embark), `embark-act` acts
+  on the call or the YAML entry at point, and on the candidates of that
+  command and of `C-c C-f`: `RET` goes where `M-.` would, `d` lists every
+  definition, `y` visits the YAML entry of a model, seed or snapshot, `b`
+  builds it, `r` runs a model, `t` tests it, `l` shows its lineage and
+  `w` copies its relation, each where `M-.` would go, and refusing a
+  resource it does not fit, such as a macro to build; embark's general
+  actions stay, but for `w`, its copy of the target (see Installation);
 - completion of the arguments of `ref`, `source` and `doc`, and of macros in
   a tag;
 - `imenu` lists the CTEs, and the macros, tests, snapshots and docs blocks;
@@ -268,6 +280,19 @@ With expreg, the regions of dbt-mode join its own:
                       (remq #'dbt-edit-expreg-regions (default-value 'expreg-functions)))))
 ```
 
+With embark, its actions on a dbt resource join its own; `M-x
+dbt-consult-resource` needs consult alone, and can take the place of
+`C-c C-f`:
+
+```elisp
+(with-eval-after-load 'embark
+  (require 'dbt-embark)
+  (add-to-list 'embark-target-finders #'dbt-embark-target)
+  (add-to-list 'embark-keymap-alist
+               '(dbt-identifier dbt-embark-identifier-map embark-general-map)))
+(keymap-set dbt-mode-map "<remap> <dbt-find-resource>" #'dbt-consult-resource)
+```
+
 `dbt-lsp-deferred` makes the root of the dbt project a folder of the lsp
 session before it starts the server, so that the server runs on the
 project, not on an enclosing repository, and each dbt project of a
@@ -350,7 +375,9 @@ is tested offline through a scripted server, `tests/bin/fake_dbt_lsp.py`. With
 dbt on the fixture project, `tests/fixtures/shop`, and, when it is the
 proprietary build, its `dbt lsp` through lsp-mode. `DBT_MODE_TEST_DBT_CACHE`,
 naming a cache of dbt's database drivers such as `~/.cache/com.getdbt`, is
-copied into the scratch home, so that dbt downloads no driver.
+copied into the scratch home, so that dbt downloads no driver. The tests
+of `dbt-consult-resource` and of embark's actions use the consult and
+embark of the development shell.
 
 ## Licence
 
