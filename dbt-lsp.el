@@ -237,9 +237,12 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   "Return the workspace of dbt-lsp of the current project, or nil.
 That is the buffer's, else the one on its file or directory: from a
 buffer that the server does not serve, such as that of the lineage, the
-server of the project."
+server of the project, not that of an enclosing project, as for the
+integration_tests of a package."
   (or (dbt-lsp-workspace)
-      (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))))
+      (when-let* ((workspace (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory)))
+                  ((equal (lsp--workspace-root workspace) (lsp-f-canonical (or (dbt-project-root) "")))))
+        workspace)))
 
 (defun dbt-lsp-command-p (command)
   "Return non-nil when the server of the project lists COMMAND.
