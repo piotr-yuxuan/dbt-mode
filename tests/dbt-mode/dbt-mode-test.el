@@ -485,6 +485,36 @@ The project's namesakes and their uses come after, or not at all."
     (should (equal (dbt-test-xref-files (xref-backend-references 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/pkg_src.sql" . 1))))))
 
+(ert-deftest dbt-mode-resolves-from-a-package-reached-through-a-link ()
+  "A call in a local package's file, visited through the link that dbt deps makes in dbt_packages, resolves in that package first.
+So does one in a file of a project reached through a link."
+  (dbt-test-with-project root
+    (let ((link (concat (directory-file-name root) "-link")))
+      (unwind-protect
+          (progn
+            (make-directory (expand-file-name "libs/zzz/models" root) t)
+            (write-region "name: 'aaa'\n" nil (expand-file-name "libs/zzz/dbt_project.yml" root))
+            (write-region "select 1 as id" nil (expand-file-name "libs/zzz/models/stg_orders.sql" root))
+            (write-region "select * from {{ ref('stg_orders') }}\n" nil
+                          (expand-file-name "libs/zzz/models/aaa_calls.sql" root))
+            (write-region "  - local: libs/zzz\n" nil (expand-file-name "packages.yml" root) 'append)
+            (make-symbolic-link "../libs/zzz" (expand-file-name "dbt_packages/aaa" root))
+            (make-symbolic-link (directory-file-name root) link)
+            (pcase-dolist (`(,top ,file) `((,root "dbt_packages/aaa/models/aaa_calls.sql")
+                                           (,(file-name-as-directory link) "libs/zzz/models/aaa_calls.sql")))
+              (with-current-buffer (dbt-test-visit top file)
+                (dbt-test-goto "stg_orders")
+                (should (equal (car (dbt-test-xref-files (xref-backend-definitions
+                                                          'dbt (xref-backend-identifier-at-point 'dbt))
+                                                         top))
+                               '("libs/zzz/models/stg_orders.sql" . 1)))
+                ;; Else the next visit of the same file finds this buffer.
+                (kill-buffer))))
+        (dolist (buffer (buffer-list))
+          (when (string-prefix-p link (or (buffer-file-name buffer) ""))
+            (kill-buffer buffer)))
+        (delete-file link)))))
+
 (ert-deftest dbt-mode-visits-the-properties-of-its-own-package ()
   "C-c C-y visits the YAML entry of the model in its own package, never that of a namesake in another.
 A package's model without an entry of its own has none to visit."
