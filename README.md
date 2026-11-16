@@ -43,7 +43,8 @@ Without any dbt executable, dbt-mode reads the project's files:
   through dispatch, which dbt resolves from that package, still goes to
   the project's; a `ref` or a `source` that neither the calling
   package nor the project defines and two packages do, which dbt rejects
-  as ambiguous, lists them and says so;
+  as ambiguous, lists them and says so, and `C-c C-e` asks whose such a
+  name to call;
 - `M-?` lists the calls that resolve to the same definition, so a
   package's model and the project's namesake stay apart, and the YAML
   entries of a model;

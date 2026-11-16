@@ -951,8 +951,10 @@ override of a package's model calls it.  A resource of the file's
 package or of the project comes by name alone, any other with its
 package.  Within a macro, a generic test or a materialization, which dbt
 resolves from whichever node calls it, any resource but the project's
-comes with its package.  To call another namesake, write the call with
-its package: completion at point offers that package's models."
+comes with its package.  A name that dbt would find ambiguous from the
+file, as `dbt-project-ambiguous' tells, asks whose resource to call.
+To call another namesake, write the call with its package: completion
+at point offers that package's models."
   (interactive (list (dbt-mode-read-resource "ref: " t)))
   (let* ((root (dbt-mode--root))
          (caller (dbt-mode-caller root))
@@ -960,8 +962,13 @@ its package: completion at point offers that package's models."
          ;; Not `dbt-mode-current-resource', which is the call at point
          ;; in a file that defines no resource, nor every resource of the
          ;; file, which may define several snapshots.
-         (entity (or (car (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
-                                  (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+         (candidates (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
+                             (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+         (packages (dbt-project-ambiguous root (list :kind 'ref) candidates caller))
+         (entity (or (if packages
+                         (let ((package (completing-read (format "Whose %s: " (car wanted)) packages nil t)))
+                           (seq-find (lambda (entity) (equal (plist-get entity :package) package)) candidates))
+                       (car candidates))
                      (user-error "No model, seed or snapshot `%s' but this one" selector)))
          ;; Probed on both builds: ref('util') in a package's macro is
          ;; ambiguous when a project's model calling the macro resolves

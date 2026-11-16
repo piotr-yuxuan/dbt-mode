@@ -1124,6 +1124,48 @@ which names resources, say nothing of it."
               (should (string-search said (dbt-test-messages-since start)))
             (should-not (string-search "ambiguous" (dbt-test-messages-since start)))))))))
 
+(ert-deftest dbt-mode-asks-whose-ref-to-insert-when-dbt-would-find-it-ambiguous ()
+  "C-c C-e on a name that dbt would find ambiguous asks whose resource to call, then calls it with its package.
+From the project as from a package that lacks the name."
+  (dbt-test-with-project root
+    (dbt-test-write-ambiguous root)
+    (save-window-excursion
+      (dolist (file '("models/marts/calls.sql" "dbt_packages/shop_utils/models/pkg_calls.sql"))
+        (switch-to-buffer (dbt-test-visit root file))
+        (goto-char (point-max))
+        (execute-kbd-macro (kbd "C-c C-e dup RET b_utils RET"))
+        (should (looking-back "^{{ ref('b_utils', 'dup') }}" (line-beginning-position)))))))
+
+(ert-deftest dbt-mode-live-rejects-what-dbt-rejects-as-ambiguous ()
+  "With the real dbt, the call that M-. says dbt rejects fails dbt parse, and the one that C-c C-e asks for passes.
+dbt names the two packages; the call inserted depends on the package
+chosen."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (dbt-test-write-ambiguous root)
+    (let ((default-directory root)
+          (parse (lambda ()
+                   (with-temp-buffer
+                     (list (call-process (getenv "DBT_MODE_TEST_DBT") nil t nil "parse" "--profiles-dir" root)
+                           (buffer-string))))))
+      (pcase-let ((`(,status ,output) (funcall parse)))
+        (should-not (eq status 0))
+        (should (string-match-p "ambiguous ref('dup').*a_utils.*b_utils" output)))
+      (save-window-excursion
+        (dolist (file '("models/marts/calls.sql" "dbt_packages/shop_utils/models/pkg_calls.sql"))
+          (switch-to-buffer (dbt-test-visit root file))
+          (erase-buffer)
+          (insert "select * from ")
+          (execute-kbd-macro (kbd "C-c C-e dup RET b_utils RET"))
+          (insert "\n")
+          (save-buffer)))
+      (should (eq 0 (car (funcall parse))))
+      (should (equal (append (gethash "nodes" (gethash "depends_on" (dbt-project-manifest-node
+                                                                       (expand-file-name "target/manifest.json" root)
+                                                                       "model.shop.calls")))
+                             nil)
+                     '("model.b_utils.dup"))))))
+
 (ert-deftest dbt-mode-inserts-no-ref-to-nothing ()
   "RET on an empty answer inserts no ref: not to the buffer's own model, nor to nothing."
   (dbt-test-with-project root
