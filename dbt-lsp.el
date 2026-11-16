@@ -220,15 +220,58 @@ value that its SCHEMA fits, a missing key holding null."
     (_ (funcall schema value))))
 
 (defun dbt-lsp-proxy-answers-p (request kind)
-  "Return non-nil when the server of the buffer answers REQUEST on targets of KIND.
-REQUEST is the key of a request that dbt-lsp-plus lists under
-experimental.dbtLspPlus of its capabilities, such as :references or
-:definition, and KIND a kind of target it lists there, such as
-\"source\": dbt-mode then leaves that request to the server."
-  (let* ((workspace (dbt-lsp-workspace))
-         (capabilities (and workspace (lsp--workspace-server-capabilities workspace))))
-    (and (dbt-lsp--conforms-p capabilities `(object (:experimental (object (:dbtLspPlus (object (,request (array stringp))))))))
-         (seq-contains-p (lsp-get (lsp-get (lsp-get capabilities :experimental) :dbtLspPlus) request) kind))))
+  "Return non-nil when dbt-lsp-plus answers REQUEST on a target of KIND here.
+REQUEST is :definition or :references, and KIND a kind of target as
+dbt-lsp-plus names it, such as \"ref\" or \"entry\".  Version 2 of the
+flag experimental.dbtLspPlus, in the capabilities of the project's
+server, lists each kind that the proxy answers with its places, the
+types of file where it does: \"sql\", \"yaml\" or \"python\".  There it
+answers every position of that kind, and never passes it on to dbt lsp;
+another version claims nothing.  The current buffer is no place while
+it has changes that lsp-mode does not send, as in a YAML file: the proxy
+reads the saved file then, which may hold another target at point."
+  (let* ((workspace (dbt-lsp--project-workspace))
+         (capabilities (and workspace (lsp--workspace-server-capabilities workspace)))
+         (key (intern (concat ":" kind)))
+         (place (and (or (dbt-lsp-workspace) (not (buffer-modified-p)))
+                     (alist-get (file-name-extension (or buffer-file-name ""))
+                                '(("sql" . "sql") ("yml" . "yaml") ("yaml" . "yaml"))
+                                nil nil #'equal))))
+    ;; No place, nil, is in no list of places.
+    (and (dbt-lsp--conforms-p capabilities
+                              `(object (:experimental
+                                        (object (:dbtLspPlus
+                                                 (object (:version ,(lambda (version) (eql version 2)))
+                                                         (,request (object (,key (array stringp))))))))))
+         (seq-contains-p (lsp-get (lsp-get (lsp-get (lsp-get capabilities :experimental) :dbtLspPlus) request) key)
+                         place))))
+
+(defun dbt-lsp-xrefs (method position)
+  "Return the xref items of the project's server's answer to METHOD at POSITION.
+METHOD is \"textDocument/definition\" or \"textDocument/references\",
+which asks for the declarations too unless
+`lsp-references-exclude-declaration' says not to, as lsp-mode does.  The
+request names the buffer's file and the line and column of POSITION, in
+the encoding that the server announced, UTF-16 by default.  It goes from
+any buffer of the project, as from a YAML file's, which lsp-mode does not
+serve: the server reads the saved file then.  An error, or no answer
+within `lsp-response-timeout', signals a `user-error' that says so."
+  (let* ((workspace (dbt-lsp--project-workspace))
+         (column (save-excursion
+                   (goto-char position)
+                   (pcase (lsp-get (lsp--workspace-server-capabilities workspace) :positionEncoding)
+                     ("utf-8" (lsp--utf-8-column))
+                     ("utf-32" (lsp--utf-32-column))
+                     (_ (lsp--utf-16-column)))))
+         (params (append (list :textDocument (list :uri (lsp--buffer-uri))
+                               :position (list :line (1- (line-number-at-pos position t)) :character column))
+                         (and (equal method "textDocument/references")
+                              (list :context (list :includeDeclaration
+                                                   (lsp-json-bool (not lsp-references-exclude-declaration))))))))
+    (with-lsp-workspace workspace
+      (condition-case failure
+          (lsp--locations-to-xref-items (lsp-request method params))
+        (error (user-error "dbt-lsp-plus: %s failed: %s" method (error-message-string failure)))))))
 
 (defun dbt-lsp--unreadable (method answer)
   "Return the message that dbt-mode cannot read ANSWER, of dbt lsp to METHOD."

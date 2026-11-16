@@ -22,8 +22,10 @@ to the seconds it waits before it answers it.
 With FAKE_ALONE set, it stands for dbt-lsp-plus alone, without dbt lsp, as
 the fake dbt-lsp-plus runs it for a dbt that lacks dbt lsp: the
 capabilities that the proxy announces alone, as probed on 2026-11-16 with
-dbt-lsp-plus cfb8ee4 and dbt-oss 2.0.11, and none of dbt lsp's commands
-or notifications; a request without an answer gets null when the proxy
+dbt-lsp-plus cfb8ee4 and dbt-oss 2.0.11, with version 2 of its flag
+experimental.dbtLspPlus, as its plan 017 announced it the same day, and
+none of dbt lsp's commands or notifications; a request without an answer
+gets null when the proxy
 answers its method alone, and otherwise the error -32803 that the proxy
 gives, as for references off a source.
 
@@ -86,10 +88,21 @@ ALONE_CAPABILITIES = {
     "executeCommandProvider": {"commands": ["dbt-lsp-plus.nodeInfo"]},
     "experimental": {
         "dbtLspPlus": {
-            "definition": ["source", "ref", "doc", "entry", "test"],
-            "references": ["source"],
-            "rename": ["source", "cte"],
-            "version": 1,
+            "definition": {
+                "source": ["sql", "yaml", "python"],
+                "ref": ["sql", "yaml"],
+                "doc": ["yaml"],
+                "entry": ["yaml"],
+                "test": ["yaml"],
+                "macro": ["sql", "yaml"],
+            },
+            "references": {
+                "source": ["sql", "yaml", "python"],
+                "ref": ["sql", "yaml"],
+                "macro": ["sql", "yaml"],
+            },
+            "rename": {"source": ["sql", "yaml", "python"], "cte": ["sql"]},
+            "version": 2,
         }
     },
     "foldingRangeProvider": True,

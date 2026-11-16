@@ -278,30 +278,38 @@ tags are code, in SQL strings or in comments."
       (dbt-test-goto (cdr case) (1- (length (cdr case))))
       (should-not (eq (get-text-property (point) 'face) 'dbt-jinja-delimiter-face)))
     (dbt-test-goto "audit_hook")
-    (should (equal (dbt-mode-target-at-point) '(:kind macro :qualifier nil :name "audit_hook" :version nil)))
+    (should (equal (dbt-mode-target-at-point)
+                   `(:kind macro :qualifier nil :name "audit_hook" :version nil :position ,(point))))
     (should (eq (dbt-test-face "config(materialized") 'font-lock-builtin-face))))
 
 (ert-deftest dbt-mode-target-at-point-names-calls-and-entries ()
-  "Calls of ref, source, doc and macros, and YAML entries, are targets."
+  "Calls of ref, source, doc and macros, and YAML entries, are targets.
+A call says where its name starts; an entry, the kind of its entity."
   (with-temp-buffer
     (insert "{{ ref('pkg', 'm') }} {{ source('raw', 'orders') }} {{ ref('n', v=2) }} {{ pkg.mac(1) }} x\n")
     (dbt-mode)
-    (dolist (case '(("'m'" 1 (:kind ref :qualifier "pkg" :name "m" :version nil))
-                    ("orders" 1 (:kind source :qualifier "raw" :name "orders" :version nil))
-                    ("'n'" 1 (:kind ref :qualifier nil :name "n" :version "2"))
-                    ("mac" 1 (:kind macro :qualifier "pkg" :name "mac" :version nil))
-                    (" x" 1 nil)))
-      (dbt-test-goto (car case) (nth 1 case))
-      (should (equal (dbt-mode-target-at-point) (nth 2 case)))))
+    ;; Each case: a text, point's offset in it, the name's, and the target.
+    (dolist (case '(("'m'" 1 1 (:kind ref :qualifier "pkg" :name "m" :version nil))
+                    ("orders" 1 0 (:kind source :qualifier "raw" :name "orders" :version nil))
+                    ("'n'" 1 1 (:kind ref :qualifier nil :name "n" :version "2"))
+                    ("mac" 1 0 (:kind macro :qualifier "pkg" :name "mac" :version nil))
+                    (" x" 1 0 nil)))
+      (dbt-test-goto (car case))
+      (let ((name (+ (point) (nth 2 case))))
+        (forward-char (nth 1 case))
+        (should (equal (dbt-mode-target-at-point) (and (nth 3 case) (append (nth 3 case) (list :position name))))))))
   (dbt-test-with-project root
     (dbt-test-visit root "models/staging/_sources.yml")
     (dbt-test-goto "raw_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind source :qualifier "raw" :name "raw_orders" :version nil)))
+    (should (equal (dbt-mode-target-at-point)
+                   '(:kind source :qualifier "raw" :name "raw_orders" :version nil :entity table)))
     (dbt-test-visit root "models/staging/_staging.yml")
     (dbt-test-goto "stg_orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop" :name "stg_orders" :version nil)))
+    (should (equal (dbt-mode-target-at-point)
+                   '(:kind ref :qualifier "shop" :name "stg_orders" :version nil :entity properties)))
     (dbt-test-goto "order_status")
-    (should (equal (dbt-mode-target-at-point) '(:kind doc :qualifier nil :name "order_status" :version nil)))))
+    (should (equal (dbt-mode-target-at-point)
+                   `(:kind doc :qualifier nil :name "order_status" :version nil :position ,(point))))))
 
 (ert-deftest dbt-mode-target-at-point-qualifies-the-entries-of-a-package ()
   "The YAML entry of a package's model names that model, not the project's."
@@ -312,7 +320,8 @@ tags are code, in SQL strings or in comments."
                   (expand-file-name "dbt_packages/shop_utils/models/_utils.yml" root))
     (dbt-test-visit root "dbt_packages/shop_utils/models/_utils.yml")
     (dbt-test-goto "orders")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier "shop_utils" :name "orders" :version nil)))
+    (should (equal (dbt-mode-target-at-point)
+                   '(:kind ref :qualifier "shop_utils" :name "orders" :version nil :entity properties)))
     (should (equal (dbt-test-xref-files (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)) root)
                    '(("dbt_packages/shop_utils/models/orders.sql" . 1))))))
 
@@ -330,7 +339,8 @@ tags are code, in SQL strings or in comments."
       (dbt-test-goto name)
       (should-not (dbt-mode-target-at-point)))
     (dbt-test-goto "util_orders')")
-    (should (equal (dbt-mode-target-at-point) '(:kind ref :qualifier nil :name "util_orders" :version nil)))))
+    (should (equal (dbt-mode-target-at-point)
+                   `(:kind ref :qualifier nil :name "util_orders" :version nil :position ,(point))))))
 
 (ert-deftest dbt-mode-finds-no-model-from-an-exposure ()
   "M-. on the name of an exposure asks what to find, though a model has that name; on a seed's or a snapshot's entry it visits that file.
@@ -598,6 +608,41 @@ A package's model without an entry of its own has none to visit."
                     (:kind analysis :qualifier nil :name "counts" :version nil)))
     (should (equal (dbt-mode-parse-identifier (dbt-mode-identifier target)) target)))
   (should-error (dbt-mode-parse-identifier "model:orders") :type 'user-error))
+
+(ert-deftest dbt-mode-names-the-proxy-s-kind-of-a-target ()
+  "Each target is of the kind that dbt-lsp-plus's contract names for its position, or of none.
+A call keeps its kind, versioned or not; the entry of a source or a
+table is a source; the entry of a model, seed, snapshot, analysis or
+macro is an entry, but not a version's item, which has no name of its
+own; a snapshot block's line is of no kind of the proxy's."
+  (dolist (case '(((:kind ref :name "orders") "ref")
+                  ((:kind ref :name "orders" :version "2") "ref")
+                  ((:kind source :qualifier "raw" :name "orders") "source")
+                  ((:kind doc :name "order_status") "doc")
+                  ((:kind macro :qualifier "shop_utils" :name "is_positive") "macro")
+                  ((:kind source :name "raw" :entity source) "source")
+                  ((:kind source :qualifier "raw" :name "orders" :entity table) "source")
+                  ((:kind ref :qualifier "shop" :name "orders" :entity properties) "entry")
+                  ((:kind analysis :qualifier "shop" :name "counts" :entity properties) "entry")
+                  ((:kind macro :qualifier "shop" :name "m" :entity properties) "entry")
+                  ((:kind ref :qualifier "shop" :name "dim" :version "1" :entity properties) nil)
+                  ((:kind ref :name "orders_snapshot" :entity snapshot) nil)))
+    (should (equal (dbt-mode-proxy-kind (car case)) (cadr case)))))
+
+(ert-deftest dbt-mode-target-at-point-says-where-a-call-s-name-starts ()
+  "A call at point says where its name starts, wherever point is on it; an entry's target, its entity's kind.
+A call is read from its function's name to its closing quote."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/staging/_staging.yml")
+    (dbt-properties-mode-maybe)
+    (let ((name (progn (dbt-test-goto "order_status") (point))))
+      ;; On `doc', on the opening quote, inside the argument.
+      (dolist (offset '(0 4 8))
+        (dbt-test-goto "doc(\"order_status\")" offset)
+        (should (equal (plist-get (dbt-mode-target-at-point) :position) name))
+        (should-not (plist-get (dbt-mode-target-at-point) :entity))))
+    (dbt-test-goto "- name: stg_orders")
+    (should (eq (plist-get (dbt-mode-target-at-point) :entity) 'properties))))
 
 (defun dbt-test-xref-files (items root)
   "Return the files of the xref ITEMS, relative to ROOT, with their lines."

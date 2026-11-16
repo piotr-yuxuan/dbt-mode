@@ -5,7 +5,7 @@
 | `dbt-executable`               | `"dbt"` | The dbt executable                                              |
 | `dbt-lsp-arguments`            | `nil`   | More arguments of `dbt lsp`, such as `("--profiles-dir" "dir")` |
 | `dbt-lsp-enable-linter`        | `nil`   | Whether the server lints the SQL with dbt's linter              |
-| `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; a request on a source that it lists goes to it |
+| `dbt-lsp-proxy`                | `nil`   | Whether dbt lsp runs through dbt-lsp-plus, when it is installed; `M-.` and `M-?` on what it says it answers go to it |
 | `dbt-preview-limit`            | `50`    | The rows that a preview shows                                   |
 | `dbt-lineage-level-limit`      | `500`   | The most nodes of a level of the lineage asked of dbt-lsp-plus  |
 | `dbt-indent-offset`            | `4`     | The columns by which a parenthesis or a Jinja block indents     |
