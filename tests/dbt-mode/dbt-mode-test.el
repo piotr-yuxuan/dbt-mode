@@ -976,6 +976,13 @@ does, not the model itself."
         (insert "\n")
         (execute-kbd-macro (kbd (format "C-c C-e %s RET" name)))
         (should (equal (buffer-substring-no-properties (line-beginning-position) (point)) call)))
+      ;; A call at point is no resource of the buffer's own: nothing to leave out.
+      (with-current-buffer "*dbt no file*"
+        (erase-buffer)
+        (insert "{{ ref('stg_orders') }}")
+        (goto-char 4)
+        (execute-kbd-macro (kbd "C-c C-e stg_orders RET"))
+        (should (equal (buffer-string) "{{ ref('stg_orders')ref('stg_orders') }}")))
       (kill-buffer "*dbt no file*"))))
 
 (ert-deftest dbt-mode-live-inserts-the-refs-that-dbt-takes-from-a-package ()
