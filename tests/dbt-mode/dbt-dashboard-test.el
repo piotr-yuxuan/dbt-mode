@@ -68,7 +68,8 @@ freshness capitalised, a freshness that failed."
 
 (ert-deftest dbt-dashboard-shows-what-to-fix-the-slowest-and-stale-sources ()
   "The dashboard lists the nodes to fix, the most severe first, with dbt's cause; the slowest; the stale sources.
-Each heading says which command wrote its file and how long ago;
+Each heading says which command wrote its file, how many results it
+holds and how long ago;
 statuses read whatever their case; a freshness that failed shows its
 error; a missing file says so."
   (dbt-test-with-project root
@@ -87,7 +88,7 @@ error; a missing file says so."
       (let ((dbt-dashboard-slowest 2))
         (revert-buffer))
       (let ((lines (dbt-test-dashboard-lines)))
-        (should (string-match-p "\\`Failed, warned or skipped in dbt build, from run_results.json, written [0-9]+ seconds? ago\\'"
+        (should (string-match-p "\\`Failed, warned or skipped in dbt build, from run_results.json, 8 results, written [0-9]+ seconds? ago\\'"
                                 (nth 0 lines)))
         (should (equal (seq-take (cdr lines) 7)
                        '("  error   orders  Database Error in model orders (target/run/shop/models/marts/orders.sql): Catalog Error: Table with name nowhere does not exist!"
@@ -114,6 +115,27 @@ error; a missing file says so."
       (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
                      "No node here"))
       (kill-buffer))))
+
+(ert-deftest dbt-dashboard-tells-no-check-from-every-source-fresh ()
+  "A freshness run whose every check could not run is told from one whose every source is fresh.
+dbt 2 then writes no result, and the heading says how many results
+sources.json holds, one in the singular."
+  (dbt-test-with-project root
+    (dbt-test-visit root "models/marts/orders.sql")
+    (make-directory (expand-file-name "target" root))
+    (pcase-dolist (`(,results ,count)
+                   '(([] "0 results")
+                     ([((unique_id . "source.shop.raw.raw_orders") (status . "pass"))] "1 result")
+                     ([((unique_id . "source.shop.raw.raw_orders") (status . "pass"))
+                       ((unique_id . "source.shop.raw.raw_customers") (status . "pass"))]
+                      "2 results")))
+      (write-region (json-encode `((results . ,results))) nil (expand-file-name "target/sources.json" root))
+      (dbt-dashboard)
+      (with-current-buffer "*dbt dashboard: shop*"
+        (should (string-match-p (format "^Stale sources, of dbt source freshness, from sources.json, %s, written "
+                                        count)
+                                (buffer-string)))))
+    (kill-buffer "*dbt dashboard: shop*")))
 
 (ert-deftest dbt-dashboard-visits-folds-and-runs-freshness ()
   "RET visits a node's file, a package's included; TAB folds a section; f runs dbt source freshness.
@@ -188,6 +210,8 @@ would contradict: the hint would then be wrong."
         (with-current-buffer "*dbt dashboard: shop*"
           (let ((lines (dbt-test-dashboard-lines)))
             (should (string-prefix-p "  warn    raw.raw_orders  loaded " (car (last lines 4))))
+            (should (string-match-p "\\`Stale sources, of dbt source freshness, from sources.json, 1 result, written "
+                                    (nth (- (length lines) 5) lines)))
             (should (equal (last lines 3) '("  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log." "" "")))
             (should-not (seq-find (lambda (line) (string-search "raw_missing" line)) lines)))
           (kill-buffer))))))

@@ -12,9 +12,10 @@
 ;; skipped in run_results.json, with dbt's message; the slowest of them;
 ;; the sources that sources.json says are stale, and where the error of a
 ;; check that failed is, as dbt writes no result for it.  Each section
-;; says which command wrote its file, and when.  RET visits a node's
-;; file, TAB folds a section, g reads the files again, and f runs `dbt
-;; source freshness', then reads them again once it ends.
+;; says which command wrote its file, how many results it holds, and
+;; when.  RET visits a node's file, TAB folds a section, g reads the
+;; files again, and f runs `dbt source freshness', then reads them again
+;; once it ends.
 
 ;;; Code:
 
@@ -55,10 +56,12 @@ read or holds no results.  The artifacts are dbt's, read as they are."
   "Insert the section TITLE of FILE, and LINES.
 ARTIFACT is FILE as `dbt-dashboard--read' read it.  Each of LINES is a
 pair (TEXT . ID): ID, a unique id, is what RET visits.  The heading
-says how long ago dbt wrote FILE, or that it holds no results."
+says how many results FILE holds and how long ago dbt wrote it, or that
+it holds no results."
   (insert (propertize title 'face 'bold)
           (if artifact
-              (format ", from %s, written %s ago\n" (file-name-nondirectory file)
+              (format ", from %s, %d result%s, written %s ago\n" (file-name-nondirectory file)
+                      (length (car artifact)) (if (= (length (car artifact)) 1) "" "s")
                       (dbt-dashboard--age (max 0 (round (float-time (time-since (file-attribute-modification-time
                                                                                 (file-attributes file))))))))
             (format ": no results in %s\n" (file-name-nondirectory file))))
@@ -182,7 +185,8 @@ The nodes that failed, errored, warned or were skipped in
 target/run_results.json, with dbt's message, the slowest nodes, and the
 sources that target/sources.json says are stale, then where the error of
 a check that failed is, as dbt writes no result for it; each section
-says when dbt wrote its file.  See `dbt-dashboard-mode'."
+says how many results its file holds, and when dbt wrote it.  See
+`dbt-dashboard-mode'."
   (interactive)
   (let ((root (or (dbt-project-root) (user-error "Not in a dbt project"))))
     (with-current-buffer (get-buffer-create (format "*dbt dashboard: %s*" (dbt-project-name root)))
