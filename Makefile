@@ -28,7 +28,7 @@ quote = '$(subst ','\'',$(1))'
 # server's tests.
 SKIP = $(if $(DBT_MODE_TEST_DBT),$(shell $(SCRATCH) sh -c 't=; command -v timeout >/dev/null 2>&1 && t="timeout -k 1 10"; $$t "$$0" lsp --help >/dev/null 2>&1 || echo "no dbt lsp in this dbt"' $(call quote,$(DBT_MODE_TEST_DBT))),no dbt 2 executable)
 
-.PHONY: check lint compile checkdoc package-lint relint complexity test public commits
+.PHONY: check lint compile checkdoc package-lint relint complexity test test-python public commits
 
 check: lint test
 
@@ -70,6 +70,9 @@ test:
 	  DBT_MODE_TEST_ALLOW_SKIP="$$skip,$$alone" \
 	  $(SCRATCH) $(if $(DBT_MODE_TEST_DBT_CACHE),--dbt-cache $(call quote,$(DBT_MODE_TEST_DBT_CACHE))) \
 	  $(EMACS) -Q --batch $(LOAD) -L tests/helpers -l tests/run-ert.el tests
+
+test-python:
+	@PYTHONDONTWRITEBYTECODE=1 $(SCRATCH) python3 -m unittest discover -s tests/scripts -p '*_test.py'
 
 public:
 	@scripts/check-public
