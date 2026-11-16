@@ -228,8 +228,11 @@ count for nothing."
   "Show one level more of the lineage, asked of a server that gives levels."
   (interactive)
   (let ((next (1+ (or dbt-lineage--depth (dbt-lineage--deepest)))))
-    (dbt-lineage--show-depth (and (or (dbt-lineage--growing-p) (< next (dbt-lineage--deepest))) next))
-    (mapc #'dbt-lineage--ask '(upstream downstream))))
+    ;; The depth that the asking reads, then the drawing, which shows
+    ;; where the asking stopped.
+    (setq dbt-lineage--depth (and (or (dbt-lineage--growing-p) (< next (dbt-lineage--deepest))) next))
+    (mapc #'dbt-lineage--ask '(upstream downstream))
+    (dbt-lineage--show-depth dbt-lineage--depth)))
 
 (defun dbt-lineage-shallower ()
   "Show one level less of the lineage, down to the nearest nodes."

@@ -288,6 +288,23 @@ The answers that they ask are given in turn."
       (should (equal header-line-format " Lineage of f, to depth 3"))
       (kill-buffer))))
 
+(ert-deftest dbt-lineage-says-where-plus-stops ()
+  "+ that comes to a level past `dbt-lineage-level-limit' says so in the header line."
+  (let ((asked (list nil))
+        (dbt-lineage-level-limit 2))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls '((upstream)
+                                              (downstream ("model.p.f" "model.p.a")
+                                                          ("model.p.a" "model.p.b" "model.p.c" "model.p.d")))
+                                            asked))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (should (equal header-line-format " Lineage of f, to depth 2"))
+      (execute-kbd-macro (kbd "+"))
+      (should (equal header-line-format
+                     " Lineage of f, to depth 3; downstream stops at depth 2: its 3 nodes are more than dbt-lineage-level-limit, 2"))
+      (kill-buffer))))
+
 (ert-deftest dbt-lineage-drops-the-answers-of-a-level-asked-again ()
   "Asked again before its answers come, the lineage keeps the answers of the last asking only.
 The first asking would have found a seed old upstream."
