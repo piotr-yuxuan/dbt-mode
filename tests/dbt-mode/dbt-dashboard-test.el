@@ -81,6 +81,7 @@ error; a missing file says so."
                        "Slowest nodes: no results in run_results.json"
                        ""
                        "Stale sources, of dbt source freshness: no results in sources.json"
+                       "  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log."
                        "" "")))
       (dbt-test-write-artifacts root)
       (let ((dbt-dashboard-slowest 2))
@@ -100,7 +101,18 @@ error; a missing file says so."
                        '("     1.50 s  orders  error" "     0.75 s  util  error" "")))
         (should (member "  warn    raw.raw_orders  loaded 2018-01-04T00:00:00Z, 3235 days ago" lines))
         (should (member "  runtime error events.page_views  Catalog Error: Table page_views does not exist" lines))
-        (should-not (seq-find (lambda (line) (string-search "raw_customers" line)) lines)))
+        (should-not (seq-find (lambda (line) (string-search "raw_customers" line)) lines))
+        ;; The rows, then the hint, which is no row of its own.
+        (should (equal (last lines 4)
+                       '("  runtime error events.page_views  Catalog Error: Table page_views does not exist"
+                         "  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log."
+                         "" ""))))
+      (switch-to-buffer (current-buffer))
+      (goto-char (point-max))
+      (search-backward "A check that failed")
+      (should (eq (get-text-property (point) 'face) 'shadow))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "RET")) :type 'user-error))
+                     "No node here"))
       (kill-buffer))))
 
 (ert-deftest dbt-dashboard-visits-folds-and-runs-freshness ()
@@ -147,6 +159,38 @@ target, f asks first, and runs nothing on a no."
             (should (re-search-forward "^arguments: source freshness$" nil t)))
           (dbt-test-wait (lambda () (string-search "no results in sources.json" (buffer-string)))))
         (kill-buffer)))))
+
+(ert-deftest dbt-dashboard-live-says-where-a-failed-check-is ()
+  "With the real dbt, a check that failed has no row, and the hint says where its error is.
+dbt writes no result for it in sources.json, which a row for raw_missing
+would contradict: the hint would then be wrong."
+  (unless (getenv "DBT_MODE_TEST_DBT") (ert-skip "no dbt 2 executable"))
+  (dbt-test-with-project root
+    (write-region (concat "version: 2\n\nsources:\n  - name: raw\n    schema: main\n    tables:\n"
+                          "      - name: raw_orders\n        config:\n"
+                          "          loaded_at_field: \"cast(order_date as timestamp)\"\n"
+                          "          freshness:\n            warn_after: {count: 1, period: day}\n"
+                          "      - name: raw_customers\n      - name: raw_missing\n        config:\n"
+                          "          loaded_at_field: loaded_at\n"
+                          "          freshness:\n            error_after: {count: 1, period: day}\n\n"
+                          "  - name: \"events\"\n    tables:\n      - name: page_views\n")
+                  nil (expand-file-name "models/staging/_sources.yml" root))
+    (let ((default-directory root))
+      (should (eq 0 (call-process (getenv "DBT_MODE_TEST_DBT") nil nil nil "seed" "--profiles-dir" root)))
+      (call-process (getenv "DBT_MODE_TEST_DBT") nil nil nil "source" "freshness" "--profiles-dir" root)
+      (should (string-search "raw_missing does not exist"
+                             (with-temp-buffer
+                               (insert-file-contents (expand-file-name "logs/dbt.log" root))
+                               (buffer-string))))
+      (dbt-test-visit root "models/marts/orders.sql")
+      (save-window-excursion
+        (dbt-dashboard)
+        (with-current-buffer "*dbt dashboard: shop*"
+          (let ((lines (dbt-test-dashboard-lines)))
+            (should (string-prefix-p "  warn    raw.raw_orders  loaded " (car (last lines 4))))
+            (should (equal (last lines 3) '("  A check that failed has no row: dbt writes no result for it.  Its error is in dbt's output and in logs/dbt.log." "" "")))
+            (should-not (seq-find (lambda (line) (string-search "raw_missing" line)) lines)))
+          (kill-buffer))))))
 
 (provide 'dbt-dashboard-test)
 ;;; dbt-dashboard-test.el ends here

@@ -127,8 +127,10 @@ which dbt-mode's previews, diffs and formats leave as they are: the nodes
 that errored, failed, warned or were skipped in `target/run_results.json`,
 the most severe first, with dbt's message to its cause and a test's
 failing rows, the ten slowest nodes, and the sources that
-`target/sources.json` says are stale or failed, each section saying which
-command wrote its file and how long ago. `RET` visits a node's file, `TAB`
+`target/sources.json` says are stale, each section saying which command
+wrote its file and how long ago. dbt writes no result there for a
+freshness check that failed: the last line of the dashboard says that
+its error is in dbt's output and in `logs/dbt.log`. `RET` visits a node's file, `TAB`
 folds a section, `n` and `p` move by line, `g` reads the files again, and
 `f` runs `dbt source freshness`, then reads them again once it ends.
 

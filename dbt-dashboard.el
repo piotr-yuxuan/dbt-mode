@@ -10,10 +10,11 @@
 ;; `dbt-dashboard' shows what your own runs left in the target path,
 ;; read and never written: the nodes that failed, errored, warned or were
 ;; skipped in run_results.json, with dbt's message; the slowest of them;
-;; the sources that sources.json says are stale.  Each section says which
-;; command wrote its file, and when.  RET visits a node's file, TAB folds a
-;; section, g reads the files again, and f runs `dbt source freshness',
-;; then reads them again once it ends.
+;; the sources that sources.json says are stale, and where the error of a
+;; check that failed is, as dbt writes no result for it.  Each section
+;; says which command wrote its file, and when.  RET visits a node's
+;; file, TAB folds a section, g reads the files again, and f runs `dbt
+;; source freshness', then reads them again once it ends.
 
 ;;; Code:
 
@@ -107,18 +108,24 @@ says how long ago dbt wrote FILE, or that it holds no results."
                        dbt-dashboard-slowest)))
     (dbt-dashboard--section
      "Stale sources, of dbt source freshness" sources-file sources
-     (mapcar (lambda (result)
-               (cons (format "%-7s %s  %s" (funcall status result) (funcall name result)
-                             (if (stringp (gethash "max_loaded_at" result))
-                                 (format "loaded %s, %s ago" (gethash "max_loaded_at" result)
-                                         (dbt-dashboard--age
-                                          (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
-                                                   (if (numberp age) (max 0 age) 0)))))
-                               ;; A freshness that failed has dbt's error instead.
-                               (funcall said result (if (gethash "error" result) "error" "message"))))
-                     (gethash "unique_id" result)))
-             (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
-                         (car sources))))
+     (append
+      (mapcar (lambda (result)
+                (cons (format "%-7s %s  %s" (funcall status result) (funcall name result)
+                              (if (stringp (gethash "max_loaded_at" result))
+                                  (format "loaded %s, %s ago" (gethash "max_loaded_at" result)
+                                          (dbt-dashboard--age
+                                           (round (let ((age (gethash "max_loaded_at_time_ago_in_s" result)))
+                                                    (if (numberp age) (max 0 age) 0)))))
+                                ;; A freshness that failed has dbt's error instead.
+                                (funcall said result (if (gethash "error" result) "error" "message"))))
+                      (gethash "unique_id" result)))
+              (seq-filter (lambda (result) (member (funcall status result) '("warn" "error" "runtime error")))
+                          (car sources)))
+      ;; dbt 2 writes no result for a check that failed (probed on
+      ;; dbt-oss 2.0.11 and the proprietary 2.0.9).
+      (list (cons (propertize "A check that failed has no row: dbt writes no result for it.  \
+Its error is in dbt's output and in logs/dbt.log." 'face 'shadow)
+                  nil))))
     (goto-char (point-min))))
 
 (defun dbt-dashboard-visit ()
@@ -173,8 +180,9 @@ It runs on the default target, which a protected target asks first, as
   "Show the state of the current project, from the artifacts of your runs.
 The nodes that failed, errored, warned or were skipped in
 target/run_results.json, with dbt's message, the slowest nodes, and the
-sources that target/sources.json says are stale; each section says when
-dbt wrote its file.  See `dbt-dashboard-mode'."
+sources that target/sources.json says are stale, then where the error of
+a check that failed is, as dbt writes no result for it; each section
+says when dbt wrote its file.  See `dbt-dashboard-mode'."
   (interactive)
   (let ((root (or (dbt-project-root) (user-error "Not in a dbt project"))))
     (with-current-buffer (get-buffer-create (format "*dbt dashboard: %s*" (dbt-project-name root)))
