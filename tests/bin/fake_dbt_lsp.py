@@ -8,8 +8,11 @@ file of answers, whose keys are a method, or "workspace/executeCommand
 COMMAND" for a command: a request without an answer there gets null.  After
 `initialized`, it sends the notifications of its own that dbt lsp sends, or
 those that the key "$notifications" of the answers lists.  The key
-"$experimental" gives its capabilities an experimental object, and the key
-"$delays" maps a method to the seconds it waits before it answers it.
+"$experimental" gives its capabilities an experimental object, the key
+"$commands" adds commands to those it lists, as dbt-lsp-plus adds its own,
+the key "$errors" maps a key of the answers to the error that answers it
+instead, and the key "$delays" maps a method to the seconds it waits before
+it answers it.
 
 Environment:
 - DBT_MODE_FAKE_ANSWERS: the file of answers, optional;
@@ -88,16 +91,24 @@ def write_message(message: dict[str, JSON]) -> None:
     sys.stdout.buffer.flush()
 
 
+def key(message: dict[str, JSON]) -> str:
+    """Return the key of the request MESSAGE in the answers."""
+    method = message["method"]
+    if method == "workspace/executeCommand":
+        return method + " " + message["params"]["command"]
+    return method
+
+
 def answer(message: dict[str, JSON], answers: dict[str, JSON]) -> JSON:
     """Return the result of the request MESSAGE."""
-    method = message["method"]
-    if method == "initialize":
+    if message["method"] == "initialize":
         experimental = answers.get("$experimental")
         extra = {"experimental": experimental} if experimental else {}
-        return {"capabilities": CAPABILITIES | extra}
-    if method == "workspace/executeCommand":
-        method += " " + message["params"]["command"]
-    return answers.get(method)
+        commands = CAPABILITIES["executeCommandProvider"]["commands"]
+        commands = commands + answers.get("$commands", [])
+        listed = {"executeCommandProvider": {"commands": commands}}
+        return {"capabilities": CAPABILITIES | extra | listed}
+    return answers.get(key(message))
 
 
 def main() -> None:
@@ -114,7 +125,12 @@ def main() -> None:
                 return
             if "id" in message and method is not None:
                 time.sleep(answers.get("$delays", {}).get(method, 0))
-                write_message({"id": message["id"], "result": answer(message, answers)})
+                error = answers.get("$errors", {}).get(key(message))
+                if error is not None:
+                    write_message({"id": message["id"], "error": error})
+                else:
+                    result = answer(message, answers)
+                    write_message({"id": message["id"], "result": result})
             if method == "initialized":
                 for notification in answers.get("$notifications", NOTIFICATIONS):
                     write_message({"method": notification, "params": {}})
