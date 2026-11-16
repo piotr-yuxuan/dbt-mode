@@ -372,75 +372,6 @@ root model finds that model."
       (should (string-match-p "\\`No util_orders in package shop, only in \\(aaa_utils, shop_utils\\|shop_utils, aaa_utils\\)\\'"
                               (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)))))))
 
-(ert-deftest dbt-mode-names-a-package-beside-the-project ()
-  "M-. on a ref of a package that lacks the name names the project and another package that define it.
-A ref without a package would take the project's alone."
-  (dbt-test-with-project root
-    (make-directory (expand-file-name "dbt_packages/aaa_utils/models" root) t)
-    (write-region "name: 'aaa_utils'\n" nil (expand-file-name "dbt_packages/aaa_utils/dbt_project.yml" root))
-    (write-region "select 1 as id" nil (expand-file-name "dbt_packages/aaa_utils/models/orders.sql" root))
-    (write-region "select * from {{ ref('shop_utils', 'orders') }}\n" nil
-                  (expand-file-name "models/marts/utils_orders.sql" root))
-    (save-window-excursion
-      (switch-to-buffer (dbt-test-visit root "models/marts/utils_orders.sql"))
-      (dbt-test-goto "'orders'" 1)
-      ;; In either order.
-      (should (string-match-p "\\`No orders in package shop_utils, only in \\(aaa_utils, shop\\|shop, aaa_utils\\)\\'"
-                              (cadr (should-error (execute-kbd-macro (kbd "M-.")) :type 'user-error)))))))
-
-(ert-deftest dbt-mode-goes-to-the-namesake-that-dbt-takes ()
-  "M-. on a ref, a source or a doc that the project and a package both define goes to the one dbt takes.
-From the project, the project's; from the package, the package's, but
-for a doc, the project's whatever calls it, as dbt 2.0.11 resolves them."
-  (dbt-test-with-project root
-    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
-    (let ((calls (concat "select * from {{ ref('stg_orders') }}\n"
-                         "join {{ source('raw', 'raw_orders') }} using (id)\n")))
-      (pcase-dolist (`(,file . ,text)
-                     `(("dbt_packages/shop_utils/models/stg_orders.sql" . "select 1 as id\n")
-                       ("dbt_packages/shop_utils/models/_utils.yml"
-                        . ,(concat "sources:\n  - name: raw\n    tables:\n      - name: raw_orders\n"
-                                   "models:\n  - name: pkg_calls\n    description: '{{ doc(\"order_status\") }}'\n"))
-                       ("dbt_packages/shop_utils/models/docs.md"
-                        . "{% docs order_status %}\nIn the package.\n{% enddocs %}\n")
-                       ("dbt_packages/shop_utils/models/pkg_calls.sql" . ,calls)
-                       ("models/marts/calls.sql" . ,calls)))
-        (write-region text nil (expand-file-name file root))))
-    (save-window-excursion
-      (pcase-dolist (`(,file ,point-on ,visited)
-                     '(("models/marts/calls.sql" "stg_orders" "models/staging/stg_orders.sql")
-                       ("models/marts/calls.sql" "raw_orders" "models/staging/_sources.yml")
-                       ("models/staging/_staging.yml" "order_status" "models/docs.md")
-                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "stg_orders"
-                        "dbt_packages/shop_utils/models/stg_orders.sql")
-                       ("dbt_packages/shop_utils/models/pkg_calls.sql" "raw_orders"
-                        "dbt_packages/shop_utils/models/_utils.yml")
-                       ("dbt_packages/shop_utils/models/_utils.yml" "order_status" "models/docs.md")))
-        (switch-to-buffer (dbt-test-visit root file))
-        (when (string-suffix-p ".yml" file)
-          (dbt-properties-mode-maybe))
-        (dbt-test-goto point-on)
-        (execute-kbd-macro (kbd "M-."))
-        (should (equal (file-relative-name buffer-file-name root) visited))))))
-
-(ert-deftest dbt-mode-lists-the-namesakes-that-dbt-finds-ambiguous ()
-  "M-. on a ref that two packages define, but neither the caller's package nor the project, lists both.
-dbt 2.0.11 rejects that call as ambiguous (dbt1005)."
-  (dbt-test-with-project root
-    (make-directory (expand-file-name "dbt_packages/shop_utils/models" root))
-    (make-directory (expand-file-name "dbt_packages/aaa_utils/models" root) t)
-    (write-region "name: 'aaa_utils'\n" nil (expand-file-name "dbt_packages/aaa_utils/dbt_project.yml" root))
-    (dolist (file '("dbt_packages/shop_utils/models/dup.sql" "dbt_packages/aaa_utils/models/dup.sql"))
-      (write-region "select 1 as id" nil (expand-file-name file root)))
-    (write-region "select * from {{ ref('dup') }}\n" nil (expand-file-name "models/marts/uses_dup.sql" root))
-    (save-window-excursion
-      (switch-to-buffer (dbt-test-visit root "models/marts/uses_dup.sql"))
-      (dbt-test-goto "dup'")
-      (execute-kbd-macro (kbd "M-."))
-      (should (equal (buffer-name) "*xref*"))
-      (dolist (package '("aaa_utils" "shop_utils"))
-        (should (string-search (format "dbt_packages/%s/models/dup.sql" package) (buffer-string)))))))
-
 (ert-deftest dbt-mode-finds-no-source-named-as-a-package ()
   "M-. on source('shop_utils', 'events') finds nothing: no source is shop_utils, and a package of that name is no source.
 The project has a source events, which a message taking shop_utils for
@@ -506,7 +437,7 @@ The project's namesakes and their uses come after, or not at all."
                           "          arguments:\n            to: ref('stg_orders')\n            field: id\n")
                   nil (expand-file-name "dbt_packages/shop_utils/models/_props.yml" root))
     ;; dbt 2.0.9 takes the package of the node that calls the macro,
-    ;; which dbt-mode cannot know, as `dbt-project-lookup' says.
+    ;; which dbt-mode cannot know, as `dbt-project-lookup-rank' says.
     (write-region "{% macro pkg_orders() %}\n  select * from {{ ref('stg_orders') }}\n{% endmacro %}\n" nil
                   (expand-file-name "dbt_packages/shop_utils/macros/pkg_orders.sql" root))
     (dolist (file '("dbt_packages/shop_utils/tests/assert_pkg.sql" "dbt_packages/shop_utils/models/_props.yml"

@@ -488,9 +488,9 @@ dbt-mode's."
              (dbt-project-entities root '(model seed snapshot analysis macro test doc source table))))))
 
 (defun dbt-mode-definitions (target)
-  "Return what TARGET resolves to from the current buffer, as dbt resolves it.
+  "Return the entities that define TARGET, from the current buffer.
 The calls of a file resolve from its package, whatever the file holds:
-a model, YAML properties, a singular test.  See `dbt-project-resolve'."
+a model, YAML properties, a singular test."
   (let ((root (dbt-project-root)))
     (dbt-project-resolve root target
                          (car (and buffer-file-name (dbt-project-file-package root buffer-file-name))))))
@@ -520,11 +520,7 @@ resolve."
                 (package (plist-get target :qualifier))
                 ((not (eq (plist-get target :kind) 'source)))
                 ((assoc package (dbt-project-packages (dbt-project-root))))
-                ;; Each package that defines the name, not only the one that
-                ;; a call without a package would take.
-                (elsewhere (seq-mapcat (lambda (other)
-                                         (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier (car other))))
-                                       (dbt-project-packages (dbt-project-root)))))
+                (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
     (mapcar #'dbt-mode--xref definitions)))
