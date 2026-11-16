@@ -43,56 +43,55 @@ It shows nothing when the server announces document symbols, from
 which lsp-mode draws its breadcrumbs, and only the symbols when
 lsp-mode's breadcrumbs are on without them.")
 
-(defun dbt-breadcrumb--update ()
-  "Compute `dbt-breadcrumb--line' at point.
-The symbols are the Jinja blocks open at point, a definition block named
-by the first identifier after its keyword and an `if', `for' or `call'
-block by its statement, and the CTEs whose parenthesis holds point or is
-opened on its line, outermost first."
-  (setq dbt-breadcrumb--timer nil
-        dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick)))
-  (let* ((case-fold-search t)
-         (position (point))
-         (root (dbt-project-root))
-         (symbols nil))
-    (save-excursion
-      (dolist (block (cdr (dbt-edit-blocks position)))
-        (let ((statement (replace-regexp-in-string
-                          "[ \t\n\r]+" " "
-                          (string-trim (buffer-substring-no-properties (+ (nth 1 block) 2) (- (nth 2 block) 2))
-                                       "[-+]?[ \t\n\r]*" "[ \t\n\r]*[-+]?"))))
-          ;; dbt-lsp-plus's outline leaves out raw, filter, block and with.
-          (when (string-match (concat "\\`\\(?:\\(?:if\\|for\\|call\\)\\_>"
-                                      "\\|\\(?:macro\\|test\\|snapshot\\|materialization\\|docs\\|set\\)"
-                                      " \\([[:alpha:]_][[:alnum:]_]*\\)\\)")
-                              statement)
-            (push (cons (nth 1 block) (or (match-string 1 statement) statement)) symbols))))
-      ;; A parenthesis in a comment or a string opens nothing for `syntax-ppss'.
-      (dolist (paren (seq-uniq (append (nth 9 (syntax-ppss position)) (nth 9 (syntax-ppss (line-end-position))))))
-        (goto-char (1+ paren))
-        (when (looking-back (dbt-mode-cte-regexp) (line-beginning-position))
-          (push (cons (match-beginning 1) (match-string-no-properties 1)) symbols))))
-    (setq dbt-breadcrumb--line
-          (cons (string-replace
-                 "%" "%%"
-                 (concat " " (string-join
-                              (append (and root (delete "." (split-string (file-relative-name default-directory root) "/" t)))
-                                      (list (file-name-nondirectory (or buffer-file-name (buffer-name)))))
-                              " > ")))
-                (string-replace "%" "%%" (mapconcat (lambda (symbol) (concat " > " (cdr symbol)))
-                                                    (sort symbols #'car-less-than-car)))))
-    (force-mode-line-update)))
+(defun dbt-breadcrumb--update (buffer)
+  "Compute `dbt-breadcrumb--line' of BUFFER at its point, unless it was killed.
+For the idle timer of `dbt-breadcrumb--schedule'.  The symbols are the
+Jinja blocks open at point, a definition block named by the first
+identifier after its keyword and an `if', `for' or `call' block by its
+statement, and the CTEs whose parenthesis holds point or is opened on
+its line, outermost first."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq dbt-breadcrumb--timer nil
+            dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick)))
+      (let* ((case-fold-search t)
+             (position (point))
+             (root (dbt-project-root))
+             (symbols nil))
+        (save-excursion
+          (dolist (block (cdr (dbt-edit-blocks position)))
+            (let ((statement (replace-regexp-in-string
+                              "[ \t\n\r]+" " "
+                              (string-trim (buffer-substring-no-properties (+ (nth 1 block) 2) (- (nth 2 block) 2))
+                                           "[-+]?[ \t\n\r]*" "[ \t\n\r]*[-+]?"))))
+              ;; dbt-lsp-plus's outline leaves out raw, filter, block and with.
+              (when (string-match (concat "\\`\\(?:\\(?:if\\|for\\|call\\)\\_>"
+                                          "\\|\\(?:macro\\|test\\|snapshot\\|materialization\\|docs\\|set\\)"
+                                          " \\([[:alpha:]_][[:alnum:]_]*\\)\\)")
+                                  statement)
+                (push (cons (nth 1 block) (or (match-string 1 statement) statement)) symbols))))
+          ;; A parenthesis in a comment or a string opens nothing for `syntax-ppss'.
+          (dolist (paren (seq-uniq (append (nth 9 (syntax-ppss position)) (nth 9 (syntax-ppss (line-end-position))))))
+            (goto-char (1+ paren))
+            (when (looking-back (dbt-mode-cte-regexp) (line-beginning-position))
+              (push (cons (match-beginning 1) (match-string-no-properties 1)) symbols))))
+        (setq dbt-breadcrumb--line
+              (cons (string-replace
+                     "%" "%%"
+                     (concat " " (string-join
+                                  (append (and root (delete "." (split-string (file-relative-name default-directory root) "/" t)))
+                                          (list (file-name-nondirectory (or buffer-file-name (buffer-name)))))
+                                  " > ")))
+                    (string-replace "%" "%%" (mapconcat (lambda (symbol) (concat " > " (cdr symbol)))
+                                                        (sort symbols #'car-less-than-car)))))
+        (force-mode-line-update)))))
 
 (defun dbt-breadcrumb--schedule ()
   "Have the header line computed once Emacs is idle, if point or the text moved.
 For `post-command-hook'.  Half a second, lsp-mode's `lsp-idle-delay'."
   (unless (or dbt-breadcrumb--timer
               (equal dbt-breadcrumb--state (cons (point) (buffer-chars-modified-tick))))
-    (setq dbt-breadcrumb--timer
-          (run-with-idle-timer 0.5 nil (lambda (buffer)
-                                         (when (buffer-live-p buffer)
-                                           (with-current-buffer buffer (dbt-breadcrumb--update))))
-                               (current-buffer)))))
+    (setq dbt-breadcrumb--timer (run-with-idle-timer 0.5 nil #'dbt-breadcrumb--update (current-buffer)))))
 
 ;;;###autoload
 (define-minor-mode dbt-breadcrumb-mode
