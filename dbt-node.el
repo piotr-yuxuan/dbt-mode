@@ -152,7 +152,13 @@ wrote it.  \\[revert-buffer] in that buffer shows it again the same way."
                                                                  (file-attributes file))))
                             refresh))))
     (if (dbt-mode-server-p)
-        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus" refresh)) from-manifest)
+        (dbt-lsp-node-info id (lambda (node) (dbt-node--show root id node "from dbt-lsp-plus" refresh))
+                           ;; Called from lsp-mode's handler of the answer, which
+                           ;; would wrap the error in its own message.
+                           (lambda ()
+                             (condition-case err
+                                 (funcall from-manifest)
+                               (user-error (message "%s" (error-message-string err))))))
       (funcall from-manifest))))
 
 ;;;###autoload
@@ -172,10 +178,11 @@ write, saying when dbt wrote it."
 
 (defun dbt-node-eldoc (callback &rest _)
   "Give CALLBACK the materialization and relation of the ref or source at point.
-For `eldoc-documentation-functions', without a server, whose hover says
-more.  They come from the project's manifest, once dbt-mode holds it as
-dbt last wrote it: eldoc never reads one."
-  (when-let* (((not (dbt-mode-server-p)))
+For `eldoc-documentation-functions', without dbt lsp, whose hover says
+more: dbt-lsp-plus alone hovers only once it has an index.  They come
+from the project's manifest, once dbt-mode holds it as dbt last wrote
+it: eldoc never reads one."
+  (when-let* (((not (dbt-mode-dbt-lsp-p)))
               (root (dbt-project-root))
               (target (dbt-mode-target-at-point))
               ((memq (plist-get target :kind) '(ref source)))

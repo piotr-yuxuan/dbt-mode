@@ -19,6 +19,14 @@ as dbt-lsp-plus adds its own, the key "$errors" maps a key of the answers
 to the error that answers it instead, and the key "$delays" maps a method
 to the seconds it waits before it answers it.
 
+With FAKE_ALONE set, it stands for dbt-lsp-plus alone, without dbt lsp, as
+the fake dbt-lsp-plus runs it for a dbt that lacks dbt lsp: the
+capabilities that the proxy announces alone, as probed on 2026-11-16 with
+dbt-lsp-plus cfb8ee4 and dbt-oss 2.0.11, and none of dbt lsp's commands
+or notifications; a request without an answer gets null when the proxy
+answers its method alone, and otherwise the error -32803 that the proxy
+gives, as for references off a source.
+
 Environment:
 - DBT_MODE_FAKE_ANSWERS: the file of answers, optional;
 - DBT_MODE_FAKE_LOG: a file to which it appends its command line, then each
@@ -70,6 +78,48 @@ CAPABILITIES = {
     },
 }
 
+ALONE_CAPABILITIES = {
+    "callHierarchyProvider": True,
+    "definitionProvider": True,
+    "documentHighlightProvider": True,
+    "documentSymbolProvider": True,
+    "executeCommandProvider": {"commands": ["dbt-lsp-plus.nodeInfo"]},
+    "experimental": {
+        "dbtLspPlus": {
+            "definition": ["source", "ref", "doc", "entry", "test"],
+            "references": ["source"],
+            "rename": ["source", "cte"],
+            "version": 1,
+        }
+    },
+    "foldingRangeProvider": True,
+    "hoverProvider": True,
+    "inlayHintProvider": True,
+    "referencesProvider": True,
+    "renameProvider": True,
+    "selectionRangeProvider": True,
+    "textDocumentSync": {"change": 2, "openClose": True, "save": {}},
+    "workspaceSymbolProvider": True,
+}
+
+# The methods that dbt-lsp-plus answers alone, null when it has nothing.
+ALONE_METHODS = {
+    "initialize",
+    "shutdown",
+    "textDocument/definition",
+    "textDocument/documentHighlight",
+    "textDocument/documentSymbol",
+    "textDocument/foldingRange",
+    "textDocument/hover",
+    "textDocument/inlayHint",
+    "textDocument/prepareCallHierarchy",
+    "textDocument/selectionRange",
+    "callHierarchy/incomingCalls",
+    "callHierarchy/outgoingCalls",
+    "workspace/symbol",
+    "workspace/executeCommand dbt-lsp-plus.nodeInfo",
+}
+
 NOTIFICATIONS = [
     "dbt/lspCompileStart",
     "dbt/lspCompileComplete",
@@ -108,8 +158,16 @@ def key(message: dict[str, JSON]) -> str:
     return method
 
 
+def alone() -> bool:
+    """Return whether the server stands for dbt-lsp-plus alone."""
+    return bool(os.environ.get("FAKE_ALONE"))
+
+
 def answer(message: dict[str, JSON], answers: dict[str, JSON]) -> JSON:
     """Return the result of the request MESSAGE."""
+    if message["method"] == "initialize" and alone():
+        added = answers.get("$capabilities", {})
+        return {"capabilities": ALONE_CAPABILITIES | added}
     if message["method"] == "initialize":
         experimental = answers.get("$experimental")
         extra = {"experimental": experimental} if experimental else {}
@@ -136,13 +194,17 @@ def main() -> None:
             if "id" in message and method is not None:
                 time.sleep(answers.get("$delays", {}).get(method, 0))
                 error = answers.get("$errors", {}).get(key(message))
+                owned = key(message) in answers or key(message) in ALONE_METHODS
+                if error is None and alone() and not owned:
+                    error = {"code": -32803, "message": "dbt lsp is not running"}
                 if error is not None:
                     write_message({"id": message["id"], "error": error})
                 else:
                     result = answer(message, answers)
                     write_message({"id": message["id"], "result": result})
             if method == "initialized":
-                for notification in answers.get("$notifications", NOTIFICATIONS):
+                own = [] if alone() else NOTIFICATIONS
+                for notification in answers.get("$notifications", own):
                     write_message({"method": notification, "params": {}})
                 for number, request in enumerate(answers.get("$requests", [])):
                     write_message({"id": f"fake-{number}", **request})

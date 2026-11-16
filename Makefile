@@ -57,7 +57,15 @@ complexity:
 	@$(EMACS) -Q --batch -l scripts/complexity.el -f repo-complexity-batch $(PACKAGE_EL) $(TOOL_EL) \
 	  $(wildcard tests/*/*-test.el)
 
+# The live tests of dbt-lsp-plus alone need DBT_MODE_TEST_PROXY, the
+# executable of dbt-lsp-plus, and a dbt that lacks dbt lsp, as dbt-oss
+# does: they skip otherwise, for one of these reasons, which the shell
+# derives from SKIP, so that dbt is asked once.
 test:
-	@DBT_MODE_TEST_ALLOW_SKIP="$(SKIP)" \
+	@skip=$(call quote,$(SKIP)); alone="no dbt-lsp-plus"; \
+	  if [ -n $(call quote,$(DBT_MODE_TEST_PROXY)) ]; then \
+	    case "$$skip" in *"no dbt lsp"*) alone= ;; *) alone="this dbt runs dbt lsp" ;; esac; \
+	  fi; \
+	  DBT_MODE_TEST_ALLOW_SKIP="$$skip,$$alone" \
 	  $(SCRATCH) $(if $(DBT_MODE_TEST_DBT_CACHE),--dbt-cache $(call quote,$(DBT_MODE_TEST_DBT_CACHE))) \
 	  $(EMACS) -Q --batch $(LOAD) -L tests/helpers -l tests/run-ert.el tests

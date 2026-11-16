@@ -26,6 +26,9 @@
 (defvar dbt-lsp-test-log nil
   "The log of the scripted server of the running test.")
 
+(defvar dbt-lsp-test-executable nil
+  "The dbt of `dbt-lsp-test-with-server' when non-nil, rather than `dbt-lsp-test-dbt'.")
+
 (defvar dbt-lsp-test-watch-files nil
   "Whether lsp-mode watches files in `dbt-lsp-test-with-server', which it does not by default.")
 
@@ -47,7 +50,7 @@ writes it.  The buffers of rows and lineage are killed afterwards."
               (process-environment (append (list (concat "DBT_MODE_FAKE_ANSWERS=" ,answers-file)
                                                  (concat "DBT_MODE_FAKE_LOG=" dbt-lsp-test-log))
                                            process-environment))
-              (dbt-executable dbt-lsp-test-dbt)
+              (dbt-executable (or dbt-lsp-test-executable dbt-lsp-test-dbt))
               (lsp--session nil)
               (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
               (lsp-enable-file-watchers dbt-lsp-test-watch-files)
@@ -140,6 +143,22 @@ So it does not load dbt-cli, with transient and compile."
                        (directory-file-name nested)))
         (should (equal (lsp--workspace-root (dbt-lsp-workspace)) (lsp-f-canonical nested)))))))
 
+(ert-deftest dbt-lsp-asks-a-nested-project-s-own-server ()
+  "From a buffer that no server serves, as the lineage's, the server asked is the project's, not an enclosing project's.
+A package's integration_tests is a project of its own."
+  (dbt-lsp-test-with-server root nil
+    (let ((nested (expand-file-name "integration_tests/" root)))
+      (make-directory nested t)
+      (with-temp-file (expand-file-name "dbt_project.yml" nested)
+        (insert "name: 'shop_tests'\nprofile: 'shop'\n"))
+      (with-temp-buffer
+        (setq default-directory root)
+        (should (eq (dbt-lsp--project-workspace) (with-current-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root))
+                                                    (dbt-lsp-workspace))))
+        (setq default-directory nested)
+        (should-not (dbt-lsp--project-workspace))
+        (should-not (dbt-lsp-command-p "dbt.show"))))))
+
 (ert-deftest dbt-lsp-runs-a-server-for-each-project-of-a-repository ()
   "Two dbt projects of a repository get a server each, though lsp-mode guesses roots."
   (dbt-lsp-test-with-server root nil
@@ -216,18 +235,163 @@ files of the Nix store do: only their true names tell them apart."
       (make-symbolic-link (expand-file-name "oss" directory) profile)
       (should-not (dbt-project-command-p "format")))))
 
+(defun dbt-lsp-test-oss-script ()
+  "Return a script of dbt that lacks dbt lsp, dbt format and dbt lint, as dbt-oss.
+It refuses them as dbt 2 refuses a command it lacks, exit 2 and clap's
+message, and runs the other commands as the fake dbt does."
+  (concat "case \"$1\" in lsp|format|lint) echo \"error: unrecognized subcommand '$1'\" >&2; exit 2 ;; esac\n"
+          "exec " (shell-quote-argument dbt-lsp-test-dbt) " \"$@\""))
+
+(defmacro dbt-lsp-test-alone (root answers &rest body)
+  "Run BODY as `dbt-lsp-test-with-server', with dbt-oss and dbt-lsp-plus alone.
+The dbt is that of `dbt-lsp-test-oss-script'; `dbt-lsp-proxy' is on, and
+the fake dbt-lsp-plus of tests/bin, found on `exec-path', runs the
+scripted server alone, as dbt-lsp-plus runs for a dbt that lacks dbt
+lsp."
+  (declare (indent 2) (debug (symbolp form body)))
+  (let ((dbt (make-symbol "dbt")))
+    `(dbt-lsp-test-with-dbt ,dbt (dbt-lsp-test-oss-script)
+       (let ((dbt-lsp-test-executable ,dbt)
+             (dbt-lsp-proxy t)
+             (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
+         (dbt-lsp-test-with-server ,root ,answers ,@body)))))
+
 (ert-deftest dbt-lsp-starts-nothing-with-a-dbt-without-a-server ()
-  "With a dbt that runs no dbt lsp, such as dbt-oss, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why."
-  (dbt-lsp-test-with-dbt dbt "exit 2"
-    (dbt-test-with-project root
-      (save-window-excursion
-        (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
-        (let ((dbt-executable dbt))
+  "With a dbt that runs no dbt lsp, the hook starts nothing, which lsp-mode would warn about, and M-x dbt-lsp says why.
+That is dbt-oss without dbt-lsp-plus, or with `dbt-lsp-proxy' on but no
+dbt-lsp-plus to run, which the message names; a dbt Core 1.x, which
+refuses dbt lsp otherwise than dbt 2 does, even with dbt-lsp-plus; and
+no dbt at all."
+  (dbt-test-with-project root
+    (save-window-excursion
+      (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))
+      (let* ((message "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")
+             (proxy (file-name-directory dbt-lsp-test-dbt)))
+        ;; No dbt-lsp-plus on an `exec-path' of Emacs's own programs only.
+        (dolist (case `((,(dbt-lsp-test-oss-script) nil ,(cons proxy exec-path) ,message)
+                        (,(dbt-lsp-test-oss-script) t ,(list exec-directory)
+                         "No dbt-lsp-plus on exec-path, which runs alone for this dbt")
+                        ("echo \"Error: No such command 'lsp'.\" >&2; exit 2" t ,(cons proxy exec-path) ,message)))
+          (dbt-lsp-test-with-dbt dbt (nth 0 case)
+            (let ((dbt-executable dbt)
+                  (dbt-lsp-proxy (nth 1 case))
+                  (exec-path (nth 2 case)))
+              (dbt-lsp-deferred)
+              (should-not (bound-and-true-p lsp--buffer-deferred))
+              (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
+                             (nth 3 case)))
+              (should-not (dbt-lsp-workspace)))))
+        (let ((dbt-executable "no-such-dbt")
+              (dbt-lsp-proxy t)
+              (exec-path (cons proxy exec-path)))
           (dbt-lsp-deferred)
-          (should-not (bound-and-true-p lsp--buffer-deferred))
-          (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp RET")) :type 'user-error))
-                         "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does"))
-          (should-not (dbt-lsp-workspace)))))))
+          (should-not (bound-and-true-p lsp--buffer-deferred)))))))
+
+(ert-deftest dbt-lsp-starts-dbt-lsp-plus-alone-for-dbt-oss ()
+  "With dbt-oss and `dbt-lsp-proxy' on, dbt-mode starts dbt-lsp-plus, which runs alone.
+The hook defers the start; M-x dbt-lsp starts it, with the same command
+line as through dbt lsp, and the server lists none of dbt lsp's
+commands."
+  (dbt-lsp-test-with-dbt dbt (dbt-lsp-test-oss-script)
+    (dbt-test-with-project root
+      (let* ((dbt-executable dbt)
+             (dbt-lsp-proxy t)
+             (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path))
+             (lsp--session nil)
+             (lsp-session-file (make-temp-name (expand-file-name "lsp-session" temporary-file-directory)))
+             (buffer (dbt-test-visit root "models/marts/orders.sql")))
+        (unwind-protect
+            (with-current-buffer buffer
+              (dbt-lsp-deferred)
+              (should lsp--buffer-deferred))
+          (kill-buffer buffer)))))
+  (dbt-lsp-test-alone root nil
+    (should (equal (seq-take (process-command (lsp--workspace-cmd-proc (dbt-lsp-workspace))) 5)
+                   (list "dbt-lsp-plus" "--" dbt-executable "lsp" "--project-dir")))
+    (should (equal (lsp-get (lsp-get (lsp--workspace-server-capabilities (dbt-lsp-workspace)) :executeCommandProvider)
+                            :commands)
+                   ["dbt-lsp-plus.nodeInfo"]))))
+
+(defun dbt-lsp-test-dbt-lsp-commands ()
+  "Return the commands of dbt lsp that the scripted server was asked, as dbt.show."
+  (seq-filter (lambda (method) (string-prefix-p "workspace/executeCommand dbt." method)) (dbt-lsp-test-methods)))
+
+(ert-deftest dbt-lsp-alone-leaves-dbt-lsp-s-commands-to-dbt ()
+  "With dbt-lsp-plus alone, the rows, a CTE's rows and the compiled SQL come from dbt, as without a server.
+dbt-lsp-plus alone lists none of dbt lsp's commands, and fails them: C-c
+C-p runs dbt show, on the model or the CTE's Jinja; C-c C-v asks for a
+dbt compile first."
+  (let ((process-environment (cons "FAKE_DBT_SUCCEED=1" process-environment)))
+    (dbt-lsp-test-alone root nil
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (execute-kbd-macro (kbd "C-c C-p"))
+        (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders*")))
+        (dbt-test-goto "select * from {{ ref('stg_customers')")
+        (execute-kbd-macro (kbd "C-u C-c C-p"))
+        (dbt-test-wait (lambda () (get-buffer "*dbt rows: orders/customers*")))
+        (should (equal (cadr (should-error (execute-kbd-macro (kbd "C-c C-v")) :type 'user-error))
+                       "Not compiled yet: run dbt compile, or start dbt lsp")))
+      (should-not (dbt-lsp-test-dbt-lsp-commands))
+      (dolist (name '("*dbt rows: orders*" "*dbt rows: orders/customers*"))
+        (kill-buffer name)))))
+
+(ert-deftest dbt-lsp-alone-lineage-falls-back-to-the-files ()
+  "With dbt-lsp-plus alone, C-c C-g asks its call hierarchy; for a node it has no item of, the calls of the files.
+dbt-lsp-plus alone lists no dbt.listNodes, which dbt lsp alone answers."
+  (dbt-lsp-test-alone root (dbt-lsp-test-hierarchy root)
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (dbt-test-wait (lambda () (assoc "upstream" (dbt-test-lineage-rows))))
+      ;; Asked a level at a time, as only the hierarchy is.
+      (should (equal header-line-format " Lineage of stg_orders, to depth 2"))
+      (kill-buffer)))
+  (dbt-lsp-test-alone root '(("textDocument/prepareCallHierarchy" . []))
+    (dbt-lineage "stg_orders")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (should (member '("upstream" "1" "seed" "raw_orders" "seeds/raw_orders.csv") (dbt-test-lineage-rows)))
+      (kill-buffer))
+    (should-not (dbt-lsp-test-dbt-lsp-commands))))
+
+(ert-deftest dbt-lsp-alone-leaves-xref-and-eldoc-to-dbt-mode ()
+  "With dbt-lsp-plus alone, M-. and M-? stay dbt-mode's where dbt lsp would answer, and eldoc speaks.
+dbt-lsp-plus alone fails references off a source, as on a column, and
+hovers only once it has an index; a source stays the proxy's, where it
+says it answers it."
+  (dbt-lsp-test-alone root nil
+    (dbt-test-goto "customers.first_name")
+    (should (eq (xref-find-backend) 'dbt))
+    (make-directory (expand-file-name "target" root))
+    (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                          " \"resource_type\": \"model\", \"package_name\": \"shop\","
+                          " \"relation_name\": \"\\\"shop\\\".\\\"main\\\".\\\"stg_orders\\\"\","
+                          " \"config\": {\"materialized\": \"view\"}}}}")
+                  nil (expand-file-name "target/manifest.json" root))
+    (dbt-project-manifest-node (expand-file-name "target/manifest.json" root) "model.shop.stg_orders")
+    (dbt-test-goto "stg_orders')")
+    (let ((said nil))
+      (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
+      (should (string-search "view" said)))
+    (goto-char (point-max))
+    (insert "\n{{ source('raw', 'raw_orders') }}")
+    (dbt-test-goto "raw_orders')")
+    (should (dbt-mode--proxy-answers-p :references (xref-backend-identifier-at-point 'dbt)))))
+
+(ert-deftest dbt-lsp-alone-refuses-what-only-dbt-lsp-does ()
+  "With dbt-lsp-plus alone, C-c C-q asks dbt format, which dbt-oss lacks; renaming a model and fixing lint issues say that no dbt lsp runs.
+dbt-lsp-plus alone announces no formatting, no code action and no
+rename of files, which dbt lsp does."
+  (dbt-lsp-test-alone root nil
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (should (string-prefix-p "This dbt cannot format"
+                               (cadr (should-error (execute-kbd-macro (kbd "C-c C-q")) :type 'user-error))))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-rename-model RET RET")) :type 'user-error))
+                     "No dbt lsp runs in this buffer"))
+      (should (equal (cadr (should-error (execute-kbd-macro (kbd "M-x dbt-lsp-fix-all RET")) :type 'user-error))
+                     "No dbt lsp runs in this buffer")))
+    (should-not (seq-intersection '("textDocument/formatting" "textDocument/codeAction" "workspace/willRenameFiles")
+                                  (dbt-lsp-test-methods)))))
 
 (ert-deftest dbt-lsp-defers-the-server-of-a-dbt-that-has-one ()
   "With a dbt that runs dbt lsp, the hook defers the start of its server until the buffer shows."
@@ -369,7 +533,8 @@ again or on in another buffer says nothing; another dbt that cannot
 format is told again; dbt 2's proprietary build is not, nor is the
 lack of any dbt, which each save then says."
   (dbt-lsp-test-with-dbt dbt "exit 2"
-    (dbt-lsp-test-with-dbt other "exit 2"
+    ;; dbt-oss, which refuses dbt format as dbt 2 does.
+    (dbt-lsp-test-with-dbt other (dbt-lsp-test-oss-script)
       (dbt-test-with-project root
         (save-window-excursion
           (let ((dbt-mode--told-cannot-format nil)
@@ -528,6 +693,18 @@ Choosing the server reads nothing of the project."
       (dbt-lsp)
       (dbt-test-goto "orders_snapshot %}")
       (should (eq (xref-find-backend) 'dbt)))))
+
+(ert-deftest dbt-lsp-leaves-yaml-to-dbt-mode ()
+  "In a YAML file, which dbt lsp does not serve, M-. stays dbt-mode's, while dbt lsp runs on the project's SQL."
+  (dbt-lsp-test-with-server root nil
+    (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+      (dbt-properties-mode-maybe)
+      (should-not (dbt-lsp-workspace))
+      (dbt-test-goto "name: stg_orders" 6)
+      (should (eq (xref-find-backend) 'dbt))
+      (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
+                             (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
+                     '("models/staging/stg_orders.sql"))))))
 
 (ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
   "With dbt-lsp-plus listing sources for a request, that request on a source is the server's.
@@ -1188,9 +1365,10 @@ stands."
 A test, no node of the index, is no link; g asks the proxy again; a
 null relation, as the proxy gives a disabled node, shows none.  Its
 error, -32803 until the proxy's first parse, shows its reason; its null
-answer, no such node, says so.  A server that does not list the
-command, as dbt lsp alone, leaves the node to the manifest; eldoc of
-dbt-mode's own steps aside for the server's hover."
+answer, no such node, says so; then the manifest serves, as without the
+proxy.  A server that does not list the command, as dbt lsp alone,
+leaves the node to the manifest; eldoc of dbt-mode's own steps aside
+for dbt lsp's hover."
   (let ((node '((unique_id . "model.shop.stg_orders") (name . "stg_orders") (resource_type . "model")
                 (package_name . "shop") (summary . "view \"shop\".\"main\".\"stg_orders\"\ntags daily")
                 (relation . "\"shop\".\"main\".\"stg_orders\"") (relation_name . "elsewhere")
@@ -1243,19 +1421,23 @@ dbt-mode's own steps aside for the server's hover."
         (should-not (string-search "relation" (buffer-string)))
         (should (string-search "  disabled      yes" (buffer-string)))
         (kill-buffer)))
-    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
-                                     ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
-                                                    . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
-      (switch-to-buffer (current-buffer))
-      (dbt-test-goto "stg_orders')")
-      (execute-kbd-macro (kbd "C-c C-o"))
-      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
-      (should-not (get-buffer "*dbt node: model.shop.stg_orders*")))
-    (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"]))
-      (switch-to-buffer (current-buffer))
-      (dbt-test-goto "stg_orders')")
-      (execute-kbd-macro (kbd "C-c C-o"))
-      (should (dbt-lsp-test-message "nodeInfo answered nothing")))
+    (dolist (case '(((("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                      ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                     . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+                     . "nodeInfo failed: No index yet: dbt parse runs")
+                    ((("$commands" . ["dbt-lsp-plus.nodeInfo"])) . "nodeInfo answered nothing")))
+      (dbt-lsp-test-with-server root (car case)
+        (make-directory (expand-file-name "target" root))
+        (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
+                              " \"resource_type\": \"model\", \"package_name\": \"shop\"}}}")
+                      nil (expand-file-name "target/manifest.json" root))
+        (switch-to-buffer (current-buffer))
+        (dbt-test-goto "stg_orders')")
+        (execute-kbd-macro (kbd "C-c C-o"))
+        (should (dbt-lsp-test-message (cdr case)))
+        (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt node: model.shop.stg_orders*")))
+          (should (string-prefix-p "stg_orders, a model of shop\nfrom target/manifest.json" (buffer-string)))
+          (kill-buffer))))
     (dbt-lsp-test-with-server root nil
       (make-directory (expand-file-name "target" root))
       (write-region (concat "{\"nodes\": {\"model.shop.stg_orders\": {\"name\": \"stg_orders\","
@@ -1271,6 +1453,22 @@ dbt-mode's own steps aside for the server's hover."
       (let ((said nil))
         (dbt-node-eldoc (lambda (text &rest _) (setq said text)))
         (should-not said)))))
+
+(ert-deftest dbt-lsp-says-that-the-manifest-is-missing-after-nodeinfo ()
+  "When nodeInfo fails and the project has no manifest, C-c C-o says both, as messages, and signals nothing."
+  (dbt-lsp-test-with-server root '(("$commands" . ["dbt-lsp-plus.nodeInfo"])
+                                   ("$errors" . (("workspace/executeCommand dbt-lsp-plus.nodeInfo"
+                                                  . ((code . -32803) (message . "No index yet: dbt parse runs"))))))
+    (switch-to-buffer (current-buffer))
+    (dbt-test-goto "stg_orders')")
+    (let ((debug-on-error t))
+      (execute-kbd-macro (kbd "C-c C-o"))
+      (should (dbt-lsp-test-message "nodeInfo failed: No index yet: dbt parse runs"))
+      (should (dbt-lsp-test-message "No readable target/manifest.json: run dbt parse first")))
+    (should-not (with-current-buffer (messages-buffer)
+                  (save-excursion
+                    (goto-char dbt-lsp-test-messages-start)
+                    (search-forward "Error processing message" nil t))))))
 
 (ert-deftest dbt-lsp-breadcrumb-adds-its-symbols-to-lsp-mode-line ()
   "With dbt lsp alone, which announces no document symbols, dbt-breadcrumb-mode adds its own after lsp-mode's line.

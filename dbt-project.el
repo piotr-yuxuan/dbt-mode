@@ -76,7 +76,7 @@ Signal a `user-error' when there is none, before anything starts."
 The key is (FILE TIME COMMAND): FILE the true name of the executable,
 TIME its modification time, so that a dbt replaced in place, or a link
 pointed at another, as an upgrade or a new profile does, is asked
-again.  The value is `yes', `no' or `timeout'.")
+again.  The value is `yes', `lacks', `no' or `timeout'.")
 
 (defvar dbt-project--probe-seconds 10
   "The seconds that dbt has to say whether it runs a command.")
@@ -85,8 +85,11 @@ again.  The value is `yes', `no' or `timeout'.")
   "Return what the dbt of `dbt-executable' answers about running COMMAND.
 That is `yes' when `dbt COMMAND --help' succeeds: dbt 2.0's proprietary
 build runs `lsp' and `format', which dbt-oss 2.0 and dbt Core 1.x lack;
-`no' when it fails; `timeout' when dbt does not answer within
-`dbt-project--probe-seconds', which a message says; nil without dbt.
+`lacks' when it fails as dbt 2 refuses a command it lacks, saying
+\"unrecognized subcommand\", as dbt-oss does, which dbt-lsp-plus asks
+too; `no' when it fails otherwise, as dbt Core 1.x does; `timeout' when
+dbt does not answer within `dbt-project--probe-seconds', which a
+message says; nil without dbt.
 The answer is kept for each command while the executable's file stays
 the same, as `dbt-project--commands' says, a timeout too, so that a dbt
 that hangs costs its wait once, not at each save or redisplay of a
@@ -96,21 +99,34 @@ runs."
     (with-memoization (gethash (let ((file (file-truename executable)))
                                  (list file (file-attribute-modification-time (file-attributes file)) command))
                                dbt-project--commands)
-      (let ((process (ignore-errors
-                       (make-process :name (format "dbt %s --help" command)
-                                     :command (list executable command "--help")
-                                     :connection-type 'pipe :noquery t)))
-            (deadline (+ (float-time) dbt-project--probe-seconds)))
+      (let* ((output "")
+             ;; Uncoloured, as dbt-lsp-plus asks: clap colours the name.
+             (process-environment (cons "NO_COLOR=1" (seq-remove (lambda (entry) (string-prefix-p "CLICOLOR_FORCE=" entry))
+                                                                 process-environment)))
+             (process (ignore-errors
+                        (make-process :name (format "dbt %s --help" command)
+                                      :command (list executable command "--help")
+                                      :connection-type 'pipe :noquery t
+                                      :filter (lambda (_process text) (setq output (concat output text))))))
+             (deadline (+ (float-time) dbt-project--probe-seconds)))
         (unwind-protect
             (progn
               (while (and (process-live-p process) (< (float-time) deadline))
                 (accept-process-output process 0.1))
+              ;; What dbt wrote before it exited, which its exit may outrun.
+              (accept-process-output process 0)
               (cond ((process-live-p process)
                      (message "dbt did not answer dbt %s --help within %s s: M-x dbt-format-buffer or M-x dbt-lsp asks again"
                               command dbt-project--probe-seconds)
                      'timeout)
-                    ((and process (eq (process-status process) 'exit) (eq 0 (process-exit-status process)))
+                    ;; A dbt that could not run says no.
+                    ((not process) 'no)
+                    ((eq 0 (process-exit-status process))
                      'yes)
+                    ;; clap's message, with which dbt 2 exits 2, as dbt-lsp-plus asks.
+                    ((and (eq 2 (process-exit-status process))
+                          (string-search (format "unrecognized subcommand '%s'" command) output))
+                     'lacks)
                     (t 'no)))
           ;; Also on a quit, as C-g in the first dispatch menu.
           (when process (delete-process process)))))))

@@ -52,26 +52,36 @@
 (require 'map)
 
 (defcustom dbt-lsp-arguments nil
-  "More arguments of `dbt lsp', such as (\"--profiles-dir\" \"/path\")."
+  "More arguments of `dbt lsp', such as (\"--profiles-dir\" \"/path\").
+dbt-lsp-plus alone, for dbt-oss, keeps only the profiles directory,
+profile, target, vars and packages' path, for its `dbt parse'."
   :type '(repeat string)
   :group 'dbt)
 
 (defcustom dbt-lsp-proxy nil
   "Whether dbt lsp runs through dbt-lsp-plus, when that executable exists.
 dbt-lsp-plus adds what dbt lsp lacks, such as the references of sources
-over the project; dbt-mode steps aside where it says that it answers."
+over the project; dbt-mode steps aside where it says that it answers.
+For dbt-oss, which runs no dbt lsp, dbt-lsp-plus then runs alone."
   :type 'boolean
   :group 'dbt)
 
 (defcustom dbt-lsp-enable-linter nil
-  "Whether the server lints the SQL, with dbt's built-in linter."
+  "Whether the server lints the SQL, with dbt's built-in linter.
+dbt lsp lints; dbt-lsp-plus alone does not."
   :type 'boolean
   :group 'dbt)
 
 (defun dbt-lsp-server-p ()
-  "Return non-nil when `dbt-executable' runs a language server, `dbt lsp'.
-Only dbt 2.0's proprietary build does, as `dbt-project-command-p' asks."
-  (dbt-project-command-p "lsp"))
+  "Return non-nil when dbt-mode runs a language server for `dbt-executable'.
+That is `dbt lsp', which only dbt 2.0's proprietary build runs, through
+dbt-lsp-plus with `dbt-lsp-proxy'; or, with `dbt-lsp-proxy' on and
+dbt-lsp-plus found, dbt-lsp-plus alone for a dbt 2 that lacks dbt lsp,
+such as dbt-oss, as the proxy decides by the same question.  A dbt
+Core 1.x, which refuses dbt lsp otherwise, or no dbt, gets none."
+  (pcase (dbt-project-command-answer "lsp")
+    ('yes t)
+    ('lacks (and dbt-lsp-proxy (executable-find "dbt-lsp-plus") t))))
 
 (defun dbt-lsp--command ()
   "Return the command line of the server, for the workspace being started.
@@ -95,6 +105,10 @@ it, as `dbt-lsp-plus -- COMMAND'."
                    (eq (lsp--client-server-id (lsp--workspace-client workspace)) 'dbt-lsp))
                  (lsp-workspaces))))
 
+(defvar dbt-lsp--hidden (make-hash-table :test #'eq :weakness 'key)
+  "From a workspace to the capabilities that `dbt-lsp--hide-formatting' hid.
+Each is a keyword of those it hides, which the server announced.")
+
 (defun dbt-lsp--hide-formatting (workspace)
   "Hide the formatting of the server of WORKSPACE from lsp-mode.
 The server formats the file on disk rather than the buffer, so lsp-mode
@@ -103,8 +117,10 @@ first.  Its code actions go too: it has one, which fixes lint issues
 and formats, also from the file on disk; `dbt-lsp-fix-all' saves first."
   ;; A key with a nil value would still mean support to lsp-mode: the keys
   ;; go.  They are strings in a hash table, keywords in a plist.
-  (let ((capabilities (lsp--workspace-server-capabilities workspace)))
-    (dolist (key '(:documentFormattingProvider :documentRangeFormattingProvider :codeActionProvider))
+  (let ((capabilities (lsp--workspace-server-capabilities workspace))
+        (keys '(:documentFormattingProvider :documentRangeFormattingProvider :codeActionProvider)))
+    (puthash workspace (seq-filter (lambda (key) (lsp-get capabilities key)) keys) dbt-lsp--hidden)
+    (dolist (key keys)
       (setq capabilities (map-delete capabilities (if (hash-table-p capabilities) (lsp-keyword->string key) key))))
     (setf (lsp--workspace-server-capabilities workspace) capabilities)))
 
@@ -163,14 +179,17 @@ included."
 ;;;###autoload
 (defun dbt-lsp ()
   "Start dbt lsp for the current buffer, on the root of its dbt project.
-A dbt that runs no server, such as dbt-oss, is an error.  A dbt that
-did not answer in time whether it runs one is asked again."
+Or dbt-lsp-plus alone, for dbt-oss, as `dbt-lsp-server-p' says.  A dbt
+with neither is an error.  A dbt that did not answer in time whether it
+runs one is asked again."
   (interactive)
   (dbt-project-ask-again "lsp")
-  (pcase (dbt-project-command-answer "lsp")
-    ('yes nil)
-    ('timeout (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
-    (_ (user-error "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does")))
+  (when (eq (dbt-project-command-answer "lsp") 'timeout)
+    (user-error "dbt did not answer dbt lsp --help in time: M-x dbt-lsp asks again"))
+  (unless (dbt-lsp-server-p)
+    (user-error (if (and dbt-lsp-proxy (eq (dbt-project-command-answer "lsp") 'lacks))
+                    "No dbt-lsp-plus on exec-path, which runs alone for this dbt"
+                  "This dbt runs no dbt lsp: only the proprietary build of dbt 2 does, or dbt-lsp-plus, with dbt-lsp-proxy on, for dbt-oss")))
   (dbt-lsp-add-project-folder)
   (lsp))
 
@@ -216,18 +235,47 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
           method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
 
+(defun dbt-lsp--project-workspace ()
+  "Return the workspace of dbt-lsp of the current project, or nil.
+That is the buffer's, else the one on its file or directory: from a
+buffer that the server does not serve, such as that of the lineage, the
+server of the project, not that of an enclosing project, as for the
+integration_tests of a package."
+  (or (dbt-lsp-workspace)
+      (when-let* ((root (dbt-project-root))
+                  (workspace (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory)))
+                  ((equal (lsp--workspace-root workspace) (lsp-f-canonical root))))
+        workspace)))
+
+(defun dbt-lsp-command-p (command)
+  "Return non-nil when the server of the project lists COMMAND.
+That is under executeCommandProvider: dbt lsp lists dbt.compileFile,
+dbt.show and dbt.listNodes; dbt-lsp-plus adds its own; alone, for a dbt
+that lacks dbt lsp, it lists only its own, and fails the others."
+  (when-let* ((workspace (dbt-lsp--project-workspace)))
+    (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities workspace) :executeCommandProvider)
+                             :commands)
+                    command)))
+
+(defun dbt-lsp-announced-p (&rest path)
+  "Return non-nil when the server of the buffer announced the capability at PATH.
+PATH is keywords, as :documentFormattingProvider, or :workspace
+:fileOperations :willRename; those that `dbt-lsp--hide-formatting' hid
+from lsp-mode count.  dbt lsp announces formatting, code actions and
+the rename of files; dbt-lsp-plus alone, none of them.  The server is
+the buffer's, as these act on the buffer's file."
+  (when-let* ((workspace (dbt-lsp-workspace)))
+    (or (memq (car path) (gethash workspace dbt-lsp--hidden))
+        (seq-reduce #'lsp-get path (lsp--workspace-server-capabilities workspace)))))
+
 (defun dbt-lsp--request (method params schema callback &optional failed)
   "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
 SCHEMA is as `dbt-lsp--conforms-p' takes it.  An answer that it does not
 fit, and an error, are said in a message instead, naming METHOD, or the
 command of a workspace/executeCommand; FAILED, a function of no
 argument, is then called."
-  ;; From a buffer the server does not serve, such as that of the
-  ;; lineage, the server of the project.
   (let ((name (if (equal method "workspace/executeCommand") (plist-get params :command) method))
-        (workspace (or (dbt-lsp-workspace)
-                       (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory))
-                       (user-error "No dbt lsp runs on this project"))))
+        (workspace (or (dbt-lsp--project-workspace) (user-error "No dbt lsp runs on this project"))))
     (with-lsp-workspace workspace
       ;; Unmerged, the answer of the one workspace asked: lsp-mode's
       ;; merging of answers would turn an array into a list.
@@ -244,35 +292,37 @@ argument, is then called."
                                           (message "dbt lsp: %s failed: %s" name (lsp-get error :message))
                                           (when failed (funcall failed)))))))
 
-(defun dbt-lsp--execute (command arguments schema callback)
+(defun dbt-lsp--execute (command arguments schema callback &optional failed)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
 CALLBACK receives the answer once the server gives it, if SCHEMA fits it,
 as `dbt-lsp--conforms-p' tells.  Otherwise, or when the answer is null
-or holds an error, a message says so."
+or holds an error, a message says so, and FAILED, a function of no
+argument, is then called, when given."
   (dbt-lsp--request "workspace/executeCommand" (list :command command :arguments (vconcat arguments))
                     `(or null (object (:error stringp)) ,schema)
                     (lambda (answer)
-                      (cond ((null answer) (message "dbt lsp: %s answered nothing" command))
-                            ((dbt-lsp--conforms-p answer '(object (:error stringp)))
-                             (message "dbt lsp: %s failed: %s" command (lsp-get answer :error)))
-                            (t (funcall callback answer))))))
+                      (if (and answer (not (dbt-lsp--conforms-p answer '(object (:error stringp)))))
+                          (funcall callback answer)
+                        (message "dbt lsp: %s %s" command
+                                 (if answer (format "failed: %s" (lsp-get answer :error)) "answered nothing"))
+                        (when failed
+                          (funcall failed))))
+                    failed))
 
 (defun dbt-lsp-node-info (id callback otherwise)
   "Give CALLBACK the node ID as dbt-lsp-plus knows it, else call OTHERWISE.
 When the server lists the command dbt-lsp-plus.nodeInfo, CALLBACK
 receives the node, a hash table, once the proxy answers; a null answer,
 no such node, and an error, such as -32803 until the proxy's first
-parse, are said as `dbt-lsp--execute' says them.  OTHERWISE, a function
-of no argument, is called when the server does not list the command, as
-dbt lsp alone."
-  (if (seq-contains-p (lsp-get (lsp-get (lsp--workspace-server-capabilities (dbt-lsp-workspace))
-                                         :executeCommandProvider)
-                                :commands)
-                      "dbt-lsp-plus.nodeInfo")
+parse or while its parse is refused, are said as `dbt-lsp--execute'
+says them.  OTHERWISE, a function of no argument, is called then, and
+when the server does not list the command, as dbt lsp alone."
+  (if (dbt-lsp-command-p "dbt-lsp-plus.nodeInfo")
       (dbt-lsp--execute "dbt-lsp-plus.nodeInfo" (list id) '(object)
                         ;; One shape whatever `lsp-use-plists' says, false
                         ;; read as nil, as lsp-mode reads it.
-                        (lambda (node) (funcall callback (json-parse-string (json-encode node) :null-object nil))))
+                        (lambda (node) (funcall callback (json-parse-string (json-encode node) :null-object nil)))
+                        otherwise)
     (funcall otherwise)))
 
 (defun dbt-lsp-compiled (callback)
@@ -475,7 +525,9 @@ of a model is not renamed, as the server would edit nothing."
   (interactive (list (read-string "Rename model to: " (file-name-base buffer-file-name))))
   (unless (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" name)
     (user-error "Not a name for a model: %s" name))
-  (unless (dbt-lsp-workspace)
+  ;; lsp-mode asks the server about the rename only when it says it
+  ;; answers, which dbt lsp does and dbt-lsp-plus alone does not.
+  (unless (dbt-lsp-announced-p :workspace :fileOperations :willRename)
     (user-error "No dbt lsp runs in this buffer"))
   (let* ((root (dbt-project-root))
          (entity (dbt-project-file-entity root buffer-file-name))
@@ -568,13 +620,17 @@ message."
   "Save the buffer, then fix its lint issues and format it with the server.
 dbt lsp 2.0.9 offers this whether or not `dbt-lsp-enable-linter' is on."
   (interactive)
-  (save-buffer)
-  (with-lsp-workspace (or (dbt-lsp-workspace) (user-error "No dbt lsp runs in this buffer"))
-    ;; Without its requirement, lsp-mode sends the method that
-    ;; `dbt-lsp--hide-formatting' hid, here only.
-    (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"
-                                                     (copy-alist lsp-method-requirements))))
-      (call-interactively #'lsp-fix-all))))
+  ;; dbt lsp offers code actions, and dbt-lsp-plus alone none.
+  (let ((workspace (if (dbt-lsp-announced-p :codeActionProvider)
+                       (dbt-lsp-workspace)
+                     (user-error "No dbt lsp runs in this buffer"))))
+    (save-buffer)
+    (with-lsp-workspace workspace
+      ;; Without its requirement, lsp-mode sends the method that
+      ;; `dbt-lsp--hide-formatting' hid, here only.
+      (let ((lsp-method-requirements (assoc-delete-all "textDocument/codeAction"
+                                                       (copy-alist lsp-method-requirements))))
+        (call-interactively #'lsp-fix-all)))))
 
 ;;;; The client
 

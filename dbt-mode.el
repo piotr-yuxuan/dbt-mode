@@ -99,6 +99,8 @@
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
 (declare-function dbt-lsp-hierarchy-p "dbt-lsp")
+(declare-function dbt-lsp-command-p "dbt-lsp")
+(declare-function dbt-lsp-announced-p "dbt-lsp")
 (declare-function dbt-lsp-hierarchy-lineage "dbt-lsp")
 
 ;;;; Faces
@@ -451,7 +453,7 @@ macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
 the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
 a request on a source, where it says so: the request goes to it."
   (and (dbt-project-root)
-       (or (not (dbt-mode-server-p))
+       (or (not (dbt-mode-dbt-lsp-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
            ;; call names is on the line of a snapshot block only: the
            ;; index is not read for the rest, which the server answers.
@@ -676,8 +678,29 @@ that other functions, such as those of a language server, still run."
 ;;;; Commands
 
 (defun dbt-mode-server-p ()
-  "Return non-nil when dbt lsp serves the current buffer."
+  "Return non-nil when a server of dbt-mode serves the current buffer.
+That is dbt lsp, through dbt-lsp-plus or not, or dbt-lsp-plus alone, for
+a dbt that lacks dbt lsp: what it answers, each feature asks, as
+`dbt-mode-server-command-p' does."
   (and (featurep 'dbt-lsp) (dbt-lsp-workspace)))
+
+(defun dbt-mode-server-command-p (command)
+  "Return non-nil when the server of the project lists the command COMMAND.
+As `dbt-lsp-command-p' says; nil while dbt-lsp.el is not loaded."
+  (and (featurep 'dbt-lsp) (dbt-lsp-command-p command)))
+
+(defun dbt-mode-server-announced-p (&rest path)
+  "Return non-nil when the server of the buffer announced the capability at PATH.
+As `dbt-lsp-announced-p' says; nil while dbt-lsp.el is not loaded."
+  (and (featurep 'dbt-lsp) (apply #'dbt-lsp-announced-p path)))
+
+(defun dbt-mode-dbt-lsp-p ()
+  "Return non-nil when dbt lsp serves the buffer, behind the proxy or not.
+Its server lists dbt.listNodes, which dbt lsp lists and dbt-lsp-plus
+alone does not: alone, the proxy fails what dbt lsp would answer, such
+as the references of a column.  dbt lsp serves no YAML file, though it
+runs on the project."
+  (and (dbt-mode-server-p) (dbt-mode-server-command-p "dbt.listNodes")))
 
 (defun dbt-mode--root ()
   "Return the root of the current project, or signal a `user-error'."
@@ -874,9 +897,10 @@ instead, as `dbt-visit-run' does."
   "Show the rows of the current model, of the SQL from START to END, or a CTE's.
 Interactively, START and END are those of the active region, and with a
 prefix argument, CTE is non-nil: the rows are those of the CTE around
-point, as `dbt-mode-cte-query' writes its query.  With dbt lsp, the
-server runs the query, on the compiled SQL for a CTE; otherwise `dbt
-show' runs it, on the Jinja of the CTE."
+point, as `dbt-mode-cte-query' writes its query.  With dbt lsp, whose
+server lists dbt.show, and dbt.compileFile for a CTE, the server runs
+the query, on the compiled SQL for a CTE; otherwise `dbt show' runs it,
+on the Jinja of the CTE."
   (interactive (cond (current-prefix-arg (list nil nil t))
                      ((use-region-p) (list (region-beginning) (region-end)))))
   ;; QUERY is the name of the rows and their SQL, or nil for the file's:
@@ -884,8 +908,11 @@ show' runs it, on the Jinja of the CTE."
   (let ((query (cond (cte (dbt-mode-cte-query))
                      (start (cons (format "%s/query" (file-name-base (buffer-name)))
                                   (buffer-substring-no-properties start end))))))
-    (cond (cte (funcall (if (dbt-mode-server-p) #'dbt-lsp-preview-cte #'dbt-cli-preview-cte) (car query)))
-          ((dbt-mode-server-p) (dbt-lsp-show (cdr query) (car query)))
+    (cond (cte (funcall (if (seq-every-p #'dbt-mode-server-command-p '("dbt.compileFile" "dbt.show"))
+                            #'dbt-lsp-preview-cte
+                          #'dbt-cli-preview-cte)
+                        (car query)))
+          ((dbt-mode-server-command-p "dbt.show") (dbt-lsp-show (cdr query) (car query)))
           (t (dbt-cli-show (or (car query)
                                (dbt-mode-resource-selector
                                 (or (dbt-mode-current-resource) (user-error "No model here"))))
@@ -935,7 +962,7 @@ preview's do."
                       (funcall side (or (dbt-project-default-target root) "the default target"))
                       (funcall side (file-name-nondirectory (directory-file-name state)))))
          (title (format "%s/diff" selector)))
-    (if (dbt-mode-server-p)
+    (if (dbt-mode-server-command-p "dbt.show")
         (dbt-lsp-show sql title)
       (dbt-cli-show title sql))))
 
@@ -947,7 +974,9 @@ entity of the index that SELECTOR names, settles which of namesakes it
 is.  With dbt-lsp-plus, its call hierarchy gives the lineage, one level
 at a time; with dbt lsp alone, the server's list of nodes; otherwise
 the `ref' and `source' calls of the project's files, read again when
-the lineage is asked for again."
+the lineage is asked for again.  For a node that the hierarchy has no
+item of, the list of nodes, else, as with dbt-lsp-plus alone, which
+lists no dbt.listNodes, the calls of the files."
   (interactive (list (dbt-mode-read-resource "Lineage of: ")))
   (require 'dbt-lineage)
   (let* ((root (dbt-mode--root))
@@ -956,19 +985,19 @@ the lineage is asked for again."
                      (car (dbt-project-resolve-ref root nil (car wanted) nil (cdr wanted)))
                      (user-error "No model, seed or snapshot %s" selector)))
          (id (dbt-project-node-id entity))
-         refresh)
-    (cond
-     ((and (dbt-mode-server-p) (dbt-lsp-hierarchy-p))
-      (dbt-lsp-hierarchy-lineage (plist-get entity :file) (plist-get entity :line) id
-                                 (lambda () (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))))
-     ((dbt-mode-server-p)
-      (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))
-     (t
-      (setq refresh (lambda ()
-                      (dbt-project-forget root)
-                      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))
-      ;; Read again on `g' only: the cached graph serves the first time.
-      (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh)))))
+         (listed (if (dbt-mode-server-command-p "dbt.listNodes")
+                     (lambda () (dbt-lsp-lineage (dbt-mode-resource-selector entity) id))
+                   (lambda ()
+                     (let (refresh)
+                       (setq refresh (lambda ()
+                                       (dbt-project-forget root)
+                                       (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls"
+                                                         refresh)))
+                       ;; Read again on `g' only: the cached graph serves the first time.
+                       (dbt-lineage-show root id (dbt-project-graph root) "ref and source calls" refresh))))))
+    (if (and (dbt-mode-server-p) (dbt-lsp-hierarchy-p))
+        (dbt-lsp-hierarchy-lineage (plist-get entity :file) (plist-get entity :line) id listed)
+      (funcall listed))))
 
 (defun dbt-insert-ref (selector)
   "Insert a call of `ref' to SELECTOR, read with completion.
@@ -1098,7 +1127,8 @@ A buffer saved meanwhile, as by a timer, is formatted as usual.")
 
 (defun dbt-format-buffer ()
   "Save the buffer, then format it.
-With dbt lsp, the server formats it as it answers, as
+With dbt lsp, which announces formatting, the server formats it as it
+answers, as
 `dbt-lsp-format-buffer' does, and leaves it modified.  Otherwise `dbt
 format' formats the saved file, and the buffer shows the result once
 dbt ends, unless it was modified meanwhile.  A dbt with neither, such
@@ -1108,7 +1138,7 @@ A dbt that did not answer in time whether it formats is asked again."
   (unless buffer-file-name
     (user-error "%s visits no file for dbt to format" (buffer-name)))
   (let ((dbt-mode--formatting (current-buffer)))
-    (if (dbt-mode-server-p)
+    (if (dbt-mode-server-announced-p :documentFormattingProvider)
         (dbt-lsp-format-buffer)
       (save-buffer)
       (dbt-project-ask-again "format")
@@ -1128,7 +1158,7 @@ format leaves it alone."
   (unless (eq dbt-mode--formatting (current-buffer))
     (let ((dbt-mode--formatting (current-buffer)))
       (condition-case err
-          (cond ((dbt-mode-server-p)
+          (cond ((dbt-mode-server-announced-p :documentFormattingProvider)
                  ;; The server answers later: the save that follows its
                  ;; edits formats nothing again.
                  (dbt-lsp-format-buffer (lambda ()
@@ -1162,7 +1192,7 @@ saves as they are too, as the message of the question says, until
         ;; proprietary build; dbt-oss has neither.
         (when-let* ((executable (executable-find dbt-executable))
                     ((not (member executable dbt-mode--told-cannot-format)))
-                    ((eq (dbt-project-command-answer "format") 'no)))
+                    ((memq (dbt-project-command-answer "format") '(no lacks))))
           (push executable dbt-mode--told-cannot-format)
           (message "This dbt cannot format, so saves stay as they are: dbt format comes with the proprietary build of dbt 2 (on dbt-oss, dbt system upgrade-distribution installs it)")))
     (remove-hook 'after-save-hook #'dbt-mode--format-after-save 'local)))
@@ -1222,10 +1252,11 @@ CTE rather than by statement."
     ["Close the Jinja block" dbt-close-block]
     ["Matching Jinja tag" dbt-jump-to-matching-tag]
     "---"
-    ["Rename model..." dbt-lsp-rename-model :active (dbt-mode-server-p)]
+    ["Rename model..." dbt-lsp-rename-model
+     :active (dbt-mode-server-announced-p :workspace :fileOperations :willRename)]
     ["Format buffer" dbt-format-buffer]
     ["Format on save" dbt-format-on-save-mode :style toggle :selected dbt-format-on-save-mode]
-    ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-p)]
+    ["Fix lint issues" dbt-lsp-fix-all :active (dbt-mode-server-announced-p :codeActionProvider)]
     ["Reread the project" dbt-project-forget]))
 
 (defvar dbt-mode-imenu-generic-expression

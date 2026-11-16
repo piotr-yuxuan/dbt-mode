@@ -193,7 +193,8 @@ changed.
 
 With dbt 2's proprietary build (`dbt lsp`), `dbt-lsp-deferred` starts the
 server through lsp-mode, which then gives the following; with `dbt-oss`
-it starts nothing, and `M-x dbt-lsp` says why:
+it starts dbt-lsp-plus alone when `dbt-lsp-proxy` is on and dbt-lsp-plus
+is installed (below), and otherwise nothing, and `M-x dbt-lsp` says why:
 
 - definitions of what dbt-mode does not resolve, such as dbt's own macros:
   on a `ref`, a source, a doc or a macro of the project or its packages,
@@ -236,6 +237,22 @@ server on that folder stops; a `.dir-locals.el` at the workspace's root
 that sets the option for every mode replaces the whole list, these
 regexps included; a `DBT_TARGET_PATH` or `DBT_LOG_PATH` elsewhere in
 the project is still watched.
+
+With `dbt-oss` and `dbt-lsp-proxy` on, dbt-lsp-plus runs alone, without
+`dbt lsp`, from the files and from its own `dbt parse`, run offline. It
+answers `M-.` and `M-?` on sources, the lineage of `C-c C-g` from its
+call hierarchy, `C-c C-o`, the document symbols of the breadcrumbs, and,
+once it has parsed, hover, inlay hints, the parse's problems and the
+last run's results as diagnostics. The rest stays dbt-mode's, as
+without a server: `C-c C-p` and the data diff ask `dbt show`, `C-c C-v`
+reads what `dbt compile` wrote, `M-.` and `M-?` answer the rest, `C-c
+C-o` reads the manifest while the proxy has not parsed, and eldoc reads
+it always; `dbt-oss` cannot format, and renaming a model or fixing lint
+issues needs `dbt lsp`. Alone, the proxy keeps of `dbt-lsp-arguments`
+only the profiles directory, profile, target, vars and packages' path,
+`dbt-lsp-enable-linter` does nothing, and the mode line says nothing
+while it parses. dbt Core 1.x, which refuses `dbt lsp` otherwise than
+dbt 2 does, gets no server.
 
 ## Keys
 
