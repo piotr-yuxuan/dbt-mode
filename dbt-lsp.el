@@ -242,8 +242,9 @@ buffer that the server does not serve, such as that of the lineage, the
 server of the project, not that of an enclosing project, as for the
 integration_tests of a package."
   (or (dbt-lsp-workspace)
-      (when-let* ((workspace (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory)))
-                  ((equal (lsp--workspace-root workspace) (lsp-f-canonical (or (dbt-project-root) "")))))
+      (when-let* ((root (dbt-project-root))
+                  (workspace (lsp-find-workspace 'dbt-lsp (or buffer-file-name default-directory)))
+                  ((equal (lsp--workspace-root workspace) (lsp-f-canonical root))))
         workspace)))
 
 (defun dbt-lsp-command-p (command)

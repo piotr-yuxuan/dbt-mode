@@ -143,6 +143,22 @@ So it does not load dbt-cli, with transient and compile."
                        (directory-file-name nested)))
         (should (equal (lsp--workspace-root (dbt-lsp-workspace)) (lsp-f-canonical nested)))))))
 
+(ert-deftest dbt-lsp-asks-a-nested-project-s-own-server ()
+  "From a buffer that no server serves, as the lineage's, the server asked is the project's, not an enclosing project's.
+A package's integration_tests is a project of its own."
+  (dbt-lsp-test-with-server root nil
+    (let ((nested (expand-file-name "integration_tests/" root)))
+      (make-directory nested t)
+      (with-temp-file (expand-file-name "dbt_project.yml" nested)
+        (insert "name: 'shop_tests'\nprofile: 'shop'\n"))
+      (with-temp-buffer
+        (setq default-directory root)
+        (should (eq (dbt-lsp--project-workspace) (with-current-buffer (get-file-buffer (expand-file-name "models/marts/orders.sql" root))
+                                                    (dbt-lsp-workspace))))
+        (setq default-directory nested)
+        (should-not (dbt-lsp--project-workspace))
+        (should-not (dbt-lsp-command-p "dbt.show"))))))
+
 (ert-deftest dbt-lsp-runs-a-server-for-each-project-of-a-repository ()
   "Two dbt projects of a repository get a server each, though lsp-mode guesses roots."
   (dbt-lsp-test-with-server root nil
