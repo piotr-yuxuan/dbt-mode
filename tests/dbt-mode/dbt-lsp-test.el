@@ -901,13 +901,27 @@ with m, and RET visits it at its line; + asks one level more."
       (dbt-test-wait (lambda () (member '("downstream" "3" "model" "customer_ltv" "") (dbt-test-lineage-rows))))
       (should (equal (car (last (dbt-lsp-test-calls))) '("callHierarchy/incomingCalls" "model.shop.customers"))))))
 
+(ert-deftest dbt-lsp-lineage-goes-on-past-a-call-that-fails ()
+  "A call of a level that fails is said, and the other calls of the level go on.
+The calls of orders fail, so customers is missing; those of
+orders_snapshot give snapshot_report, at the second level."
+  (dbt-lsp-test-with-server root
+      (append `(("$errors" . (("callHierarchy/incomingCalls model.shop.orders"
+                               . ((code . -32603) (message . "No graph yet")))))
+                ("callHierarchy/incomingCalls snapshot.shop.orders_snapshot"
+                 . [(:from ,(dbt-lsp-test-item root "model.shop.snapshot_report" "models/marts/snapshot_report.sql")
+                           :fromRanges [])]))
+              (dbt-lsp-test-hierarchy root))
+    (dbt-lineage "stg_orders")
+    (dbt-lsp-test-message "dbt lsp: callHierarchy/incomingCalls failed: No graph yet")
+    (with-current-buffer (dbt-test-wait (lambda () (get-buffer "*dbt lineage: stg_orders*")))
+      (dbt-test-wait (lambda () (member '("downstream" "2" "model" "snapshot_report" "") (dbt-test-lineage-rows))))
+      (should-not (member "customers" (mapcar (lambda (row) (nth 3 row)) (dbt-test-lineage-rows)))))))
+
 (ert-deftest dbt-lsp-lineage-says-why-the-call-hierarchy-shows-nothing ()
-  "A call that fails, an answer that dbt-mode cannot read, and no item of the node, say so.
+  "An answer that dbt-mode cannot read, and no item of the node, say so.
 Without the node's item, no lineage shows."
-  (dolist (case (list (list '(("$errors" . (("callHierarchy/incomingCalls model.shop.stg_orders"
-                                              . ((code . -32603) (message . "No graph yet"))))))
-                            "dbt lsp: callHierarchy/incomingCalls failed: No graph yet")
-                      (list '(("callHierarchy/outgoingCalls model.shop.stg_orders" . [((to . 3))]))
+  (dolist (case (list (list '(("callHierarchy/outgoingCalls model.shop.stg_orders" . [((to . 3))]))
                             "dbt lsp: callHierarchy/outgoingCalls answered what dbt-mode cannot read")
                       (list '(("textDocument/prepareCallHierarchy" . []))
                             (concat "dbt lsp: textDocument/prepareCallHierarchy gives no item of "

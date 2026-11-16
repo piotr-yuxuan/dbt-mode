@@ -187,11 +187,12 @@ experimental.dbtLspPlus of its capabilities, such as :references or
   (format "dbt lsp: %s answered what dbt-mode cannot read: %s"
           method (truncate-string-to-width (json-encode answer) 200 nil nil "...")))
 
-(defun dbt-lsp--request (method params schema callback)
+(defun dbt-lsp--request (method params schema callback &optional failed)
   "Ask the server METHOD with PARAMS; give CALLBACK the answer SCHEMA fits.
 SCHEMA is as `dbt-lsp--conforms-p' takes it.  An answer that it does not
 fit, and an error, are said in a message instead, naming METHOD, or the
-command of a workspace/executeCommand."
+command of a workspace/executeCommand; FAILED, a function of no
+argument, is then called."
   ;; From a buffer the server does not serve, such as that of the
   ;; lineage, the server of the project.
   (let ((name (if (equal method "workspace/executeCommand") (plist-get params :command) method))
@@ -206,11 +207,13 @@ command of a workspace/executeCommand."
                            (let ((answer (cdar answers)))
                              (if (dbt-lsp--conforms-p answer schema)
                                  (funcall callback answer)
-                               (message "%s" (dbt-lsp--unreadable name answer)))))
+                               (message "%s" (dbt-lsp--unreadable name answer))
+                               (when failed (funcall failed)))))
                          :mode 'detached
                          :no-merge t
                          :error-handler (lambda (error)
-                                          (message "dbt lsp: %s failed: %s" name (lsp-get error :message)))))))
+                                          (message "dbt lsp: %s failed: %s" name (lsp-get error :message))
+                                          (when failed (funcall failed)))))))
 
 (defun dbt-lsp--execute (command arguments schema callback)
   "Ask the server to run COMMAND with ARGUMENTS, a list, and call CALLBACK.
@@ -380,11 +383,16 @@ downstream, one level at a time, as `dbt-lineage-show' asks them."
                          :package (nth 1 (split-string id "\\.")) :file (and (file-regular-p path) path)
                          :line (1+ (lsp-get (lsp-get (lsp-get item :range) :start) :line))))))
          (calls (lambda (ids direction callback)
-                  (pcase-let ((`(,method ,key) (if (eq direction 'upstream)
-                                                   '("callHierarchy/outgoingCalls" :to)
-                                                 '("callHierarchy/incomingCalls" :from)))
-                              (left (length ids))
-                              (found nil))
+                  (pcase-let* ((`(,method ,key) (if (eq direction 'upstream)
+                                                    '("callHierarchy/outgoingCalls" :to)
+                                                  '("callHierarchy/incomingCalls" :from)))
+                               (left (length ids))
+                               (found nil)
+                               ;; Once each node of the level answered, or
+                               ;; failed, as said: the others go on.
+                               (done (lambda ()
+                                       (when (zerop (setq left (1- left)))
+                                         (funcall callback (nreverse found))))))
                     (dolist (asked ids)
                       (let ((default-directory root))
                         (dbt-lsp--request
@@ -397,8 +405,8 @@ downstream, one level at a time, as `dbt-lineage-show' asks them."
                                          (list other asked (plist-get other :id))
                                        (list other (plist-get other :id) asked))
                                      found)))
-                           (when (zerop (setq left (1- left)))
-                             (funcall callback (nreverse found)))))))))))
+                           (funcall done))
+                         done)))))))
     (dbt-lsp--request
      "textDocument/prepareCallHierarchy"
      (list :textDocument (list :uri (lsp--path-to-uri file)) :position (list :line (1- line) :character 0))
