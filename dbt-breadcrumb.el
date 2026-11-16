@@ -34,7 +34,7 @@ that hold point, each after \" > \".")
   "Point and the buffer's modification count when the line was computed.")
 
 (defconst dbt-breadcrumb--construct
-  '(:eval (cond ((and (bound-and-true-p lsp-mode) (lsp-feature? "textDocument/documentSymbol")) nil)
+  '(:eval (cond ((and (dbt-mode-server-p) (dbt-lsp-symbols-p)) nil)
                 ;; lsp-mode's line, before this one, names the place.
                 ((bound-and-true-p lsp-headerline-breadcrumb-mode) (cdr dbt-breadcrumb--line))
                 (t (concat (car dbt-breadcrumb--line) (cdr dbt-breadcrumb--line)))))

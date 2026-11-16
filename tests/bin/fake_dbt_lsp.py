@@ -45,6 +45,8 @@ CAPABILITIES = {
     },
     "definitionProvider": True,
     "documentFormattingProvider": True,
+    # Announced as false, which lsp-mode takes for support all the same.
+    "documentSymbolProvider": False,
     "executeCommandProvider": {
         "commands": ["dbt.listNodes", "dbt.compileFile", "dbt.show"]
     },

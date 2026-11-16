@@ -360,6 +360,14 @@ dbt-lsp-plus does; dbt lsp alone does not."
   (let ((workspace (dbt-lsp-workspace)))
     (and workspace (lsp-get (lsp--workspace-server-capabilities workspace) :callHierarchyProvider))))
 
+(defun dbt-lsp-symbols-p ()
+  "Return non-nil when the server of the buffer announces document symbols.
+dbt-lsp-plus does; dbt lsp alone announces false, which `lsp-feature?'
+takes for support all the same, as it reads false as nil and a nil
+option as support."
+  (let ((workspace (dbt-lsp-workspace)))
+    (and workspace (lsp-get (lsp--workspace-server-capabilities workspace) :documentSymbolProvider))))
+
 (defconst dbt-lsp--item
   '(object (:name stringp) (:uri stringp) (:range (object (:start (object (:line natnump)))))
            (:data (object (:uniqueId stringp) (:resourceType stringp))))
