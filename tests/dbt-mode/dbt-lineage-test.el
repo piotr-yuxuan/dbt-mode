@@ -265,6 +265,29 @@ The answers that they ask are given in turn."
       (should (equal header-line-format " Lineage of f, to depth 1"))
       (kill-buffer))))
 
+(ert-deftest dbt-lineage-asks-no-level-again-while-it-is-asked ()
+  "+ while a level is asked asks it no more: its answer asks the next level, as deep as shown."
+  (let ((asked (list nil))
+        (pending (list nil)))
+    (dbt-lineage-show "/" "model.p.f" (list (list :id "model.p.f" :name "f" :type 'model)) "a test" #'ignore
+                      (dbt-test-level-calls dbt-test-levels asked pending))
+    ;; The first level only, which asks the second.
+    (let ((first (reverse (car pending))))
+      (setcar pending nil)
+      (mapc #'funcall first))
+    (save-window-excursion
+      (switch-to-buffer "*dbt lineage: f*")
+      (should (equal (length (car asked)) 4))
+      (execute-kbd-macro (kbd "+"))
+      (should (equal (length (car asked)) 4))
+      (dbt-test-answer-pending pending)
+      (should (equal (reverse (car asked))
+                     '((upstream "model.p.f") (downstream "model.p.f")
+                       (upstream "seed.p.s" "macro.p.m") (downstream "model.p.a" "model.p.b" "model.p.c")
+                       (upstream "macro.p.n") (downstream "model.p.d"))))
+      (should (equal header-line-format " Lineage of f, to depth 3"))
+      (kill-buffer))))
+
 (ert-deftest dbt-lineage-drops-the-answers-of-a-level-asked-again ()
   "Asked again before its answers come, the lineage keeps the answers of the last asking only.
 The first asking would have found a seed old upstream."

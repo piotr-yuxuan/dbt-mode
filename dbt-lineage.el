@@ -93,8 +93,11 @@ Nil in a direction that has no level left to ask.")
 (defvar-local dbt-lineage--asked nil
   "The number of levels asked of the server, by direction.")
 
+(defvar-local dbt-lineage--walk nil
+  "The token of this buffer's walk: only the answers of its last walk count.")
+
 (defvar-local dbt-lineage--asking nil
-  "The token of the last asking, by direction: only its answer counts.")
+  "The directions whose next level is asked, its answer not come yet.")
 
 (defvar-local dbt-lineage--stops nil
   "Where and why the lineage asks no further, a list of sentences.")
@@ -183,25 +186,26 @@ Point goes to the first line of that node while the tree shows it."
   "Ask the server for the next level of this buffer's lineage in DIRECTION.
 Only while the lineage shows deeper than it asked in DIRECTION.  A level
 of more nodes than `dbt-lineage-level-limit' is not asked: the lineage
-stops there in DIRECTION, as its header line says.  The answer draws the
-lineage again and asks the next level, unless the lineage was asked
-again in DIRECTION since: it then counts for nothing."
+stops there in DIRECTION, as its header line says.  A level already
+asked is not asked again: its answer draws the lineage again and asks
+the next level, unless the lineage was shown anew since, which makes it
+count for nothing."
   (let ((buffer (current-buffer))
         (ids (alist-get direction dbt-lineage--frontier))
         (asked (alist-get direction dbt-lineage--asked 0))
-        (token (list direction)))
-    (when (and ids (< asked (or dbt-lineage--depth 0)))
+        (walk dbt-lineage--walk))
+    (when (and ids (not (memq direction dbt-lineage--asking)) (< asked (or dbt-lineage--depth 0)))
       (if (> (length ids) dbt-lineage-level-limit)
           (setf (alist-get direction dbt-lineage--frontier) nil
                 dbt-lineage--stops (cons (format "%s stops at depth %d: its %d nodes are more than dbt-lineage-level-limit, %d"
                                                  direction asked (length ids) dbt-lineage-level-limit)
                                          dbt-lineage--stops))
-        (setf (alist-get direction dbt-lineage--asking) token)
+        (push direction dbt-lineage--asking)
         (funcall dbt-lineage--calls ids direction
                  (lambda (calls)
-                   (when (and (buffer-live-p buffer)
-                              (eq token (alist-get direction (buffer-local-value 'dbt-lineage--asking buffer))))
+                   (when (and (buffer-live-p buffer) (eq walk (buffer-local-value 'dbt-lineage--walk buffer)))
                      (with-current-buffer buffer
+                       (setq dbt-lineage--asking (delq direction dbt-lineage--asking))
                        (let (reached)
                          (pcase-dolist (`(,node ,child ,parent) calls)
                            (unless (gethash (plist-get node :id) dbt-lineage--by-id)
@@ -329,6 +333,7 @@ lineage is asked to the depth shown, two levels at least."
             dbt-lineage--calls calls
             dbt-lineage--frontier (and calls (list (list 'upstream id) (list 'downstream id)))
             dbt-lineage--asked nil
+            dbt-lineage--walk (list id)
             dbt-lineage--asking nil
             dbt-lineage--stops nil
             dbt-lineage--depth (if calls (max 2 (or dbt-lineage--depth (dbt-lineage--deepest))) dbt-lineage--depth))
