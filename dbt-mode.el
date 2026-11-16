@@ -510,7 +510,15 @@ a model, YAML properties, a singular test."
              (xref-make-file-location (plist-get entity :file) (plist-get entity :line) 0)))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
-  "Return the definitions of IDENTIFIER.
+  "Return the definitions of IDENTIFIER, the one dbt takes first.
+For a `ref', a `source' or a `doc' at point, when dbt takes the
+project's definition, it is the only one, as dbt takes it from every
+caller.  Another definition that dbt takes is listed with the others:
+dbt skips a package's model that the project disables to override it,
+which the index does not read, and resolves a call in a macro from the
+node that calls the macro.  An identifier typed at a prompt is no call,
+and lists every definition.
+
 When IDENTIFIER names a package of the project that lacks the name, and
 other packages define it, signal an error that names them, as for a root
 YAML entry of a package's model, which dbt reads as unused.  xref's
@@ -530,7 +538,12 @@ resolve."
                 (elsewhere (dbt-mode-definitions (plist-put (copy-sequence target) :qualifier nil))))
       (user-error "No %s in package %s, only in %s" (dbt-mode-resource-selector target) package
                   (string-join (delete-dups (mapcar (lambda (entity) (plist-get entity :package)) elsewhere)) ", ")))
-    (mapcar #'dbt-mode--xref definitions)))
+    (mapcar #'dbt-mode--xref
+            (if (and (memq (plist-get target :kind) '(ref source doc))
+                     (equal (plist-get (car definitions) :package) (dbt-project-name (dbt-project-root)))
+                     (equal identifier (xref-backend-identifier-at-point 'dbt)))
+                (list (car definitions))
+              definitions))))
 
 (cl-defmethod xref-backend-references ((_backend (eql dbt)) identifier)
   "Return the uses of IDENTIFIER in the project and its packages.
