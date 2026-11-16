@@ -913,11 +913,12 @@ of their own, as dbt requires.  shop_utils's model pkg_calls and the
 project's model calls are empty; shop_utils's macro pkg_macro and the
 project's macro project_macro are too, and so are shop_utils's singular
 test pkg_test, its generic test pkg_check and its materialization
-pkg_view."
+pkg_view.  The project's snapshots/two.sql defines snap_a and snap_b,
+its snapshots/_snapshots.yml snap_c and snap_d."
   (dolist (directory '("dbt_packages/shop_utils/models" "dbt_packages/shop_utils/tests" "dbt_packages/a_utils/models"))
     (make-directory (expand-file-name directory root) t))
   (pcase-dolist (`(,file . ,text)
-                 '(("packages.yml" . "packages:\n  - local: dbt_packages/a_utils\n  - local: dbt_packages/shop_utils\n")
+                 `(("packages.yml" . "packages:\n  - local: dbt_packages/a_utils\n  - local: dbt_packages/shop_utils\n")
                    ("dbt_packages/a_utils/dbt_project.yml" . "name: 'a_utils'\nversion: '1.0.0'\nconfig-version: 2\n")
                    ("dbt_packages/shop_utils/models/util.sql" . "select 1 as id\n")
                    ("dbt_packages/shop_utils/models/stg_orders.sql"
@@ -931,7 +932,13 @@ pkg_view."
                    ("dbt_packages/shop_utils/tests/pkg_test.sql" . "")
                    ("dbt_packages/shop_utils/macros/pkg_generic.sql" . "{% test pkg_check(model) %}\n{% endtest %}\n")
                    ("dbt_packages/shop_utils/macros/pkg_materialization.sql"
-                    . "{% materialization pkg_view, default %}\n{% endmaterialization %}\n")))
+                    . "{% materialization pkg_view, default %}\n{% endmaterialization %}\n")
+                   ("snapshots/two.sql"
+                    . ,(concat "{% snapshot snap_a %}\nselect 1 as id\n{% endsnapshot %}\n"
+                               "{% snapshot snap_b %}\nselect 1 as id\n{% endsnapshot %}\n"))
+                   ("snapshots/_snapshots.yml"
+                    . ,(concat "snapshots:\n  - name: snap_c\n    relation: ref('stg_orders')\n"
+                               "  - name: snap_d\n    relation: ref('stg_orders')\n"))))
     (write-region text nil (expand-file-name file root))))
 
 (ert-deftest dbt-mode-inserts-the-ref-that-dbt-takes-from-a-package ()
@@ -962,6 +969,7 @@ does, not the model itself."
                        ("dbt_packages/shop_utils/tests/pkg_test.sql" "util" "{{ ref('util') }}")
                        ("dbt_packages/shop_utils/models/util.sql" "util" "{{ ref('a_utils', 'util') }}")
                        ("models/staging/stg_orders.sql" "stg_orders" "{{ ref('shop_utils', 'stg_orders') }}")
+                       ("snapshots/two.sql" "snap_b" "{{ ref('snap_b') }}")
                        (nil "stg_orders" "{{ ref('stg_orders') }}")
                        (nil "only_in_a" "{{ ref('a_utils', 'only_in_a') }}")))
         (if file
@@ -976,13 +984,18 @@ does, not the model itself."
         (insert "\n")
         (execute-kbd-macro (kbd (format "C-c C-e %s RET" name)))
         (should (equal (buffer-substring-no-properties (line-beginning-position) (point)) call)))
+      ;; The snapshots that a YAML file defines are none of its own.
+      (switch-to-buffer (dbt-test-visit root "snapshots/_snapshots.yml"))
+      (goto-char (point-max))
+      (execute-kbd-macro (kbd "M-x dbt-insert-ref RET snap_d RET"))
+      (should (looking-back "^{{ ref('snap_d') }}" (line-beginning-position)))
       ;; A call at point is no resource of the buffer's own: nothing to leave out.
-      (with-current-buffer "*dbt no file*"
-        (erase-buffer)
-        (insert "{{ ref('stg_orders') }}")
-        (goto-char 4)
-        (execute-kbd-macro (kbd "C-c C-e stg_orders RET"))
-        (should (equal (buffer-string) "{{ ref('stg_orders')ref('stg_orders') }}")))
+      (switch-to-buffer "*dbt no file*")
+      (erase-buffer)
+      (insert "{{ ref('stg_orders') }}")
+      (goto-char 4)
+      (execute-kbd-macro (kbd "C-c C-e stg_orders RET"))
+      (should (equal (buffer-string) "{{ ref('stg_orders')ref('stg_orders') }}"))
       (kill-buffer "*dbt no file*"))))
 
 (ert-deftest dbt-mode-live-inserts-the-refs-that-dbt-takes-from-a-package ()

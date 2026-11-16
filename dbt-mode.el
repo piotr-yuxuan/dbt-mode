@@ -951,9 +951,10 @@ offers that package's models."
          (caller (dbt-mode-caller root))
          (wanted (dbt-mode-parse-selector selector))
          ;; Not `dbt-mode-current-resource', which is the call at point
-         ;; in a file that defines no resource.
-         (entity (or (car (seq-remove (lambda (entity) (equal (plist-get entity :file) buffer-file-name))
-                                      (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
+         ;; in a file that defines no resource, nor every resource of the
+         ;; file, which may define several snapshots.
+         (entity (or (car (remove (and buffer-file-name (dbt-project-file-entity root buffer-file-name))
+                                  (dbt-project-resolve-ref root nil (car wanted) caller (cdr wanted))))
                      (user-error "No model, seed or snapshot `%s' but this one" selector)))
          ;; Probed on both builds: ref('util') in a package's macro is
          ;; ambiguous when a project's model calling the macro resolves
