@@ -355,9 +355,9 @@ dbt-lsp-plus alone lists no dbt.listNodes, which dbt lsp alone answers."
 
 (ert-deftest dbt-lsp-alone-leaves-xref-and-eldoc-to-dbt-mode ()
   "With dbt-lsp-plus alone, M-. and M-? stay dbt-mode's where dbt lsp would answer, and eldoc speaks.
-dbt-lsp-plus alone fails references off a source, as on a column, and
-hovers only once it has an index; a source stays the proxy's, where it
-says it answers it."
+dbt-lsp-plus alone fails references on a column, which it does not
+claim, and hovers only once it has an index; a source is the proxy's,
+where it says it answers it."
   (dbt-lsp-test-alone root nil
     (dbt-test-goto "customers.first_name")
     (should (eq (xref-find-backend) 'dbt))
@@ -375,7 +375,7 @@ says it answers it."
     (goto-char (point-max))
     (insert "\n{{ source('raw', 'raw_orders') }}")
     (dbt-test-goto "raw_orders')")
-    (should (dbt-mode--proxy-answers-p :references (xref-backend-identifier-at-point 'dbt)))))
+    (should (dbt-mode--proxy-position :references (xref-backend-identifier-at-point 'dbt)))))
 
 (ert-deftest dbt-lsp-alone-refuses-what-only-dbt-lsp-does ()
   "With dbt-lsp-plus alone, C-c C-q asks dbt format, which dbt-oss lacks; renaming a model and fixing lint issues say that no dbt lsp runs.
@@ -704,7 +704,9 @@ Choosing the server reads nothing of the project."
       (should (eq (xref-find-backend) 'dbt))
       (should (equal (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root))
                              (xref-backend-definitions 'dbt (xref-backend-identifier-at-point 'dbt)))
-                     '("models/staging/stg_orders.sql"))))))
+                     '("models/staging/stg_orders.sql")))
+      ;; dbt lsp alone announces no flag of dbt-lsp-plus.
+      (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))))
 
 (ert-deftest dbt-lsp-leaves-sources-to-the-proxy-when-it-says-so ()
   "With dbt-lsp-plus listing sources for a request, that request on a source is the server's.
@@ -719,7 +721,8 @@ after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
     (unwind-protect
         (progn
           (dbt-lsp-test-with-server root
-              `(("$experimental" . (:dbtLspPlus (:version 1 :references ["source"] :rename ["source"])))
+              `(("$experimental" . (:dbtLspPlus (:version 2 :references (:source ["sql" "yaml" "python"])
+                                                 :rename (:source ["sql" "yaml" "python"]))))
                 ("textDocument/references"
                  . [(:uri ,(lsp--path-to-uri (expand-file-name "models/marts/customers.sql" root))
                           :range (:start (:line 0 :character 0) :end (:line 0 :character 1)))]))
@@ -755,7 +758,7 @@ after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
             (should (= 1 (seq-count (lambda (method) (equal method "textDocument/references")) (dbt-lsp-test-methods))))
             (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))
           (dbt-lsp-test-with-server root
-              `(("$experimental" . (:dbtLspPlus (:version 1 :definition ["source"])))
+              `(("$experimental" . (:dbtLspPlus (:version 2 :definition (:source ["sql" "yaml" "python"]))))
                 ("textDocument/definition"
                  . [(:uri ,(lsp--path-to-uri (expand-file-name "models/staging/_sources.yml" root))
                           :range (:start (:line 7 :character 8) :end (:line 7 :character 18)))]))
@@ -771,6 +774,239 @@ after --, when `dbt-lsp-proxy' is on, and dbt as found on `exec-path'."
                   (exec-path (cons (file-name-directory dbt-lsp-test-dbt) exec-path)))
               (should (equal (seq-take (dbt-lsp--command) 3) (list "dbt-lsp-plus" "--" dbt-lsp-test-dbt))))))
       (delete-directory bin t))))
+
+(defconst dbt-lsp-test-flag
+  '(:version 2
+    :definition (:source ["sql" "yaml" "python"] :ref ["yaml"] :doc ["yaml"] :entry ["yaml"] :test ["yaml"])
+    :references (:source ["sql" "yaml" "python"])
+    :rename (:source ["sql" "yaml" "python"] :cte ["sql"]))
+  "experimental.dbtLspPlus as dbt-lsp-plus announces it in front of dbt lsp, at version 2.
+As its plan 017 announced it on 2026-11-16: each kind of target that it
+answers itself, with the places, by type of file, where it answers it.")
+
+(defun dbt-lsp-test-position (root file text &optional offset)
+  "Return the URI of FILE, under ROOT, and the position of TEXT in its saved text.
+That is (URI LINE CHARACTER), from 0, of the first TEXT, OFFSET
+characters on; CHARACTER counts characters."
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8))
+      (insert-file-contents (expand-file-name file root)))
+    (dbt-test-goto text offset)
+    (list (lsp--path-to-uri (expand-file-name file root)) (1- (line-number-at-pos)) (- (point) (line-beginning-position)))))
+
+(defun dbt-lsp-test-requests (method)
+  "Return the position of each METHOD request that the scripted server received.
+Each is (URI LINE CHARACTER), as `dbt-lsp-test-position' gives it."
+  (mapcar (lambda (message)
+            (let ((params (plist-get message :params)))
+              (list (plist-get (plist-get params :textDocument) :uri)
+                    (plist-get (plist-get params :position) :line)
+                    (plist-get (plist-get params :position) :character))))
+          (seq-filter (lambda (message) (equal (plist-get message :method) method)) (dbt-lsp-test-received))))
+
+(defun dbt-lsp-test-xref (action)
+  "Do ACTION in the current buffer, and return the files of what xref then shows.
+ACTION is keys, such as \"M-.\", or a function of no argument, done at
+point, which a window that showed the buffer before does not move.
+Each file is relative to the project's root."
+  (let* ((root (dbt-project-root))
+         (position (point))
+         shown
+         (xref-show-xrefs-function (lambda (fetcher _alist) (setq shown (funcall fetcher))))
+         (xref-show-definitions-function xref-show-xrefs-function))
+    (save-window-excursion
+      (switch-to-buffer (current-buffer))
+      (goto-char position)
+      (if (stringp action) (execute-kbd-macro (kbd action)) (funcall action)))
+    (mapcar (lambda (item) (file-relative-name (xref-location-group (xref-item-location item)) root)) shown)))
+
+(defun dbt-lsp-test-declarations ()
+  "Return whether each references request that the scripted server received asked for the declaration.
+That is t, or :false as JSON's false reads."
+  (mapcar (lambda (message) (plist-get (plist-get (plist-get message :params) :context) :includeDeclaration))
+          (seq-filter (lambda (message) (equal (plist-get message :method) "textDocument/references"))
+                      (dbt-lsp-test-received))))
+
+(ert-deftest dbt-lsp-leaves-to-the-proxy-what-it-answers-in-yaml ()
+  "In a YAML file, M-. and M-? on a target of a kind that dbt-lsp-plus lists at yaml are the project's server's.
+The request names the YAML file, which lsp-mode does not serve, and the
+start of the target's name, wherever point is on it: a doc, an entry's
+name, a ref, a versioned ref, a table's name.  M-? asks for the
+declaration too, unless `lsp-references-exclude-declaration' says not
+to, as lsp-mode does."
+  (dbt-lsp-test-with-server root
+      `(("$experimental" . (:dbtLspPlus ,dbt-lsp-test-flag))
+        ("textDocument/definition"
+         . (:uri ,(lsp--path-to-uri (expand-file-name "models/docs.md" root))
+                 :range (:start (:line 0 :character 8) :end (:line 0 :character 20))))
+        ("textDocument/references"
+         . [(:uri ,(lsp--path-to-uri (expand-file-name "models/marts/orders.sql" root))
+                  :range (:start (:line 0 :character 0) :end (:line 0 :character 0)))]))
+    (write-region (concat "version: 2\n\nmodels:\n  - name: customers\n    columns:\n      - name: customer_id\n"
+                          "        data_tests:\n          - relationships:\n              arguments:\n"
+                          "                to: ref('stg_orders')\n                field: order_id\n"
+                          "          - relationships:\n              arguments:\n"
+                          "                to: ref('stg_orders', v=1)\n                field: order_id\n")
+                  nil (expand-file-name "models/marts/_marts.yml" root))
+    (dbt-project-forget root)
+    (dolist (case '(("models/staging/_staging.yml" "doc(\"order_status\")" 0 "order_status")
+                    ("models/staging/_staging.yml" "doc(\"order_status\")" 4 "order_status")
+                    ("models/staging/_staging.yml" "doc(\"order_status\")" 8 "order_status")
+                    ("models/staging/_staging.yml" "- name: stg_orders" 0 "stg_orders")
+                    ("models/staging/_staging.yml" "- name: stg_orders" 18 "stg_orders")
+                    ("models/marts/_marts.yml" "ref('stg_orders')" 0 "stg_orders')")
+                    ("models/marts/_marts.yml" "ref('stg_orders', v=1)" 0 "stg_orders', v=1")
+                    ("models/staging/_sources.yml" "- name: raw_orders" 0 "raw_orders")))
+      (with-current-buffer (dbt-test-visit root (nth 0 case))
+        (dbt-properties-mode-maybe)
+        (should-not (dbt-lsp-workspace))
+        (dbt-test-goto (nth 1 case) (nth 2 case))
+        (should (equal (dbt-lsp-test-xref "M-.") '("models/docs.md")))
+        (should (equal (car (last (dbt-lsp-test-requests "textDocument/definition")))
+                       (dbt-lsp-test-position root (nth 0 case) (nth 3 case))))))
+    (should (= 8 (length (dbt-lsp-test-requests "textDocument/definition"))))
+    (with-current-buffer (dbt-test-visit root "models/staging/_sources.yml")
+      (dbt-test-goto "- name: raw_orders")
+      (should (equal (dbt-lsp-test-xref "M-?") '("models/marts/orders.sql")))
+      (let ((lsp-references-exclude-declaration t))
+        (dbt-lsp-test-xref "M-?"))
+      (should (equal (dbt-lsp-test-requests "textDocument/references")
+                     (make-list 2 (dbt-lsp-test-position root "models/staging/_sources.yml" "raw_orders"))))
+      (should (equal (dbt-lsp-test-declarations) '(t :false))))))
+
+(ert-deftest dbt-lsp-counts-a-column-in-the-encoding-of-the-server ()
+  "A request's column counts what the server's positionEncoding names: UTF-16 code units by default, UTF-8 bytes, or characters.
+A rocket before the target, one character beyond the Basic Multilingual
+Plane, is two UTF-16 code units and four UTF-8 bytes."
+  (dolist (case '((nil . 1) ("utf-16" . 1) ("utf-8" . 3) ("utf-32" . 0)))
+    (dbt-lsp-test-with-server root
+        `(("$experimental" . (:dbtLspPlus ,dbt-lsp-test-flag))
+          ,@(and (car case) `(("$capabilities" . (:positionEncoding ,(car case)))))
+          ("textDocument/definition"
+           . (:uri ,(lsp--path-to-uri (expand-file-name "models/docs.md" root))
+                   :range (:start (:line 0 :character 8) :end (:line 0 :character 20)))))
+      (let ((coding-system-for-write 'utf-8))
+        (write-region (concat "version: 2\n\nmodels:\n  - name: orders\n"
+                              "    description: '" (string #x1F680) " {{ doc(\"order_status\") }}'\n")
+                      nil (expand-file-name "models/marts/_rocket.yml" root)))
+      (dbt-project-forget root)
+      (with-current-buffer (let ((coding-system-for-read 'utf-8)) (dbt-test-visit root "models/marts/_rocket.yml"))
+        (dbt-properties-mode-maybe)
+        (dbt-test-goto "doc(")
+        (should (equal (dbt-lsp-test-xref "M-.") '("models/docs.md")))
+        (pcase-let ((`(,uri ,line ,character) (dbt-lsp-test-position root "models/marts/_rocket.yml" "order_status")))
+          (should (equal (dbt-lsp-test-requests "textDocument/definition")
+                         (list (list uri line (+ character (cdr case)))))))))))
+
+(ert-deftest dbt-lsp-keeps-what-the-proxy-does-not-answer ()
+  "With dbt-lsp-plus in front of dbt lsp, M-. stays dbt-mode's where its flag lists no kind at that place.
+A ref and a macro call in SQL, and a macro call in a description, which
+the proxy answers alone only; a version's item, which has no name of its
+own; a YAML buffer with unsaved changes, whose saved file the proxy
+would read; an identifier typed at the prompt; and C-c C-f, which lists
+every definition: none sends a definition request."
+  (dbt-lsp-test-with-server root `(("$experimental" . (:dbtLspPlus ,dbt-lsp-test-flag)))
+    (write-region "select 1" nil (expand-file-name "models/marts/dim_v1.sql" root))
+    (write-region (concat "version: 2\n\nmodels:\n  - name: dim\n"
+                          "    description: '{{ cents_to_dollars(\"amount\") }}'\n"
+                          "    versions:\n      - v: 1\n")
+                  nil (expand-file-name "models/marts/_dim.yml" root))
+    (dbt-project-forget root)
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should (equal (dbt-lsp-test-xref "M-.") '("models/staging/stg_orders.sql")))
+    (dbt-test-goto "is_positive")
+    (should (equal (dbt-lsp-test-xref "M-.") '("dbt_packages/shop_utils/macros/is_positive.sql")))
+    (with-current-buffer (dbt-test-visit root "models/marts/_dim.yml")
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "- v: 1")
+      (should (equal (dbt-lsp-test-xref "M-.") '("models/marts/dim_v1.sql")))
+      (dbt-test-goto "cents_to_dollars")
+      (should (equal (dbt-lsp-test-xref "M-.") '("macros/cents_to_dollars.sql"))))
+    (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "doc(\"order_status\")" 6)
+      (should (equal (dbt-lsp-test-xref (lambda () (dbt-find-resource "doc:order_status"))) '("models/docs.md")))
+      (dbt-test-goto "- name: stg_customers")
+      (should (equal (dbt-lsp-test-xref (lambda () (xref-find-definitions "doc:order_status"))) '("models/docs.md")))
+      (goto-char (point-max))
+      (insert "\n")
+      (dbt-test-goto "doc(\"order_status\")" 6)
+      (should (equal (dbt-lsp-test-xref "M-.") '("models/docs.md"))))
+    (should-not (member "textDocument/definition" (dbt-lsp-test-methods)))))
+
+(ert-deftest dbt-lsp-alone-leaves-refs-and-macros-to-the-proxy ()
+  "With dbt-lsp-plus alone, M-. and M-? on a ref and on a macro, in SQL and in YAML, are its own.
+dbt-lsp-plus alone lists ref and macro at sql and yaml: a ref and a
+macro call in a model, a macro's own name in its tag, a macro call in a
+description.  M-? asks for the declaration too, unless
+`lsp-references-exclude-declaration' says not to, as lsp-mode does."
+  (dbt-lsp-test-alone root
+      `(("textDocument/definition"
+         . (:uri ,(lsp--path-to-uri (expand-file-name "models/staging/stg_orders.sql" root))
+                 :range (:start (:line 0 :character 0) :end (:line 0 :character 0))))
+        ("textDocument/references"
+         . [(:uri ,(lsp--path-to-uri (expand-file-name "models/marts/orders.sql" root))
+                  :range (:start (:line 11 :character 26) :end (:line 11 :character 36)))]))
+    (write-region (concat "version: 2\n\nmodels:\n  - name: orders\n"
+                          "    description: '{{ cents_to_dollars(\"amount\") }}'\n")
+                  nil (expand-file-name "models/marts/_marts.yml" root))
+    (dbt-project-forget root)
+    (dbt-test-goto "ref('stg_orders')")
+    (should (equal (dbt-lsp-test-xref "M-.") '("models/staging/stg_orders.sql")))
+    (dbt-test-goto "shop_utils.is_positive")
+    (dbt-lsp-test-xref "M-.")
+    (with-current-buffer (dbt-test-visit root "macros/cents_to_dollars.sql")
+      (dbt-test-goto "cents_to_dollars")
+      (dbt-lsp-test-xref "M-."))
+    (with-current-buffer (dbt-test-visit root "models/marts/_marts.yml")
+      (dbt-properties-mode-maybe)
+      (dbt-test-goto "cents_to_dollars")
+      (dbt-lsp-test-xref "M-."))
+    (should (equal (dbt-lsp-test-requests "textDocument/definition")
+                   (list (dbt-lsp-test-position root "models/marts/orders.sql" "stg_orders')")
+                         (dbt-lsp-test-position root "models/marts/orders.sql" "is_positive")
+                         (dbt-lsp-test-position root "macros/cents_to_dollars.sql" "cents_to_dollars")
+                         (dbt-lsp-test-position root "models/marts/_marts.yml" "cents_to_dollars"))))
+    (dbt-test-goto "ref('stg_orders')" 6)
+    (should (equal (dbt-lsp-test-xref "M-?") '("models/marts/orders.sql")))
+    (let ((lsp-references-exclude-declaration t))
+      (dbt-lsp-test-xref "M-?"))
+    (should (equal (dbt-lsp-test-declarations) '(t :false)))))
+
+(ert-deftest dbt-lsp-reads-version-2-of-the-proxy-s-flag-only ()
+  "A flag of dbt-lsp-plus at another version, or of another shape, claims nothing: M-. stays dbt-mode's.
+That is version 1, which named no places, a version 3, a flag without
+definition, and a list of kinds where version 2 has an object of them."
+  (dolist (flag '((:version 1 :definition ["source" "ref" "doc" "entry" "test"])
+                  (:version 3 :definition (:source ["sql" "yaml"] :doc ["yaml"]))
+                  (:version 2 :references (:source ["sql" "yaml"]))
+                  (:version 2 :definition ["source" "doc"])))
+    (dbt-lsp-test-with-server root `(("$experimental" . (:dbtLspPlus ,flag)))
+      (goto-char (point-max))
+      (insert "\n{{ source('raw', 'raw_orders') }}")
+      (dbt-test-goto "raw_orders')")
+      (should (equal (dbt-lsp-test-xref "M-.") '("models/staging/_sources.yml")))
+      (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+        (dbt-properties-mode-maybe)
+        (dbt-test-goto "doc(\"order_status\")" 6)
+        (should (equal (dbt-lsp-test-xref "M-.") '("models/docs.md"))))
+      (should-not (member "textDocument/definition" (dbt-lsp-test-methods))))))
+
+(ert-deftest dbt-lsp-says-when-the-proxy-fails-a-definition ()
+  "When dbt-lsp-plus answers a definition with nothing, an error, or not in time, M-. says so and shows nothing.
+Nothing is xref's own message; an error and a timeout name the request."
+  (dolist (case '((() "No definitions found for: doc:order_status")
+                  ((("$errors" . (("textDocument/definition" . (:code -32603 :message "it broke")))))
+                   "dbt-lsp-plus: textDocument/definition failed: it broke")
+                  ((("$delays" . (("textDocument/definition" . 3))))
+                   "dbt-lsp-plus: textDocument/definition failed: Timeout")))
+    (dbt-lsp-test-with-server root `(("$experimental" . (:dbtLspPlus ,dbt-lsp-test-flag)) ,@(car case))
+      (with-current-buffer (dbt-test-visit root "models/staging/_staging.yml")
+        (dbt-properties-mode-maybe)
+        (dbt-test-goto "doc(\"order_status\")" 6)
+        (let ((lsp-response-timeout 1))
+          (should (string-prefix-p (cadr case)
+                                   (cadr (should-error (dbt-lsp-test-xref "M-.") :type 'user-error)))))))))
 
 (ert-deftest dbt-lsp-show-shows-null-true-numbers-and-strings ()
   "The rows of a model show null as NULL, true, numbers and strings as such.

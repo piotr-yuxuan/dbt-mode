@@ -609,6 +609,26 @@ A package's model without an entry of its own has none to visit."
     (should (equal (dbt-mode-parse-identifier (dbt-mode-identifier target)) target)))
   (should-error (dbt-mode-parse-identifier "model:orders") :type 'user-error))
 
+(ert-deftest dbt-mode-names-the-proxy-s-kind-of-a-target ()
+  "Each target is of the kind that dbt-lsp-plus's contract names for its position, or of none.
+A call keeps its kind, versioned or not; the entry of a source or a
+table is a source; the entry of a model, seed, snapshot, analysis or
+macro is an entry, but not a version's item, which has no name of its
+own; a snapshot block's line is of no kind of the proxy's."
+  (dolist (case '(((:kind ref :name "orders") "ref")
+                  ((:kind ref :name "orders" :version "2") "ref")
+                  ((:kind source :qualifier "raw" :name "orders") "source")
+                  ((:kind doc :name "order_status") "doc")
+                  ((:kind macro :qualifier "shop_utils" :name "is_positive") "macro")
+                  ((:kind source :name "raw" :entity source) "source")
+                  ((:kind source :qualifier "raw" :name "orders" :entity table) "source")
+                  ((:kind ref :qualifier "shop" :name "orders" :entity properties) "entry")
+                  ((:kind analysis :qualifier "shop" :name "counts" :entity properties) "entry")
+                  ((:kind macro :qualifier "shop" :name "m" :entity properties) "entry")
+                  ((:kind ref :qualifier "shop" :name "dim" :version "1" :entity properties) nil)
+                  ((:kind ref :name "orders_snapshot" :entity snapshot) nil)))
+    (should (equal (dbt-mode-proxy-kind (car case)) (cadr case)))))
+
 (ert-deftest dbt-mode-target-at-point-says-where-a-call-s-name-starts ()
   "A call at point says where its name starts, wherever point is on it; an entry's target, its entity's kind.
 A call is read from its function's name to its closing quote."

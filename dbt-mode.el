@@ -95,6 +95,7 @@
 (declare-function dbt-lineage-show "dbt-lineage")
 (declare-function dbt-lsp-workspace "dbt-lsp")
 (declare-function dbt-lsp-proxy-answers-p "dbt-lsp")
+(declare-function dbt-lsp-xrefs "dbt-lsp")
 (declare-function dbt-lsp-show "dbt-lsp")
 (declare-function dbt-lsp-preview-cte "dbt-lsp")
 (declare-function dbt-lsp-lineage "dbt-lsp")
@@ -455,7 +456,8 @@ For `xref-backend-functions', ahead of lsp-mode's.  Where dbt lsp runs,
 it answers only what dbt-mode does not resolve, such as dbt's own
 macros: dbt lsp 2.0.9 lists the uses in the current file only, ignores
 the version of a `ref' and resolves no `doc'.  dbt-lsp-plus answers
-a request on a source, where it says so: the request goes to it."
+a request on a target of a kind that it lists at the buffer's place:
+the request goes to it, as `dbt-mode--proxy-position' tells."
   (and (dbt-project-root)
        (or (not (dbt-mode-dbt-lsp-p))
            ;; dbt lsp serves SQL buffers alone, where a target that no
@@ -469,28 +471,16 @@ a request on a source, where it says so: the request goes to it."
              (and target (dbt-mode-definitions target))))
        'dbt))
 
-(defun dbt-mode--proxy-answers-p (request identifier)
-  "Return non-nil when dbt-lsp-plus answers REQUEST on IDENTIFIER.
-IDENTIFIER is that of a source at point.  REQUEST is :definition or
-:references, as `dbt-lsp-proxy-answers-p' takes it: the proxy contract
-steps aside per request and per kind.  The server answers for point: an
-identifier typed at the prompt, which names another target, stays
-dbt-mode's."
-  (and (equal identifier (xref-backend-identifier-at-point 'dbt))
-       (eq (plist-get (dbt-mode-parse-identifier identifier) :kind) 'source)
-       (dbt-mode-server-p)
-       (dbt-lsp-proxy-answers-p request "source")))
-
 (cl-defmethod xref-backend-definitions :around ((_backend (eql dbt)) identifier)
-  "Leave the definition of a source to dbt-lsp-plus where it answers it."
-  (if (dbt-mode--proxy-answers-p :definition identifier)
-      (xref-backend-definitions 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+  "Leave the definition at point to dbt-lsp-plus where it answers it."
+  (if-let* ((position (dbt-mode--proxy-position :definition identifier)))
+      (dbt-lsp-xrefs "textDocument/definition" position)
     (cl-call-next-method)))
 
 (cl-defmethod xref-backend-references :around ((_backend (eql dbt)) identifier)
-  "Leave the uses of a source to dbt-lsp-plus where it answers them."
-  (if (dbt-mode--proxy-answers-p :references identifier)
-      (xref-backend-references 'xref-lsp (xref-backend-identifier-at-point 'xref-lsp))
+  "Leave the uses of what point is on to dbt-lsp-plus where it answers them."
+  (if-let* ((position (dbt-mode--proxy-position :references identifier)))
+      (dbt-lsp-xrefs "textDocument/references" position)
     (cl-call-next-method)))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql dbt)))
@@ -531,6 +521,41 @@ from `dbt-mode-caller'."
   "Non-nil while a command asks for every definition of an identifier.
 `dbt-find-resource' does: an identifier that it reads names resources,
 not a call that dbt resolves.")
+
+(defun dbt-mode-proxy-kind (target)
+  "Return the kind of TARGET as dbt-lsp-plus names it, or nil.
+TARGET is a plist of `dbt-mode-target-at-point'.  A call of `ref',
+`source', `doc' or a macro keeps its kind, versioned or not.  The entry
+of a source or a table is a source; the entry of a model, seed,
+snapshot, analysis or macro is an entry, but not a version's item, which
+has no name of its own; a snapshot block is none of the proxy's kinds."
+  (pcase (plist-get target :entity)
+    ('nil (symbol-name (plist-get target :kind)))
+    ((or 'source 'table) "source")
+    ('properties (and (null (plist-get target :version)) "entry"))))
+
+(defun dbt-mode--proxy-position (request identifier)
+  "Return where dbt-lsp-plus answers REQUEST on IDENTIFIER, or nil.
+REQUEST is :definition or :references.  The proxy answers per kind of
+target, as `dbt-mode-proxy-kind' names it, and per place, as
+`dbt-lsp-proxy-answers-p' tells, for point: an identifier typed at the
+prompt, which names another target, stays dbt-mode's, and so does every
+definition that `dbt-find-resource' asks for.  The position is the start
+of the target's name, the call's argument or the entry's `name' on its
+line, where the proxy claims it; dbt-mode reads the whole call, and the
+whole line of an entry."
+  (when-let* (((featurep 'dbt-lsp))
+              ((not dbt-mode--every-definition))
+              (target (dbt-mode-target-at-point))
+              ((equal identifier (dbt-mode-identifier target)))
+              (kind (dbt-mode-proxy-kind target))
+              ((dbt-lsp-proxy-answers-p request kind)))
+    (or (plist-get target :position)
+        (save-excursion
+          (forward-line 0)
+          (and (re-search-forward (concat "\\_<name:[ \t]*['\"]?\\(" (regexp-quote (plist-get target :name)) "\\)")
+                                  (line-end-position) t)
+               (match-beginning 1))))))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql dbt)) identifier)
   "Return the definitions of IDENTIFIER, the one dbt takes first.
