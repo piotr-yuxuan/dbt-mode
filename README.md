@@ -21,6 +21,8 @@ project's files and needs no dbt at all. It is pre-release, tested with
 It keeps the keys of `sql-mode`, but for `C-M-a` and `C-M-e`, which move by
 CTE rather than by statement.
 
+![dbt-mode: SQL and Jinja of dbt projects, in Emacs. An Emacs frame shows a model's CTEs, its mode line, and the lineage of the model below it.](./docs/social-media-preview.png)
+
 ## Install
 
 dbt-mode needs Emacs 31.1 or later and lsp-mode 9, and works with the one

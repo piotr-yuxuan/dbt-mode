@@ -53,6 +53,12 @@ docs/explanation/          how dbt-mode reads a project without dbt, and what th
 flake.nix                  the development shell
 ```
 
+`docs/social-media-preview.png`, 1280 by 640, the repository's picture for
+social media, is made from an HTML source kept in the untracked
+`docs/work/social-preview/`, rasterised by headless Chromium; GitHub takes
+it under Settings, Social preview. It shows a stylised Emacs frame drawn
+for it, and no mark of dbt Labs, of Emacs or of anyone else.
+
 ## What the server does
 
 The protocol of `dbt lsp` is not documented. What dbt-lsp.el relies on was
