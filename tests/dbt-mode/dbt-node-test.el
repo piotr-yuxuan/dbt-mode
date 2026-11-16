@@ -15,8 +15,8 @@
 (defun dbt-test-write-manifest (root)
   "Write in ROOT's target a manifest of stg_orders, raw_orders, the table raw.raw_orders and a disabled model off.
 Its shape is dbt 2's: stg_orders with its files, a relation, a
-configuration, columns, what it depends on and a description; off under
-\"disabled\", the first of an array."
+configuration, columns, what it depends on and a description of two
+lines; off under \"disabled\", the first of an array."
   (make-directory (expand-file-name "target" root) t)
   (write-region
    (json-encode
@@ -32,7 +32,7 @@ configuration, columns, what it depends on and a description; off under
                                              (description . "One per order.")))
                                 (amount . ((name . "amount") (data_type) (description . "")))))
                     (depends_on . ((nodes . ["seed.shop.raw_orders"]) (macros . ["macro.shop.cents_to_dollars"])))
-                    (description . "The orders, cleaned.")))
+                    (description . "The orders, cleaned.\nOne row per order.")))
                 (seed.shop.raw_orders
                  . ((unique_id . "seed.shop.raw_orders") (name . "raw_orders") (resource_type . "seed")
                     (package_name . "shop")))))
@@ -49,10 +49,11 @@ configuration, columns, what it depends on and a description; off under
   (split-string (buffer-substring-no-properties (point-min) (point-max)) "\n"))
 
 (ert-deftest dbt-node-shows-a-node-from-the-manifest ()
-  "C-c C-o on a ref shows its node from the manifest: files, configuration, columns, tests, what it depends on, what uses it, its description.
+  "C-c C-o on a ref shows its node from the manifest, its description first, then its files, configuration, columns, tests, what it depends on and what uses it.
 The heading names the node, its kind and package, and the manifest it
 comes from, with when dbt wrote it.  A value that dbt leaves empty, null
-or false shows nothing.  The tests are left to dbt-lsp-plus.  What uses
+or false shows nothing; a description of two lines is one value, which
+TAB folds with its section.  The tests are left to dbt-lsp-plus.  What uses
 it is what dbt's child_map names, but for tests: an analysis, a model, a
 snapshot.  C-c C-o again, and g, show the node once.  RET visits its
 file, its YAML entry, what it depends on and what uses it."
@@ -68,6 +69,9 @@ file, its YAML entry, what it depends on and what uses it."
           (should (string-match-p "\\`from target/manifest\\.json, written at [0-9-]+ [0-9:]+\\'" (nth 1 lines)))
           (should (equal (nthcdr 2 lines)
                          '(""
+                           "Description"
+                           "  The orders, cleaned."
+                           "  One row per order."
                            "Files"
                            "  file          models/staging/stg_orders.sql"
                            "  properties    models/staging/_staging.yml"
@@ -89,10 +93,13 @@ file, its YAML entry, what it depends on and what uses it."
                            "  analysis  order_counts"
                            "  model     orders"
                            "  snapshot  orders_snapshot"
-                           "Description"
-                           "  The orders, cleaned."
                            ""))))
         (switch-to-buffer (current-buffer))
+        (goto-char (point-min))
+        (search-forward "Description")
+        (execute-kbd-macro (kbd "TAB"))
+        (should (save-excursion (search-forward "One row") (outline-invisible-p)))
+        (outline-show-all)
         (execute-kbd-macro (kbd "g"))
         (should (equal (seq-count (lambda (line) (equal line "Configuration")) (dbt-test-node-lines)) 1))
         (switch-to-buffer (dbt-test-visit root "models/marts/orders.sql"))

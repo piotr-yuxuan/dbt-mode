@@ -138,10 +138,10 @@ Rows and compiled SQL:
 
 `C-c C-o`, `dbt-describe`, shows what dbt knows of the model, seed,
 snapshot or source table that the `ref` or `source` at point names, else
-of the current resource: its file and its YAML entry, its relation,
-owner, materialization and its settings, tags, group,
+of the current resource: its description, its file and its YAML entry,
+its relation, owner, materialization and its settings, tags, group,
 access, contract, version, whether it is disabled, its columns, its
-tests, what it depends on, what uses it and its description. With
+tests, what it depends on and what uses it. With
 dbt-lsp-plus, it comes from the proxy's own `dbt parse`, with the
 summary that its hover shows; otherwise from `target/manifest.json`,
 saying when dbt wrote it, its tests left to the proxy and to `C-c C-t`. What

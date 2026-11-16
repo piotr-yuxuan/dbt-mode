@@ -32,11 +32,12 @@
 (defun dbt-node--section (title lines)
   "Insert the section TITLE and its LINES, unless there are none.
 A line with the property `dbt-node-id', a unique id, or `dbt-node-file',
-a file, is what RET visits."
+a file, is what RET visits.  The lines of a value that has several are
+indented as its first, so that only titles start a line."
   (when lines
     (insert (propertize title 'face 'bold) "\n")
     (dolist (line lines)
-      (insert (propertize (concat "  " line)
+      (insert (propertize (concat "  " (replace-regexp-in-string "\n" "\n  " line))
                           'dbt-node-id (get-text-property 0 'dbt-node-id line)
                           'dbt-node-file (get-text-property 0 'dbt-node-file line))
               "\n"))))
@@ -72,6 +73,7 @@ of no argument, shows the node again, on \\[revert-buffer]."
         (when-let* ((summary (map-elt node "summary")))
           (insert summary "\n"))
         (insert from "\n\n")
+        (dbt-node--section "Description" (seq-remove empty (list (map-elt node "description"))))
         (dbt-node--section "Files"
                            (delq nil (list (dbt-node--file "file" directory (map-elt node "original_file_path"))
                                            (dbt-node--file "properties" directory
@@ -120,7 +122,6 @@ of no argument, shows the node again, on \\[revert-buffer]."
                                                       (seq-filter (lambda (child) (member id (plist-get child :parents)))
                                                                   (dbt-project-graph root)))
                                               #'string<)))
-        (dbt-node--section "Description" (seq-remove empty (list (map-elt node "description"))))
         (goto-char (point-min))
         (pop-to-buffer (current-buffer))))))
 
@@ -153,8 +154,9 @@ wrote it.  \\[revert-buffer] in that buffer shows it again the same way."
 (defun dbt-describe ()
   "Show what dbt knows of the model, seed, snapshot or source table at point.
 On a `ref' or a `source', it is what the call names, else the current
-resource: its configuration, columns, tests, what it depends on, what
-uses it and its description, in a buffer of `dbt-node-mode'.  With
+resource: its description, its file and YAML entry, its configuration,
+columns, tests, what it depends on and what uses it, in a buffer of
+`dbt-node-mode'.  With
 dbt-lsp-plus, whose server lists the command dbt-lsp-plus.nodeInfo, it
 comes from the proxy's parse, with its summary; otherwise from
 target/manifest.json, which `dbt parse', `dbt compile' and every run
