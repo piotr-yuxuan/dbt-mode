@@ -367,20 +367,26 @@ or `doc', or, within a Jinja tag, of a macro."
        (append dbt-project-call-regexps
                (and (dbt-mode-jinja-bounds) `((macro . ,dbt-mode-macro-call-regexp))))))))
 
+(defun dbt-mode-entity-at-point (kinds)
+  "Return the entity of the index that the current line defines, or nil.
+Its kind is one of KINDS.  It is the entry of a YAML file whose `name'
+is on the line, or a snapshot block, as the index read the file when
+last saved."
+  (when-let* ((root (dbt-project-root)))
+    (let ((line (line-number-at-pos)))
+      (seq-find (lambda (entity)
+                  (and (equal (plist-get entity :file) buffer-file-name)
+                       (eql (plist-get entity :line) line)))
+                (dbt-project-entities root kinds)))))
+
 (defun dbt-mode-target-at-point ()
   "Return what point is on, as a target plist, or nil.
-It is the call of `dbt-mode-call-at-point', or else, in a YAML file, the
-`name' of an entry, which stands for what it describes, as
-`dbt-mode-entity-target' tells: the index of the project gives the entry
-of the line, as last saved."
+It is the call of `dbt-mode-call-at-point', or else what the entity of
+the line stands for, as `dbt-mode-entity-target' tells: in a YAML file,
+the `name' of an entry stands for what the entry describes."
   (or (dbt-mode-call-at-point)
-      (let ((line (line-number-at-pos)))
-        (when-let* ((root (dbt-project-root))
-                    (entity (seq-find (lambda (entity)
-                                        (and (equal (plist-get entity :file) buffer-file-name)
-                                             (eql (plist-get entity :line) line)))
-                                      (dbt-project-entities root '(properties source table exposure snapshot)))))
-          (dbt-mode-entity-target entity (dbt-project-name root))))))
+      (when-let* ((entity (dbt-mode-entity-at-point '(properties source table exposure snapshot))))
+        (dbt-mode-entity-target entity (dbt-project-name (dbt-project-root))))))
 
 ;;;; Cross-references
 
@@ -690,16 +696,19 @@ its node in the manifest of the user's runs, read only then.  For
 (defun dbt-mode-selection-at-point ()
   "Return dbt's selector of what point is on, else of the current file.
 On a `ref', it is the model, seed or snapshot that it names, as NAME or
-NAME.vVERSION; on a `source', source:SOURCE.TABLE.  Else it is the
-current resource, or path:FILE for a file of the project that holds
-none, such as a singular test or a properties file, as dbt selects by
-path.  Nil outside a file of a project."
+NAME.vVERSION; on a `source', source:SOURCE.TABLE; on the name of an
+exposure, exposure:NAME, as a bare NAME selects a model of that name
+too.  Else it is the current resource, or path:FILE for a file of the
+project that holds none, such as a singular test or a properties file,
+as dbt selects by path.  Nil outside a file of a project."
   (let* ((target (dbt-mode-target-at-point))
          (entity (or (and (memq (plist-get target :kind) '(ref source)) (car (dbt-mode-definitions target)))
-                     (dbt-mode-current-resource))))
+                     (dbt-mode-current-resource)
+                     (dbt-mode-entity-at-point '(exposure)))))
     (pcase (plist-get entity :kind)
       ('table (format "source:%s.%s" (plist-get entity :source) (plist-get entity :name)))
       ('source (format "source:%s" (plist-get entity :name)))
+      ('exposure (format "exposure:%s" (plist-get entity :name)))
       ((pred identity) (dbt-mode-resource-selector entity))
       (_ (and buffer-file-name (concat "path:" (file-relative-name buffer-file-name (dbt-project-root))))))))
 
@@ -944,7 +953,8 @@ That is the model, seed or snapshot of the `ref' at point, the source
 of the `source' at point, or else the current resource, as
 `dbt-mode-selection-at-point' selects it.  With FAMILY, interactively a
 prefix argument, the selection takes in its upstream and downstream:
-+SELECTOR+."
++SELECTOR+.  An exposure, which dbt has nothing to build for, needs it
+to build what the exposure reads."
   (interactive "P")
   (let* ((selector (or (dbt-mode-selection-at-point) (user-error "No model here")))
          (command (format "dbt build -s %s" (if family (format "+%s+" selector) selector))))

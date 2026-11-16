@@ -335,20 +335,28 @@ tags are code, in SQL strings or in comments."
 (ert-deftest dbt-mode-finds-no-model-from-an-exposure ()
   "M-. on the name of an exposure asks what to find, though a model has that name; on a seed's or a snapshot's entry it visits that file.
 No `ref' names an exposure.  M-x dbt-copy-build-command there selects
-the file, which dbt 2.0.11 reads as its exposures, where the bare name
-would select the model too."
+it as dbt 2.0.11 does, exposure:NAME: a bare NAME would select the model
+too, and path:FILE the other entries of the file.  On a semantic model,
+which names nothing either, it selects the file."
   (dbt-test-with-project root
     (write-region (concat "exposures:\n  - name: orders\n    type: dashboard\n"
                           "    depends_on:\n      - ref('customers')\n"
                           "seeds:\n  - name: raw_orders\n"
-                          "snapshots:\n  - name: orders_snapshot\n")
+                          "snapshots:\n  - name: orders_snapshot\n"
+                          "semantic_models:\n  - name: orders_semantic\n    model: ref('orders')\n")
                   nil (expand-file-name "models/_exposures.yml" root))
     (save-window-excursion
       (switch-to-buffer (dbt-test-visit root "models/_exposures.yml"))
       (dbt-properties-mode-maybe)
       (dbt-test-goto "orders")
       (execute-kbd-macro (kbd "M-x dbt-copy-build-command RET"))
+      (should (equal (car kill-ring) "dbt build -s exposure:orders"))
+      (execute-kbd-macro (kbd "C-u M-x dbt-copy-build-command RET"))
+      (should (equal (car kill-ring) "dbt build -s +exposure:orders+"))
+      (dbt-test-goto "orders_semantic")
+      (execute-kbd-macro (kbd "M-x dbt-copy-build-command RET"))
       (should (equal (car kill-ring) "dbt build -s path:models/_exposures.yml"))
+      (dbt-test-goto "orders")
       (execute-kbd-macro (kbd "M-. ref:customers RET"))
       (should (equal (file-relative-name buffer-file-name root) "models/marts/customers.sql"))
       (dolist (case '(("raw_orders" . "seeds/raw_orders.csv") ("orders_snapshot" . "snapshots/orders_snapshot.sql")))
