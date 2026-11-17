@@ -6,7 +6,7 @@
 ;; Author: piotr-yuxuan <piotr-yuxuan@users.noreply.github.com>
 ;; Maintainer: piotr-yuxuan <piotr-yuxuan@users.noreply.github.com>
 ;; URL: https://github.com/piotr-yuxuan/dbt-mode
-;; Version: 0.1.2
+;; Version: 0.1.3
 ;; Package-Requires: ((emacs "31.1") (lsp-mode "9.0.0"))
 ;; Keywords: languages, sql, tools
 
