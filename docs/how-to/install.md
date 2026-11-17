@@ -21,7 +21,13 @@ With [straight.el](https://github.com/radian-software/straight.el) and
 (use-package dbt-mode
   :straight (dbt-mode :type git :host github :repo "piotr-yuxuan/dbt-mode")
   :hook ((dbt-mode . dbt-lsp-deferred)
-         ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe)))
+         ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe))
+  :custom
+  ;; dbt 2's proprietary build runs dbt lsp and dbt format; dbt-oss the rest.
+  (dbt-executable "/path/to/dbt")
+  ;; Run dbt lsp through dbt-lsp-plus, or the proxy alone with dbt-oss,
+  ;; when dbt-lsp-plus is on exec-path.
+  (dbt-lsp-proxy t))
 ```
 
 With expreg, the regions of dbt-mode join its own:

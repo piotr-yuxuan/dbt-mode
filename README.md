@@ -33,12 +33,19 @@ dbt you have. With [straight.el](https://github.com/radian-software/straight.el)
 (use-package dbt-mode
   :straight (dbt-mode :type git :host github :repo "piotr-yuxuan/dbt-mode")
   :hook ((dbt-mode . dbt-lsp-deferred)
-         ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe)))
+         ((yaml-mode yaml-ts-mode) . dbt-properties-mode-maybe))
+  :custom
+  ;; dbt 2's proprietary build runs dbt lsp and dbt format; dbt-oss the rest.
+  (dbt-executable "/path/to/dbt")
+  ;; Run dbt lsp through dbt-lsp-plus, or the proxy alone with dbt-oss,
+  ;; when dbt-lsp-plus is on exec-path.
+  (dbt-lsp-proxy t))
 ```
 
 [Your first project](docs/tutorials/first-project.md) walks through it
 from a clone, with nothing installed, and [Install](docs/how-to/install.md)
-gives the rest: expreg, embark and consult, the server, dbt-lsp-plus.
+gives the rest: expreg, embark and consult, the server,
+[dbt-lsp-plus](https://github.com/piotr-yuxuan/dbt-lsp-plus).
 
 ## Documentation
 
