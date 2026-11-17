@@ -47,7 +47,7 @@ scripts/release.py         the release, run by CD
 .github/workflows/         CI, the checks on every push, and CD, a release after each green push to main
 .version                   the last version released, written by the release alone
 docs/tutorials/            lessons: first-project.md, the fixture from a clone
-docs/how-to/               install, format and fix, run the tests
+docs/how-to/               install, format and fix, run the tests, troubleshoot
 docs/reference/            keys, commands, options, limitations, the release pipeline
 docs/explanation/          how dbt-mode reads a project without dbt, and what the server does
 flake.nix                  the development shell

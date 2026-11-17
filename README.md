@@ -58,6 +58,7 @@ gives the rest: expreg, embark and consult, the server,
 - [Install](docs/how-to/install.md): which dbt does what, and dbt-mode with expreg, embark, consult and dbt-lsp-plus.
 - [Format and fix](docs/how-to/format-and-fix.md): with the server or `dbt format`, on save or by hand.
 - [Run the tests](docs/how-to/run-the-tests.md): offline, or against a real dbt.
+- [Troubleshoot](docs/how-to/troubleshoot.md): a request that times out, where Emacs shows what the servers say.
 
 **Reference**
 
